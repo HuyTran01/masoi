@@ -1,0 +1,86 @@
+{
+  "entities": {
+    "PlayerAccount": {
+      "title": "PlayerAccount",
+      "description": "Public player profile and game statistics stored in Firestore.",
+      "type": "object",
+      "properties": {
+        "ownerId": {
+          "type": "string",
+          "description": "Authenticated user UID owning this player account.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "username": {
+          "type": "string",
+          "description": "Unique account username handle.",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name shown in the 3D Werewolf Village.",
+          "minLength": 2,
+          "maxLength": 40
+        },
+        "avatar": {
+          "type": "string",
+          "description": "Character avatar emoji.",
+          "minLength": 1,
+          "maxLength": 16
+        },
+        "region": {
+          "type": "string",
+          "description": "Server region code.",
+          "enum": ["VN", "SEA", "GLOBAL"],
+          "minLength": 2,
+          "maxLength": 10
+        },
+        "elo": {
+          "type": "integer",
+          "description": "Player ELO rating in Werewolf matches."
+        },
+        "matchesPlayed": {
+          "type": "integer",
+          "description": "Total completed matches."
+        },
+        "wins": {
+          "type": "integer",
+          "description": "Total victories."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "ownerId",
+        "username",
+        "displayName",
+        "avatar",
+        "region",
+        "elo",
+        "matchesPlayed",
+        "wins",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/player_accounts/{accountId}": {
+      "schema": {
+        "$ref": "#/entities/PlayerAccount"
+      },
+      "description": "Stores public player account profiles, ELO ratings, and match counters."
+    }
+  }
+}

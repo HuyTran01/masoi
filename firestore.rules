@@ -1,0 +1,115 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidPlayerAccount(data) {
+      return data.keys().hasAll([
+          'ownerId',
+          'username',
+          'displayName',
+          'avatar',
+          'region',
+          'elo',
+          'matchesPlayed',
+          'wins',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId',
+          'username',
+          'displayName',
+          'avatar',
+          'region',
+          'elo',
+          'matchesPlayed',
+          'wins',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.ownerId is string
+        && data.ownerId.size() >= 1
+        && data.ownerId.size() <= 128
+        && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ownerId == request.auth.uid
+        && data.username is string
+        && data.username.size() >= 3
+        && data.username.size() <= 32
+        && data.username.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.displayName is string
+        && data.displayName.size() >= 2
+        && data.displayName.size() <= 40
+        && data.avatar is string
+        && data.avatar.size() >= 1
+        && data.avatar.size() <= 16
+        && data.region is string
+        && data.region.size() >= 2
+        && data.region.size() <= 10
+        && (data.region == 'VN' || data.region == 'SEA' || data.region == 'GLOBAL')
+        && data.elo is int
+        && data.elo >= 0
+        && data.elo <= 10000
+        && data.matchesPlayed is int
+        && data.matchesPlayed >= 0
+        && data.matchesPlayed <= 100000
+        && data.wins is int
+        && data.wins >= 0
+        && data.wins <= 100000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    match /player_accounts/{accountId} {
+      allow get: if isSignedIn() && isValidId(accountId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+
+      allow create: if isSignedIn()
+        && isValidId(accountId)
+        && accountId == request.auth.uid
+        && isValidPlayerAccount(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn()
+        && isValidPlayerAccount(incoming())
+        && isValidId(accountId)
+        && accountId == request.auth.uid
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().username == existing().username
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: Update Profile Info
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatar', 'region', 'updatedAt'])
+          ||
+          // Action: Update Match Statistics & ELO
+          incoming().diff(existing()).affectedKeys().hasOnly(['elo', 'matchesPlayed', 'wins', 'updatedAt'])
+          ||
+          // Action: Full Sync of Profile & Match Statistics
+          incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'avatar', 'region', 'elo', 'matchesPlayed', 'wins', 'updatedAt'])
+        );
+
+      allow delete: if isSignedIn() && isValidId(accountId) && existing().ownerId == request.auth.uid;
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Ma Sói Huyền Thoại - Werewolf Online & Trợ Lý Quản Trò",
+  "description": "Game Ma Sói trực tuyến & công cụ trợ lý quản trò thực tế đỉnh cao. Phân vai tự động, voice chat, bỏ phiếu minh bạch, phát vai qua điện thoại và lịch sử trận đấu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
