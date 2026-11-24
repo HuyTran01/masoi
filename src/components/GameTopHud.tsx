@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Camera,
   Compass,
+  Crown,
   Eye,
   FastForward,
   HelpCircle,
@@ -31,6 +32,7 @@ interface GameTopHudProps {
   showFactionHints: boolean;
   showFastForwardBtn: boolean;
   myRole: RoleDefinition;
+  mayorName?: string | null;
   cameraPreset: CameraViewPreset;
   freeLook360: boolean;
   isMicOn: boolean;
@@ -61,6 +63,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
   showFactionHints,
   showFastForwardBtn,
   myRole,
+  mayorName,
   cameraPreset,
   freeLook360,
   isMicOn,
@@ -77,33 +80,33 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
   onPause,
 }) => {
   const t = UI_TEXT[lang];
-  // Clean label without desktop keyboard shortcuts like [V] on mobile screens
   const cleanFpvShort = lang === 'vi' ? 'Góc nhìn 1' : 'FPV';
 
   return (
     <div className="flex items-center justify-between gap-1.5 sm:gap-2">
-      {/* Top-Left Phase, Timer & Neutral Survivor Count (No backdrop-blur over WebGL) */}
+      {/* Top-Left Carved-Wood Phase Dial, Timer, Mayor & Neutral Alive Counter */}
       <div
         data-tour-id="top-left"
-        className="pointer-events-auto flex items-center gap-1.5 sm:gap-2.5 bg-[#080c17]/94 border border-amber-700/50 rounded-xl sm:rounded-2xl px-2 py-1 sm:px-3 sm:py-1.5 shadow-xl min-w-0"
+        className="pointer-events-auto flex items-center gap-1.5 sm:gap-2.5 agrou-wood-panel rounded-xl sm:rounded-2xl px-2 py-1 sm:px-3 sm:py-1.5 min-w-0"
       >
+        {/* Agrou-Style Circular Sun / Moon Dial */}
         <div
-          className={`w-7 h-7 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl flex items-center justify-center border shrink-0 ${
+          className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center border-2 shrink-0 shadow-inner ${
             phase === 'night'
-              ? 'bg-rose-950 border-rose-500 text-rose-300'
-              : 'bg-amber-950 border-amber-400 text-amber-300'
+              ? 'bg-[#1f1936] border-[#9b7ce8] text-[#ddd6fe]'
+              : 'bg-[#4f2c12] border-[#f5b82e] text-[#fde047]'
           }`}
         >
           {phase === 'night' ? (
-            <Moon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <Moon className="w-4 h-4 sm:w-5 sm:h-5" />
           ) : (
-            <Sun className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+            <Sun className="w-4 h-4 sm:w-5 sm:h-5" />
           )}
         </div>
 
-        <div className="md:pr-2.5 md:border-r md:border-slate-800 min-w-0">
+        <div className="md:pr-2.5 md:border-r md:border-[#634329] min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider text-amber-400 truncate">
+            <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider text-[#f5b82e] truncate">
               {phase === 'night'
                 ? t.nightPhaseTitle(round)
                 : phase === 'day_discussion'
@@ -113,7 +116,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
                 : t.hunterPhaseTitle}
             </span>
             {gameMode === 'online' && (
-              <span className="hidden sm:inline text-[9px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">
+              <span className="hidden sm:inline text-[9px] font-mono px-1.5 py-0.2 rounded bg-[#3b281a] text-[#fde7c3]">
                 {t.roomBadge(roomId)}
               </span>
             )}
@@ -121,7 +124,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
 
           <div className="flex items-center gap-1 sm:gap-1.5">
             <span
-              className="text-sm sm:text-lg font-black text-slate-100 font-mono leading-tight"
+              className="text-sm sm:text-lg font-black text-[#fff7e8] font-mono leading-tight"
               style={{ fontVariantNumeric: 'tabular-nums' }}
             >
               {Math.round(timerSeconds)}s
@@ -134,7 +137,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
                 e.currentTarget.blur();
                 onAdjustTimer(-10);
               }}
-              className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-[9px] font-mono font-bold text-slate-200 cursor-pointer"
+              className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-[#1b120b] hover:bg-[#312115] border border-[#785334] text-[9px] font-mono font-bold text-[#e6d5b8] cursor-pointer"
               title={lang === 'vi' ? 'Giảm 10 giây' : 'Subtract 10s'}
             >
               -10s
@@ -146,7 +149,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
                 e.currentTarget.blur();
                 onAdjustTimer(15);
               }}
-              className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-indigo-900/90 hover:bg-indigo-800 border border-indigo-400/50 text-[9px] font-mono font-bold text-indigo-200 cursor-pointer"
+              className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-[#312115] hover:bg-[#452e1e] border border-[#b58148] text-[9px] font-mono font-bold text-[#fde7c3] cursor-pointer"
               title={lang === 'vi' ? 'Thêm 15 giây' : 'Add 15s'}
             >
               +15s
@@ -160,9 +163,9 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
                   e.currentTarget.blur();
                   onAdvancePhaseFast();
                 }}
-                className="px-2 py-0.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[10px] sm:text-[11px] flex items-center gap-1 shadow cursor-pointer whitespace-nowrap"
+                className="px-2 py-0.5 rounded-lg bg-[#e86f24] hover:bg-[#f28139] border border-[#fbc266] text-[#fff8ed] font-extrabold text-[10px] sm:text-[11px] flex items-center gap-1 shadow cursor-pointer whitespace-nowrap"
               >
-                <FastForward className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-slate-950 shrink-0" />
+                <FastForward className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-[#fff8ed] shrink-0" />
                 <span>
                   {phase === 'night'
                     ? t.skipNightBtn
@@ -175,30 +178,30 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
           </div>
         </div>
 
-        {/* Neutral Survivor Counter (Prevents Hidden Role / Cursed Wolf Info Leak!) */}
+        {/* Neutral Survivor Counter + Agrou Village Mayor Indicator */}
         <div
           data-testid="hud-survivor-counter"
-          className="hidden md:flex items-center gap-2.5 text-xs"
+          className="hidden md:flex items-center gap-3 text-xs"
         >
           {showFactionHints ? (
             <>
               <div>
-                <span className="text-[8px] font-bold uppercase text-rose-400 block">
+                <span className="text-[8px] font-bold uppercase text-[#f87171] block">
                   {t.wolvesAlive}
                 </span>
                 <span
-                  className="text-sm font-black text-rose-200 font-mono"
+                  className="text-sm font-black text-[#fecaca] font-mono"
                   style={{ fontVariantNumeric: 'tabular-nums' }}
                 >
                   {aliveWolvesCount}
                 </span>
               </div>
               <div>
-                <span className="text-[8px] font-bold uppercase text-sky-400 block">
+                <span className="text-[8px] font-bold uppercase text-[#7dd3fc] block">
                   {t.villagersAlive}
                 </span>
                 <span
-                  className="text-sm font-black text-sky-200 font-mono"
+                  className="text-sm font-black text-[#e0f2fe] font-mono"
                   style={{ fontVariantNumeric: 'tabular-nums' }}
                 >
                   {aliveVillagersCount}
@@ -207,13 +210,13 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
             </>
           ) : (
             <div className="flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5 text-emerald-400" />
+              <Users className="w-3.5 h-3.5 text-[#6ee7b7]" />
               <div>
-                <span className="text-[8px] font-bold uppercase text-slate-400 block">
+                <span className="text-[8px] font-bold uppercase text-[#bfa586] block">
                   {lang === 'vi' ? 'Còn sống' : 'Alive'}
                 </span>
                 <span
-                  className="text-sm font-black text-emerald-200 font-mono leading-none"
+                  className="text-sm font-black text-[#d1fae5] font-mono leading-none"
                   style={{ fontVariantNumeric: 'tabular-nums' }}
                 >
                   {aliveTotal}/{totalPlayers}
@@ -221,13 +224,35 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
               </div>
             </div>
           )}
+
+          {mayorName && (
+            <div
+              data-testid="hud-mayor-chip"
+              className="hidden lg:flex items-center gap-1.5 pl-2.5 border-l border-[#634329]"
+              title={
+                lang === 'vi'
+                  ? 'Thị Trưởng có phiếu bầu x2 để phá thế hòa'
+                  : 'Village Mayor has a 2x tie-breaking vote'
+              }
+            >
+              <Crown className="w-3.5 h-3.5 text-[#f5b82e] shrink-0" />
+              <div className="leading-tight">
+                <span className="text-[8px] font-bold uppercase text-[#d9a65d] block">
+                  {lang === 'vi' ? 'Thị Trưởng (x2)' : 'Mayor (x2)'}
+                </span>
+                <span className="text-[11px] font-extrabold text-[#fef3c7] max-w-[90px] truncate block">
+                  {mayorName}
+                </span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Top-Right Compact Utility Bar */}
+      {/* Top-Right Compact Carved-Wood Utility Bar */}
       <div
         data-tour-id="top-right"
-        className="pointer-events-auto flex items-center gap-1 bg-[#080c17]/94 border border-amber-700/40 rounded-xl sm:rounded-2xl p-1 shadow-xl shrink-0"
+        className="pointer-events-auto flex items-center gap-1 agrou-wood-panel rounded-xl sm:rounded-2xl p-1 shrink-0"
       >
         <button
           type="button"
@@ -236,10 +261,10 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
             e.currentTarget.blur();
             onOpenRoleCard();
           }}
-          className="px-2 py-1.5 rounded-xl bg-amber-950/90 hover:bg-amber-900 border border-amber-500/50 text-amber-200 text-xs font-extrabold flex items-center gap-1 cursor-pointer"
+          className="px-2 py-1.5 rounded-xl bg-[#4f2c12] hover:bg-[#663a19] border border-[#e89c3e] text-[#fef3c7] text-xs font-extrabold flex items-center gap-1 cursor-pointer"
           title={myRole.name[lang]}
         >
-          <Eye className="w-3.5 h-3.5 text-amber-400" />
+          <Eye className="w-3.5 h-3.5 text-[#f5b82e]" />
           <span className="hidden sm:inline">{myRole.name[lang]}</span>
         </button>
 
@@ -253,8 +278,8 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
           }}
           className={`px-2 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center gap-1 cursor-pointer ${
             cameraPreset === 'first_person'
-              ? 'bg-emerald-600 border-emerald-300 text-white'
-              : 'bg-slate-900 border-slate-800 text-emerald-300 hover:bg-slate-800'
+              ? 'bg-[#2f7d4d] border-[#86efac] text-white'
+              : 'bg-[#1c130c] border-[#6b4a2e] text-[#86efac] hover:bg-[#312115]'
           }`}
           title={t.firstPersonBtn}
           aria-label={t.firstPersonBtn}
@@ -273,8 +298,8 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
           }}
           className={`hidden sm:flex px-2 py-1.5 rounded-xl border text-[11px] font-bold items-center gap-1 cursor-pointer ${
             freeLook360
-              ? 'bg-sky-600 border-sky-300 text-white'
-              : 'bg-slate-900 border-slate-800 text-sky-300 hover:bg-slate-800'
+              ? 'bg-[#2d68a8] border-[#93c5fd] text-white'
+              : 'bg-[#1c130c] border-[#6b4a2e] text-[#93c5fd] hover:bg-[#312115]'
           }`}
           title={t.freeLook360}
         >
@@ -290,11 +315,11 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
             e.currentTarget.blur();
             onCycleCameraPreset();
           }}
-          className="hidden sm:flex p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 cursor-pointer"
+          className="hidden sm:flex p-2 rounded-xl bg-[#1c130c] hover:bg-[#312115] text-[#f6ebd8] border border-[#6b4a2e] cursor-pointer"
           title={t.switchCamera}
           aria-label={t.switchCamera}
         >
-          <Camera className="w-4 h-4 text-sky-400" />
+          <Camera className="w-4 h-4 text-[#f5b82e]" />
         </button>
 
         <button
@@ -305,7 +330,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
             e.currentTarget.blur();
             onOpenOnboardingTour();
           }}
-          className="p-1.5 sm:p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-800 cursor-pointer"
+          className="p-1.5 sm:p-2 rounded-xl bg-[#1c130c] hover:bg-[#312115] text-[#f5b82e] border border-[#6b4a2e] cursor-pointer"
           title={t.openGuide}
           aria-label={t.openGuide}
         >
@@ -321,8 +346,8 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
           }}
           className={`hidden sm:flex p-2 rounded-xl border cursor-pointer ${
             isMicOn
-              ? 'bg-rose-700 border-rose-400 text-white'
-              : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'
+              ? 'bg-[#9e2b25] border-[#fca5a5] text-white'
+              : 'bg-[#1c130c] border-[#6b4a2e] text-[#d6bfa2] hover:bg-[#312115]'
           }`}
           title={t.toggleMic}
           aria-label={t.toggleMic}
@@ -337,11 +362,11 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
             e.currentTarget.blur();
             onToggleMute();
           }}
-          className="hidden sm:flex p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-800 cursor-pointer"
+          className="hidden sm:flex p-2 rounded-xl bg-[#1c130c] hover:bg-[#312115] text-[#f6ebd8] border border-[#6b4a2e] cursor-pointer"
           title={t.toggleSound}
           aria-label={t.toggleSound}
         >
-          <Volume2 className={`w-4 h-4 ${isMuted ? 'text-slate-500' : 'text-emerald-400'}`} />
+          <Volume2 className={`w-4 h-4 ${isMuted ? 'text-[#8c7258]' : 'text-[#5cb85c]'}`} />
         </button>
 
         <button
@@ -351,7 +376,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
             e.currentTarget.blur();
             onPause();
           }}
-          className="p-1.5 sm:p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-300 border border-slate-800 cursor-pointer"
+          className="p-1.5 sm:p-2 rounded-xl bg-[#1c130c] hover:bg-[#312115] text-[#f5b82e] border border-[#6b4a2e] cursor-pointer"
           title={t.pauseGame}
           aria-label={t.pauseGame}
         >

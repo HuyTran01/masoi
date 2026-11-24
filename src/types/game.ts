@@ -58,6 +58,9 @@ export interface Player {
   elderLives?: number; // starts with 2
   targetPlayerId?: string; // for doppelganger specific player model
   targetRoleId?: RoleId; // fallback role inheritance
+  hat?: 'none' | 'witch' | 'crown' | 'knight' | 'straw' | 'antlers' | 'pirate';
+  cloakColor?: number;
+  isMayor?: boolean;
 }
 
 export type Phase = 'lobby' | 'night' | 'day_discussion' | 'day_voting' | 'hunter_revenge' | 'game_over';

@@ -1,10 +1,20 @@
 import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { Player, Phase, ThrownPropEvent, PropType, Language } from '../types/game';
+import { Player, Phase, ThrownPropEvent, PropType, Language, VoteRecord } from '../types/game';
 import { ROLES } from '../game/roles';
 import { UI_TEXT } from '../utils/i18n';
 import { sound, PROP_REACTION_META } from '../utils/sound';
+import {
+  AGROU_BIOMES,
+  AGROU_EMOTES,
+  AgrouEmoteEvent,
+  AgrouEmoteId,
+  AgrouHatId,
+  AgrouMapBiome,
+  CAMPFIRE_ABSTAIN_ID,
+  getBotCosmetics,
+} from '../game/agrouMechanics';
 import {
   CameraViewPreset,
   computeDefaultFpvYawFromSeatAngle,
@@ -30,13 +40,18 @@ interface WerewolfVillage3DProps {
   cupidLovers?: [string, string] | null;
   votesMap: Record<string, number>;
   votersByTarget?: Record<string, string[]>;
+  votes?: VoteRecord[];
   activeSpeakers: string[];
   revealAllRoles?: boolean;
   cameraPreset: CameraViewPreset;
   activePropTool?: PropType | null;
   fpvLookTurnRate?: number;
+  mapBiome?: AgrouMapBiome;
+  mayorId?: string | null;
+  emoteEvents?: AgrouEmoteEvent[];
   onAimedPlayerChange?: (playerId: string | null) => void;
   onSelectPlayer: (playerId: string) => void;
+  onVoteCampfireAbstain?: () => void;
 }
 
 interface SeatVisual {
@@ -57,11 +72,15 @@ interface SeatVisual {
   wolfEarsGroup: THREE.Group;
   angerAuraGroup: THREE.Group;
   happyAuraGroup: THREE.Group;
+  mayorCrownGroup: THREE.Group;
+  hatVariants: Record<AgrouHatId, THREE.Group>;
   koProgress: number;
   wobbleTimer: number;
   throwAnimTimer: number;
   reactionType: 'none' | 'angry' | 'happy_dance';
   reactionTimer: number;
+  emoteType: AgrouEmoteId | null;
+  emoteTimer: number;
   baseAngle: number;
   homePos: THREE.Vector3;
   currentPos: THREE.Vector3;
@@ -115,21 +134,6 @@ const _dummyObj = new THREE.Object3D();
 const _scratchColor = new THREE.Color();
 const _arcPos = new THREE.Vector3();
 
-const SEAT_COLORS = [
-  0xe11d48, // crimson
-  0x9333ea, // purple
-  0x0284c7, // sky
-  0x059669, // emerald
-  0xd97706, // amber
-  0xec4899, // pink
-  0x4f46e5, // indigo
-  0x0d9488, // teal
-  0xea580c, // orange
-  0x65a30d, // lime
-  0x2563eb, // blue
-  0xc026d3, // fuchsia
-];
-
 const PROP_STYLE_MAP: Record<PropType, { icon: string; bg: string }> = {
   tomato: {
     icon: '🍅',
@@ -164,18 +168,25 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
   cupidLovers,
   votesMap,
   votersByTarget,
+  votes = [],
   activeSpeakers,
   revealAllRoles,
   cameraPreset,
   activePropTool = null,
   fpvLookTurnRate = 0,
+  mapBiome = 'forest',
+  mayorId = null,
+  emoteEvents = [],
   onAimedPlayerChange,
   onSelectPlayer,
+  onVoteCampfireAbstain,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const labelContainerRef = useRef<HTMLDivElement>(null);
   const labelElsRef = useRef<(HTMLDivElement | null)[]>([]);
+  const campfireLabelRef = useRef<HTMLDivElement | null>(null);
   const processedPropsRef = useRef<Set<string>>(new Set());
+  const processedEmotesRef = useRef<Set<string>>(new Set());
 
   // Mutable ref holding latest props so 60Hz WebGL loop never tears down on React state changes
   const stateRef = useRef({
@@ -191,14 +202,20 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     secondaryTargetId,
     cupidLovers,
     votesMap,
+    votes,
     activeSpeakers,
     revealAllRoles,
     cameraPreset,
     activePropTool,
     fpvLookTurnRate,
+    mapBiome,
+    mayorId,
+    emoteEvents,
     onAimedPlayerChange,
     onSelectPlayer,
+    onVoteCampfireAbstain,
     hoveredPlayerId: null as string | null,
+    hoveredCampfire: false,
     aimedPlayerId: null as string | null,
     lastReportedAimedId: null as string | null,
     trauma: 0,
@@ -241,13 +258,18 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       secondaryTargetId,
       cupidLovers,
       votesMap,
+      votes,
       activeSpeakers,
       revealAllRoles,
       cameraPreset,
       activePropTool,
       fpvLookTurnRate,
+      mapBiome,
+      mayorId,
+      emoteEvents,
       onAimedPlayerChange,
       onSelectPlayer,
+      onVoteCampfireAbstain,
     };
 
     if (cameraPreset !== prevPreset) {
@@ -312,13 +334,18 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     secondaryTargetId,
     cupidLovers,
     votesMap,
+    votes,
     activeSpeakers,
     revealAllRoles,
     cameraPreset,
     activePropTool,
     fpvLookTurnRate,
+    mapBiome,
+    mayorId,
+    emoteEvents,
     onAimedPlayerChange,
     onSelectPlayer,
+    onVoteCampfireAbstain,
   ]);
 
   useEffect(() => {
@@ -369,11 +396,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     container.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    const bgNight = new THREE.Color(0x070b16);
-    const bgBlindNight = new THREE.Color(0x020308);
-    const bgDay = new THREE.Color(0x6fb7e9);
-    scene.background = bgNight.clone();
-    scene.fog = new THREE.FogExp2(0x070b16, 0.017);
+    const initialSky = AGROU_BIOMES[stateRef.current.mapBiome || 'forest'].daySky;
+    scene.background = new THREE.Color(initialSky);
+    scene.fog = new THREE.FogExp2(initialSky, 0.0085);
 
     const camera = new THREE.PerspectiveCamera(46, width / height, 0.12, 140);
     camera.position.set(0, 8.2, 15.5);
@@ -476,130 +501,152 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
     pmremGenerator.dispose();
 
-    // 3. Detailed Procedural Ground Cobblestone & Moss Texture + Bump Micro-Relief
-    const createGroundTexture = () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 512;
-      const ctx = canvas.getContext('2d')!;
-      ctx.fillStyle = '#111822';
-      ctx.fillRect(0, 0, 512, 512);
-      for (let i = 0; i < 480; i++) {
-        const x = (i * 97) % 512;
-        const y = (i * 163) % 512;
-        const r = 7 + (i % 15);
-        ctx.fillStyle =
-          i % 4 === 0
-            ? '#1e293b'
-            : i % 4 === 1
-            ? '#172326'
-            : i % 4 === 2
-            ? '#17202e'
-            : '#0f1722';
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#090d14';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-      }
-      const tex = new THREE.CanvasTexture(canvas);
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(11, 11);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      return tex;
-    };
+    // 3. Agrou-Style Stylized Low-Poly Meadow Ground & Warm Dirt Campfire Clearing
+    const initPalette = AGROU_BIOMES[stateRef.current.mapBiome || 'forest'];
 
-    const groundTex = createGroundTexture();
-    const groundGeo = new THREE.CircleGeometry(56, 60);
+    const groundGeo = new THREE.PlaneGeometry(118, 118, 36, 36);
+    groundGeo.rotateX(-Math.PI / 2);
+    const gPos = groundGeo.attributes.position;
+    for (let i = 0; i < gPos.count; i++) {
+      const gx = gPos.getX(i);
+      const gz = gPos.getZ(i);
+      const dist = Math.hypot(gx, gz);
+      if (dist > 11.5) {
+        const hillFactor = Math.min(1, (dist - 11.5) / 22);
+        const wave =
+          Math.sin(gx * 0.16) * Math.cos(gz * 0.16) * 1.45 +
+          Math.sin((gx + gz) * 0.25) * 0.65;
+        gPos.setY(i, Math.max(0, wave * hillFactor + hillFactor * 0.9));
+      } else {
+        gPos.setY(i, 0);
+      }
+    }
+    groundGeo.computeVertexNormals();
+
     const groundMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      map: groundTex,
-      bumpMap: groundTex,
-      bumpScale: 0.14,
-      roughness: 0.84,
-      metalness: 0.08,
+      color: initPalette.groundNight,
+      roughness: 0.92,
+      metalness: 0.02,
+      flatShading: true,
     });
     const groundMesh = new THREE.Mesh(groundGeo, groundMat);
-    groundMesh.rotation.x = -Math.PI / 2;
     groundMesh.receiveShadow = true;
     scene.add(groundMesh);
 
-    // Stone Ritual Circle Path + Inner Rune Ring + Radial Stepping Stones
-    const ringRoadGeo = new THREE.RingGeometry(4.65, 6.65, 56);
-    const ringRoadMat = new THREE.MeshStandardMaterial({
-      color: 0x263142,
-      roughness: 0.72,
-      metalness: 0.18,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
+    // Warm Packed-Dirt Campfire Clearing Disc + Mossy Stepping Stones
+    const clearingDirtGeo = new THREE.CylinderGeometry(7.2, 7.6, 0.05, 18);
+    const clearingDirtMat = new THREE.MeshStandardMaterial({
+      color: initPalette.clearingDirt,
+      roughness: 0.94,
+      metalness: 0.02,
+      flatShading: true,
     });
-    const ringRoad = new THREE.Mesh(ringRoadGeo, ringRoadMat);
-    ringRoad.rotation.x = -Math.PI / 2;
-    ringRoad.position.y = 0.02;
-    ringRoad.receiveShadow = true;
-    scene.add(ringRoad);
+    const clearingDirt = new THREE.Mesh(clearingDirtGeo, clearingDirtMat);
+    clearingDirt.position.y = 0.01;
+    clearingDirt.receiveShadow = true;
+    scene.add(clearingDirt);
 
-    const innerRuneRingGeo = new THREE.RingGeometry(2.15, 2.38, 44);
-    const innerRuneRingMat = new THREE.MeshBasicMaterial({
-      color: 0xd97706,
+    const innerDirtGeo = new THREE.CylinderGeometry(2.65, 2.85, 0.07, 14);
+    const innerDirtMat = new THREE.MeshStandardMaterial({
+      color: 0x5c422e,
+      roughness: 0.95,
+      flatShading: true,
+    });
+    const innerDirt = new THREE.Mesh(innerDirtGeo, innerDirtMat);
+    innerDirt.position.y = 0.025;
+    innerDirt.receiveShadow = true;
+    scene.add(innerDirt);
+
+    // Subtle Campfire Abstention Voting Ring (lights up warmly during day_voting!)
+    const campfireVoteRingGeo = new THREE.RingGeometry(1.75, 2.08, 24);
+    const campfireVoteRingMat = new THREE.MeshBasicMaterial({
+      color: 0xfbbf24,
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.25,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
-    const innerRuneRing = new THREE.Mesh(innerRuneRingGeo, innerRuneRingMat);
-    innerRuneRing.rotation.x = -Math.PI / 2;
-    innerRuneRing.position.y = 0.025;
-    scene.add(innerRuneRing);
+    const campfireVoteRing = new THREE.Mesh(campfireVoteRingGeo, campfireVoteRingMat);
+    campfireVoteRing.rotation.x = -Math.PI / 2;
+    campfireVoteRing.position.y = 0.07;
+    scene.add(campfireVoteRing);
 
-    // 4. Lighting Rig
-    const hemiLight = new THREE.HemisphereLight(0x4765a0, 0x111522, 0.98);
-    hemiLight.position.set(0, 25, 0);
+    // 4. Lighting Rig (Warm Storytelling Agrou Key + Moonlight/Sunlight + Campfire Glow)
+    const hemiLight = new THREE.HemisphereLight(
+      initPalette.nightHemiSky,
+      initPalette.nightHemiGround,
+      1.05
+    );
+    hemiLight.position.set(0, 26, 0);
     scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(0x93c5fd, 1.4);
-    dirLight.position.set(12, 19, -10);
+    const dirLight = new THREE.DirectionalLight(initPalette.nightMoonLight, 1.55);
+    dirLight.position.set(14, 21, -11);
     dirLight.castShadow = !isSoftwareGl;
     if (!isSoftwareGl) {
       dirLight.shadow.mapSize.width = 1024;
       dirLight.shadow.mapSize.height = 1024;
-      const d = 14;
+      const d = 15;
       dirLight.shadow.camera.left = -d;
       dirLight.shadow.camera.right = d;
       dirLight.shadow.camera.top = d;
       dirLight.shadow.camera.bottom = -d;
       dirLight.shadow.camera.near = 1;
-      dirLight.shadow.camera.far = 45;
+      dirLight.shadow.camera.far = 48;
       dirLight.shadow.bias = -0.0005;
       dirLight.shadow.normalBias = 0.02;
     }
     scene.add(dirLight);
 
-    const fireLight = new THREE.PointLight(0xff6b1a, 5.2, 22, 1.5);
-    fireLight.position.set(0, 1.5, 0);
+    const fireLight = new THREE.PointLight(0xff7b24, 6.2, 24, 1.45);
+    fireLight.position.set(0, 1.65, 0);
     scene.add(fireLight);
 
-    // Celestial Blood Moon / Golden Sun Orb in background vista
+    // Celestial Golden Sun / Stylized Low-Poly Moon in background vista
     const moonGroup = new THREE.Group();
-    const moonGeo = new THREE.SphereGeometry(2.7, 24, 24);
-    const moonMat = new THREE.MeshBasicMaterial({ color: 0xfda4af });
+    const moonGeo = new THREE.IcosahedronGeometry(2.7, 1);
+    const moonMat = new THREE.MeshBasicMaterial({ color: 0xfde68a });
     const moonMesh = new THREE.Mesh(moonGeo, moonMat);
-    const moonHaloGeo = new THREE.RingGeometry(2.8, 4.3, 32);
+    const moonHaloGeo = new THREE.RingGeometry(2.9, 4.4, 24);
     const moonHaloMat = new THREE.MeshBasicMaterial({
-      color: 0xf43f5e,
+      color: 0xf59e0b,
       transparent: true,
-      opacity: 0.3,
+      opacity: 0.28,
       side: THREE.DoubleSide,
       depthWrite: false,
     });
     const moonHalo = new THREE.Mesh(moonHaloGeo, moonHaloMat);
     moonGroup.add(moonMesh, moonHalo);
-    moonGroup.position.set(0, 15.2, -31);
+    moonGroup.position.set(0, 15.8, -32);
     scene.add(moonGroup);
+
+    // Stylized Low-Poly Clouds drifting overhead (visible at Day / Dusk like Agrou!)
+    const cloudGroup = new THREE.Group();
+    const cloudMat = new THREE.MeshStandardMaterial({
+      color: 0xfff8eb,
+      roughness: 0.9,
+      flatShading: true,
+    });
+    const cloudPuffGeo = new THREE.DodecahedronGeometry(1.4, 0);
+    const cloudClusters: { mesh: THREE.Group; baseAngle: number; radius: number; height: number; speed: number }[] = [];
+    for (let c = 0; c < 9; c++) {
+      const cluster = new THREE.Group();
+      const puffCount = 3 + (c % 2);
+      for (let p = 0; p < puffCount; p++) {
+        const puff = new THREE.Mesh(cloudPuffGeo, cloudMat);
+        puff.position.set((p - 1) * 1.45, (p % 2) * 0.42, (p % 3 - 1) * 0.4);
+        const ps = 0.72 + (p === 1 ? 0.42 : 0.15);
+        puff.scale.set(ps * 1.35, ps * 0.72, ps);
+        cluster.add(puff);
+      }
+      const ba = (c / 9) * Math.PI * 2;
+      const cr = 22 + (c % 3) * 6.5;
+      const ch = 13.5 + (c % 4) * 1.8;
+      cluster.position.set(Math.cos(ba) * cr, ch, Math.sin(ba) * cr);
+      cloudGroup.add(cluster);
+      cloudClusters.push({ mesh: cluster, baseAngle: ba, radius: cr, height: ch, speed: 0.025 + (c % 3) * 0.008 });
+    }
+    scene.add(cloudGroup);
 
     // 4B. Starry Night Sky Dome (140 Instanced Stars)
     const starGeo = new THREE.OctahedronGeometry(0.14, 0);
@@ -625,128 +672,159 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     starInst.computeBoundingSphere();
     scene.add(starInst);
 
-    // 5. Central Crackling Campfire & Stone Altar
+    // 5. Agrou Central Campfire Hearth, Crossed Firewood, Tripod Cauldron & Faceted Flames
     const campfireGroup = new THREE.Group();
-    const altarBaseGeo = new THREE.CylinderGeometry(1.55, 1.75, 0.16, 20);
-    const altarBaseMat = new THREE.MeshStandardMaterial({
-      color: 0x334155,
-      roughness: 0.85,
-      metalness: 0.2,
-    });
-    const altarBase = new THREE.Mesh(altarBaseGeo, altarBaseMat);
-    altarBase.position.y = 0.08;
-    altarBase.receiveShadow = true;
-    campfireGroup.add(altarBase);
 
-    const stoneGeo = new THREE.DodecahedronGeometry(0.32, 0);
-    const stoneMat = new THREE.MeshStandardMaterial({
-      color: 0x475569,
-      roughness: 0.82,
-      metalness: 0.18,
+    const rockMat = new THREE.MeshStandardMaterial({
+      color: initPalette.rockColor,
+      roughness: 0.86,
+      metalness: 0.05,
+      flatShading: true,
     });
+    const stoneGeo = new THREE.DodecahedronGeometry(0.36, 0);
     for (let i = 0; i < 12; i++) {
       const a = (i / 12) * Math.PI * 2;
-      const rock = new THREE.Mesh(stoneGeo, stoneMat);
-      rock.position.set(Math.cos(a) * 1.22, 0.24, Math.sin(a) * 1.22);
-      rock.scale.set(1.1, 0.78, 0.95);
-      rock.rotation.y = a;
+      const rock = new THREE.Mesh(stoneGeo, rockMat);
+      rock.position.set(Math.cos(a) * 1.32, 0.22, Math.sin(a) * 1.32);
+      rock.scale.set(1.15 + (i % 2) * 0.16, 0.72 + (i % 3) * 0.1, 0.92);
+      rock.rotation.set(i * 0.3, a, i * 0.2);
+      rock.castShadow = !isSoftwareGl;
       campfireGroup.add(rock);
     }
 
-    const logGeo = new THREE.CylinderGeometry(0.11, 0.14, 1.75, 8);
+    const logGeo = new THREE.CylinderGeometry(0.12, 0.15, 1.85, 6);
     const logMat = new THREE.MeshStandardMaterial({
-      color: 0x3b2316,
-      roughness: 0.9,
-      metalness: 0.05,
+      color: 0x5c3a21,
+      roughness: 0.92,
+      flatShading: true,
     });
-    for (let i = 0; i < 5; i++) {
+    const paleWoodMat = new THREE.MeshStandardMaterial({
+      color: 0xd9b382,
+      roughness: 0.88,
+      flatShading: true,
+    });
+    for (let i = 0; i < 6; i++) {
       const log = new THREE.Mesh(logGeo, logMat);
-      log.position.y = 0.3;
-      log.rotation.z = Math.PI / 2.5;
-      log.rotation.y = (i * Math.PI) / 5;
+      log.position.y = 0.28;
+      log.rotation.z = Math.PI / 2.45;
+      log.rotation.y = (i * Math.PI) / 3;
       campfireGroup.add(log);
     }
 
-    const emberCoreGeo = new THREE.SphereGeometry(0.55, 12, 10);
+    // Wooden Cooking Tripod + Cast-Iron Stew Pot over Campfire (Classic Medieval Campfire Charm)
+    const tripodPoleGeo = new THREE.CylinderGeometry(0.045, 0.06, 2.75, 5);
+    for (let p = 0; p < 3; p++) {
+      const pa = (p / 3) * Math.PI * 2 + 0.35;
+      const pole = new THREE.Mesh(tripodPoleGeo, logMat);
+      pole.position.set(Math.cos(pa) * 0.78, 1.12, Math.sin(pa) * 0.78);
+      pole.lookAt(0, 2.38, 0);
+      pole.rotateX(Math.PI / 2);
+      campfireGroup.add(pole);
+    }
+    const ironMat = new THREE.MeshStandardMaterial({
+      color: 0x262930,
+      roughness: 0.55,
+      metalness: 0.65,
+      flatShading: true,
+    });
+    const cauldronMesh = new THREE.Mesh(new THREE.DodecahedronGeometry(0.36, 0), ironMat);
+    cauldronMesh.position.y = 1.52;
+    cauldronMesh.scale.set(1.05, 0.82, 1.05);
+    const chainRod = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.72, 5), ironMat);
+    chainRod.position.y = 1.98;
+    campfireGroup.add(cauldronMesh, chainRod);
+
+    const emberCoreGeo = new THREE.DodecahedronGeometry(0.58, 0);
     const emberCoreMat = new THREE.MeshBasicMaterial({ color: 0xf97316 });
     const emberCore = new THREE.Mesh(emberCoreGeo, emberCoreMat);
-    emberCore.scale.set(1.2, 0.45, 1.2);
+    emberCore.scale.set(1.25, 0.42, 1.25);
     emberCore.position.y = 0.24;
     campfireGroup.add(emberCore);
 
-    const flameOuterGeo = new THREE.ConeGeometry(0.7, 1.75, 10);
+    const flameOuterGeo = new THREE.ConeGeometry(0.76, 1.65, 6);
     const flameOuterMat = new THREE.MeshBasicMaterial({
       color: 0xea580c,
       transparent: true,
-      opacity: 0.88,
+      opacity: 0.9,
     });
     const flameOuter = new THREE.Mesh(flameOuterGeo, flameOuterMat);
-    flameOuter.position.y = 0.92;
+    flameOuter.position.y = 0.88;
 
-    const flameInnerGeo = new THREE.ConeGeometry(0.42, 1.28, 8);
+    const flameInnerGeo = new THREE.ConeGeometry(0.45, 1.18, 5);
     const flameInnerMat = new THREE.MeshBasicMaterial({
       color: 0xfef08a,
     });
     const flameInner = new THREE.Mesh(flameInnerGeo, flameInnerMat);
-    flameInner.position.y = 0.78;
+    flameInner.position.y = 0.74;
 
-    campfireGroup.add(flameOuter, flameInner);
+    // Clickable Campfire Abstention Hitbox
+    const campfireHitbox = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.55, 1.55, 2.3, 10),
+      new THREE.MeshBasicMaterial({ visible: false })
+    );
+    campfireHitbox.position.y = 1.15;
+    campfireHitbox.userData.isCampfire = true;
+    campfireGroup.add(flameOuter, flameInner, campfireHitbox);
     scene.add(campfireGroup);
 
-    // 6. Ancient Gothic Stone Archway & Village Judgment Gallows Podium
+    // 6. Rustic Carved Timber Village Archway with Hanging Lanterns
     const archGroup = new THREE.Group();
-    const pillarGeo = new THREE.BoxGeometry(0.9, 4.6, 0.9);
-    const pillarCapGeo = new THREE.BoxGeometry(1.15, 0.32, 1.15);
-    const archStoneMat = new THREE.MeshStandardMaterial({
-      color: 0x334155,
-      roughness: 0.78,
-      metalness: 0.22,
+    const pillarGeo = new THREE.CylinderGeometry(0.32, 0.42, 4.4, 6);
+    const archBeamGeo = new THREE.BoxGeometry(5.6, 0.55, 0.65);
+    const archRoofGeo = new THREE.ConeGeometry(3.5, 1.15, 4);
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: initPalette.wallColor,
+      roughness: 0.88,
+      flatShading: true,
     });
-    const leftPillar = new THREE.Mesh(pillarGeo, archStoneMat);
-    leftPillar.position.set(-2.2, 2.3, 0);
-    const rightPillar = new THREE.Mesh(pillarGeo, archStoneMat);
-    rightPillar.position.set(2.2, 2.3, 0);
-    const leftCap = new THREE.Mesh(pillarCapGeo, archStoneMat);
-    leftCap.position.set(-2.2, 4.65, 0);
-    const rightCap = new THREE.Mesh(pillarCapGeo, archStoneMat);
-    rightCap.position.set(2.2, 4.65, 0);
+    const roofMat = new THREE.MeshStandardMaterial({
+      color: initPalette.roofColor,
+      roughness: 0.74,
+      flatShading: true,
+    });
+    const leftPillar = new THREE.Mesh(pillarGeo, logMat);
+    leftPillar.position.set(-2.15, 2.2, 0);
+    const rightPillar = new THREE.Mesh(pillarGeo, logMat);
+    rightPillar.position.set(2.15, 2.2, 0);
+    const lintel = new THREE.Mesh(archBeamGeo, logMat);
+    lintel.position.set(0, 4.45, 0);
+    const archCanopy = new THREE.Mesh(archRoofGeo, roofMat);
+    archCanopy.position.set(0, 5.25, 0);
+    archCanopy.scale.set(1.25, 1, 0.45);
+    archCanopy.rotation.y = Math.PI / 4;
 
-    const lintelGeo = new THREE.BoxGeometry(5.8, 0.78, 1.08);
-    const lintel = new THREE.Mesh(lintelGeo, archStoneMat);
-    lintel.position.set(0, 5.0, 0);
-
-    const runeOrbGeo = new THREE.OctahedronGeometry(0.5, 0);
-    const runeOrbMat = new THREE.MeshBasicMaterial({ color: 0xf43f5e });
+    const runeOrbGeo = new THREE.OctahedronGeometry(0.42, 0);
+    const runeOrbMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24 });
     const runeOrb = new THREE.Mesh(runeOrbGeo, runeOrbMat);
-    runeOrb.position.set(0, 5.85, 0);
+    runeOrb.position.set(0, 3.82, 0);
 
-    archGroup.add(leftPillar, rightPillar, leftCap, rightCap, lintel, runeOrb);
-    archGroup.position.set(0, 0, -11.5);
+    archGroup.add(leftPillar, rightPillar, lintel, archCanopy, runeOrb);
+    archGroup.position.set(0, 0, -11.8);
     scene.add(archGroup);
 
-    // 6B. Medieval Windmill with Rotating Sails & Stone Watchtower with Blazing Brazier
+    // 6B. Stylized Low-Poly Medieval Windmill & Timber Watchtower
     const windmillGroup = new THREE.Group();
-    const millTowerGeo = new THREE.CylinderGeometry(1.15, 1.65, 5.6, 12);
-    const millRoofGeo = new THREE.ConeGeometry(1.5, 1.8, 12);
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x453227, roughness: 0.85 });
-    const roofMat = new THREE.MeshStandardMaterial({ color: 0x1e1b2e, roughness: 0.62 });
-    const millTower = new THREE.Mesh(millTowerGeo, wallMat);
+    const millTower = new THREE.Mesh(
+      new THREE.CylinderGeometry(1.15, 1.68, 5.6, 7),
+      wallMat
+    );
     millTower.position.y = 2.8;
-    const millRoof = new THREE.Mesh(millRoofGeo, roofMat);
+    const millRoof = new THREE.Mesh(new THREE.ConeGeometry(1.55, 1.85, 7), roofMat);
     millRoof.position.y = 6.5;
     windmillGroup.add(millTower, millRoof);
 
     const windmillBlades = new THREE.Group();
-    windmillBlades.position.set(0, 4.8, 1.32);
-    const bladeHub = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.4, 10), logMat);
+    windmillBlades.position.set(0, 4.8, 1.34);
+    const bladeHub = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.24, 0.4, 6), logMat);
     bladeHub.rotation.x = Math.PI / 2;
     windmillBlades.add(bladeHub);
 
-    const sailSpokeGeo = new THREE.BoxGeometry(0.12, 5.8, 0.08);
-    const sailCanvasGeo = new THREE.BoxGeometry(0.62, 2.2, 0.04);
+    const sailSpokeGeo = new THREE.BoxGeometry(0.14, 5.8, 0.08);
+    const sailCanvasGeo = new THREE.BoxGeometry(0.66, 2.2, 0.05);
     const sailCanvasMat = new THREE.MeshStandardMaterial({
-      color: 0xd6d3d1,
-      roughness: 0.7,
+      color: 0xf3e5cc,
+      roughness: 0.78,
+      flatShading: true,
     });
     for (let b = 0; b < 2; b++) {
       const spoke = new THREE.Mesh(sailSpokeGeo, logMat);
@@ -757,7 +835,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       const sailPivot = new THREE.Group();
       sailPivot.rotation.z = (s * Math.PI) / 2;
       const sail = new THREE.Mesh(sailCanvasGeo, sailCanvasMat);
-      sail.position.set(0.24, 1.65, 0.04);
+      sail.position.set(0.25, 1.65, 0.04);
       sailPivot.add(sail);
       windmillBlades.add(sailPivot);
     }
@@ -766,56 +844,59 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     windmillGroup.rotation.y = 0.48;
     scene.add(windmillGroup);
 
-    // Fortified Stone Watchtower with Glowing Beacon Brazier on the right flank
     const watchtowerGroup = new THREE.Group();
     const towerBody = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.35, 1.65, 6.2, 12),
-      archStoneMat
+      new THREE.CylinderGeometry(1.32, 1.68, 6.2, 7),
+      rockMat
     );
     towerBody.position.y = 3.1;
     const towerCrown = new THREE.Mesh(
-      new THREE.CylinderGeometry(1.6, 1.45, 0.65, 12),
-      archStoneMat
+      new THREE.CylinderGeometry(1.62, 1.45, 0.68, 7),
+      logMat
     );
-    towerCrown.position.y = 6.3;
+    towerCrown.position.y = 6.32;
     const brazierFlame = new THREE.Mesh(
-      new THREE.ConeGeometry(0.65, 1.4, 8),
+      new THREE.ConeGeometry(0.68, 1.42, 6),
       flameOuterMat
     );
-    brazierFlame.position.y = 7.1;
+    brazierFlame.position.y = 7.12;
     watchtowerGroup.add(towerBody, towerCrown, brazierFlame);
     watchtowerGroup.position.set(14.5, 0, -13.5);
     scene.add(watchtowerGroup);
 
-    // 7. Detailed Multi-Part Medieval Timber-Framed Cottages + Barrels & Fences
+    // 7. Warm Agrou Stylized Half-Timbered Cottages with Pitched Roofs & Glowing Windows
     const cottagePositions = [
-      { x: -11.5, z: -7.5, rot: 0.55 },
-      { x: 11.5, z: -7.5, rot: -0.55 },
-      { x: -13.2, z: 4.5, rot: 1.25 },
-      { x: 13.2, z: 4.5, rot: -1.25 },
-      { x: -7.5, z: -13.0, rot: 0.25 },
-      { x: 7.5, z: -13.0, rot: -0.25 },
-      { x: -9.8, z: 11.2, rot: 2.35 },
-      { x: 9.8, z: 11.2, rot: -2.35 },
+      { x: -11.8, z: -7.6, rot: 0.55 },
+      { x: 11.8, z: -7.6, rot: -0.55 },
+      { x: -13.4, z: 4.5, rot: 1.25 },
+      { x: 13.4, z: 4.5, rot: -1.25 },
+      { x: -7.6, z: -13.2, rot: 0.25 },
+      { x: 7.6, z: -13.2, rot: -0.25 },
+      { x: -10.2, z: 11.5, rot: 2.35 },
+      { x: 10.2, z: 11.5, rot: -2.35 },
     ];
-    const wallGeo = new THREE.BoxGeometry(3.4, 2.5, 2.9);
-    const roofGeo = new THREE.ConeGeometry(2.85, 2.1, 4);
-    const chimneyGeo = new THREE.BoxGeometry(0.52, 2.4, 0.52);
-    const doorGeo = new THREE.BoxGeometry(0.75, 1.35, 0.12);
-    const doorMat = new THREE.MeshStandardMaterial({ color: 0x291811, roughness: 0.9 });
-    const winGeo = new THREE.PlaneGeometry(0.58, 0.68);
+    const wallGeo = new THREE.BoxGeometry(3.4, 2.45, 2.9);
+    const roofGeo = new THREE.ConeGeometry(2.9, 2.2, 4);
+    const chimneyGeo = new THREE.BoxGeometry(0.54, 2.35, 0.54);
+    const doorGeo = new THREE.BoxGeometry(0.76, 1.35, 0.14);
+    const doorMat = new THREE.MeshStandardMaterial({
+      color: 0x4a2c18,
+      roughness: 0.9,
+      flatShading: true,
+    });
+    const winGeo = new THREE.PlaneGeometry(0.62, 0.7);
     const winMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24 });
-    const barrelGeo = new THREE.CylinderGeometry(0.28, 0.26, 0.68, 10);
+    const barrelGeo = new THREE.CylinderGeometry(0.28, 0.26, 0.68, 7);
 
     cottagePositions.forEach((pos) => {
       const house = new THREE.Group();
       const base = new THREE.Mesh(wallGeo, wallMat);
-      base.position.y = 1.25;
+      base.position.y = 1.22;
       const roof = new THREE.Mesh(roofGeo, roofMat);
       roof.position.y = 3.55;
       roof.rotation.y = Math.PI / 4;
-      const chimney = new THREE.Mesh(chimneyGeo, archStoneMat);
-      chimney.position.set(0.95, 3.2, -0.55);
+      const chimney = new THREE.Mesh(chimneyGeo, rockMat);
+      chimney.position.set(0.95, 3.25, -0.55);
       const door = new THREE.Mesh(doorGeo, doorMat);
       door.position.set(0, 0.68, 1.46);
       const winL = new THREE.Mesh(winGeo, winMat);
@@ -823,218 +904,295 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       const winR = new THREE.Mesh(winGeo, winMat);
       winR.position.set(0.92, 1.42, 1.47);
       const barrel = new THREE.Mesh(barrelGeo, logMat);
-      barrel.position.set(1.45, 0.34, 1.4);
+      barrel.position.set(1.48, 0.34, 1.38);
       house.add(base, roof, chimney, door, winL, winR, barrel);
       house.position.set(pos.x, 0, pos.z);
       house.rotation.y = pos.rot;
       scene.add(house);
     });
 
-    // 7B. Wrought-Iron Streetlamps & Wooden Rail Fences around the Village Plaza (r = 8.4m)
-    const lampPoleGeo = new THREE.CylinderGeometry(0.06, 0.09, 2.9, 8);
-    const lampArmGeo = new THREE.BoxGeometry(0.55, 0.06, 0.06);
-    const lampOrbGeo = new THREE.OctahedronGeometry(0.2, 1);
-    const lampIronMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b,
-      roughness: 0.4,
-      metalness: 0.75,
-    });
+    // 7B. Rustic Wooden Lantern Posts, Split-Rail Fences, Boulders, Mushrooms & Autumn Pumpkins
+    const lampPoleGeo = new THREE.CylinderGeometry(0.08, 0.11, 2.85, 6);
+    const lampArmGeo = new THREE.BoxGeometry(0.55, 0.09, 0.09);
+    const lampOrbGeo = new THREE.OctahedronGeometry(0.22, 0);
     const lampGlowMat = new THREE.MeshBasicMaterial({ color: 0xfde047 });
-    const fenceRailGeo = new THREE.BoxGeometry(2.2, 0.09, 0.07);
-    const fencePostGeo = new THREE.BoxGeometry(0.14, 0.95, 0.14);
+    const fenceRailGeo = new THREE.BoxGeometry(2.3, 0.1, 0.08);
+    const fencePostGeo = new THREE.CylinderGeometry(0.08, 0.1, 0.95, 5);
+    const pumpkinGroup = new THREE.Group();
+    const pumpkinMat = new THREE.MeshStandardMaterial({
+      color: 0xea580c,
+      roughness: 0.72,
+      flatShading: true,
+    });
+    const pumpkinStemMat = new THREE.MeshStandardMaterial({
+      color: 0x365314,
+      roughness: 0.85,
+      flatShading: true,
+    });
+    const mushroomCapMat = new THREE.MeshStandardMaterial({
+      color: 0xdc2626,
+      roughness: 0.65,
+      flatShading: true,
+    });
 
     for (let k = 0; k < 8; k++) {
       const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
-      const lx = Math.cos(a) * 8.45;
-      const lz = Math.sin(a) * 8.45;
+      const lx = Math.cos(a) * 8.65;
+      const lz = Math.sin(a) * 8.65;
 
       const lampGroup = new THREE.Group();
-      const pole = new THREE.Mesh(lampPoleGeo, lampIronMat);
-      pole.position.y = 1.45;
-      const arm = new THREE.Mesh(lampArmGeo, lampIronMat);
-      arm.position.set(0.22, 2.85, 0);
+      const pole = new THREE.Mesh(lampPoleGeo, logMat);
+      pole.position.y = 1.42;
+      const arm = new THREE.Mesh(lampArmGeo, logMat);
+      arm.position.set(0.22, 2.78, 0);
       const bulb = new THREE.Mesh(lampOrbGeo, lampGlowMat);
-      bulb.position.set(0.44, 2.65, 0);
+      bulb.position.set(0.45, 2.58, 0);
       lampGroup.add(pole, arm, bulb);
       lampGroup.position.set(lx, 0, lz);
       lampGroup.rotation.y = -a + Math.PI;
       scene.add(lampGroup);
 
-      // Add wooden fence segment next to alternate streetlamps
+      // Split-rail wooden fence & decorative mossy boulder / toadstool cluster
       if (k % 2 === 0) {
         const fence = new THREE.Group();
         const p1 = new THREE.Mesh(fencePostGeo, logMat);
-        p1.position.set(-1.0, 0.47, 0);
+        p1.position.set(-1.05, 0.47, 0);
         const p2 = new THREE.Mesh(fencePostGeo, logMat);
-        p2.position.set(1.0, 0.47, 0);
+        p2.position.set(1.05, 0.47, 0);
         const r1 = new THREE.Mesh(fenceRailGeo, logMat);
         r1.position.set(0, 0.72, 0);
         const r2 = new THREE.Mesh(fenceRailGeo, logMat);
-        r2.position.set(0, 0.38, 0);
+        r2.position.set(0, 0.36, 0);
         fence.add(p1, p2, r1, r2);
         const fa = a + 0.22;
-        fence.position.set(Math.cos(fa) * 9.2, 0, Math.sin(fa) * 9.2);
+        fence.position.set(Math.cos(fa) * 9.3, 0, Math.sin(fa) * 9.3);
         fence.rotation.y = -fa + Math.PI / 2;
         scene.add(fence);
-      }
-    }
 
-    // 8. Instanced Layered Pine Forest & Majestic Distant Alpine Mountain Range
-    const treeCount = 64;
-    const trunkGeo = new THREE.CylinderGeometry(0.18, 0.28, 1.6, 6);
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x2b1d14, roughness: 0.9 });
-    const foliageGeo = new THREE.ConeGeometry(1.45, 4.1, 7);
-    const foliageMat = new THREE.MeshStandardMaterial({ color: 0x0f2922, roughness: 0.8 });
+        // Low-poly woodland boulder + red-capped toadstool
+        const boulder = new THREE.Mesh(stoneGeo, rockMat);
+        boulder.position.set(Math.cos(a - 0.16) * 8.9, 0.28, Math.sin(a - 0.16) * 8.9);
+        boulder.scale.set(1.65, 1.05, 1.4);
+        boulder.rotation.y = k;
+        scene.add(boulder);
+
+        const mushStem = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.22, 5), paleWoodMat);
+        mushStem.position.set(Math.cos(a - 0.11) * 8.3, 0.11, Math.sin(a - 0.11) * 8.3);
+        const mushCap = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.16, 6), mushroomCapMat);
+        mushCap.position.set(Math.cos(a - 0.11) * 8.3, 0.26, Math.sin(a - 0.11) * 8.3);
+        scene.add(mushStem, mushCap);
+      }
+
+      // Glowing Autumn Pumpkins around clearing (visible in 'autumn' biome!)
+      const pBody = new THREE.Mesh(new THREE.DodecahedronGeometry(0.32, 0), pumpkinMat);
+      pBody.scale.set(1.15, 0.84, 1.15);
+      pBody.position.set(Math.cos(a + 0.1) * 7.8, 0.26, Math.sin(a + 0.1) * 7.8);
+      const pStem = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 0.16, 5), pumpkinStemMat);
+      pStem.position.set(Math.cos(a + 0.1) * 7.8, 0.54, Math.sin(a + 0.1) * 7.8);
+      pumpkinGroup.add(pBody, pStem);
+    }
+    pumpkinGroup.visible = stateRef.current.mapBiome === 'autumn';
+    scene.add(pumpkinGroup);
+
+    // 8. Agrou Multi-Tiered Stylized Low-Poly Pine Forest (2-Tier Faceted Cones!)
+    const treeCount = 68;
+    const trunkGeo = new THREE.CylinderGeometry(0.18, 0.3, 1.75, 5);
+    const trunkMat = new THREE.MeshStandardMaterial({
+      color: 0x4f321d,
+      roughness: 0.92,
+      flatShading: true,
+    });
+    const foliageLowerGeo = new THREE.ConeGeometry(1.65, 2.85, 6);
+    const foliageUpperGeo = new THREE.ConeGeometry(1.18, 2.45, 6);
+    const foliageMatLower = new THREE.MeshStandardMaterial({
+      color: initPalette.foliagePrimary,
+      roughness: 0.84,
+      flatShading: true,
+    });
+    const foliageMatUpper = new THREE.MeshStandardMaterial({
+      color: initPalette.foliageSecondary,
+      roughness: 0.82,
+      flatShading: true,
+    });
 
     const trunkInst = new THREE.InstancedMesh(trunkGeo, trunkMat, treeCount);
-    const foliageInst = new THREE.InstancedMesh(foliageGeo, foliageMat, treeCount);
+    const foliageLowerInst = new THREE.InstancedMesh(foliageLowerGeo, foliageMatLower, treeCount);
+    const foliageUpperInst = new THREE.InstancedMesh(foliageUpperGeo, foliageMatUpper, treeCount);
 
     for (let i = 0; i < treeCount; i++) {
       const angle = (i / treeCount) * Math.PI * 2 + (i % 3) * 0.04;
-      const radius = 16.0 + (i % 5) * 2.6;
+      const radius = 15.8 + (i % 5) * 2.7;
       const x = Math.cos(angle) * radius;
       const z = Math.sin(angle) * radius;
-      const scale = 0.85 + (i % 4) * 0.18;
+      const scale = 0.88 + (i % 4) * 0.22;
 
-      _dummyObj.position.set(x, 0.8 * scale, z);
+      _dummyObj.position.set(x, 0.85 * scale, z);
       _dummyObj.scale.set(scale, scale, scale);
       _dummyObj.rotation.set(0, angle, 0);
       _dummyObj.updateMatrix();
       trunkInst.setMatrixAt(i, _dummyObj.matrix);
 
-      _dummyObj.position.set(x, 2.8 * scale, z);
+      _dummyObj.position.set(x, 2.55 * scale, z);
       _dummyObj.updateMatrix();
-      foliageInst.setMatrixAt(i, _dummyObj.matrix);
+      foliageLowerInst.setMatrixAt(i, _dummyObj.matrix);
 
-      _scratchColor.setHex(i % 2 === 0 ? 0x0f2922 : 0x14382d);
-      foliageInst.setColorAt(i, _scratchColor);
+      _dummyObj.position.set(x, 4.15 * scale, z);
+      _dummyObj.rotation.set(0, angle + 0.5, 0);
+      _dummyObj.updateMatrix();
+      foliageUpperInst.setMatrixAt(i, _dummyObj.matrix);
     }
     trunkInst.computeBoundingSphere();
-    foliageInst.computeBoundingSphere();
-    scene.add(trunkInst, foliageInst);
+    foliageLowerInst.computeBoundingSphere();
+    foliageUpperInst.computeBoundingSphere();
+    scene.add(trunkInst, foliageLowerInst, foliageUpperInst);
 
-    // Distant Alpine Mountain Range Perimeter (18 Jagged Peaks framing the horizon)
+    // Distant Faceted Alpine Mountain Range + Crisp Snow Caps (18 Peaks)
     const mountainCount = 18;
-    const mountainGeo = new THREE.ConeGeometry(8.5, 19, 6);
+    const mountainGeo = new THREE.ConeGeometry(8.8, 19.5, 5);
     const mountainMat = new THREE.MeshStandardMaterial({
-      color: 0x162032,
+      color: initPalette.mountainColor,
       roughness: 0.92,
-      metalness: 0.08,
+      flatShading: true,
+    });
+    const snowCapGeo = new THREE.ConeGeometry(3.55, 7.6, 5);
+    const snowCapMat = new THREE.MeshStandardMaterial({
+      color: initPalette.mountainSnowCap,
+      roughness: 0.86,
+      flatShading: true,
     });
     const mountainInst = new THREE.InstancedMesh(mountainGeo, mountainMat, mountainCount);
+    const snowCapInst = new THREE.InstancedMesh(snowCapGeo, snowCapMat, mountainCount);
     for (let m = 0; m < mountainCount; m++) {
       const ma = (m / mountainCount) * Math.PI * 2;
-      const mr = 38 + (m % 3) * 3.5;
+      const mr = 39 + (m % 3) * 3.5;
       const mx = Math.cos(ma) * mr;
       const mz = Math.sin(ma) * mr;
-      const sy = 0.75 + (m % 4) * 0.25;
-      const sxz = 0.85 + (m % 3) * 0.22;
-      _dummyObj.position.set(mx, 8.5 * sy, mz);
+      const sy = 0.78 + (m % 4) * 0.24;
+      const sxz = 0.88 + (m % 3) * 0.22;
+      _dummyObj.position.set(mx, 8.8 * sy, mz);
       _dummyObj.scale.set(sxz, sy, sxz);
       _dummyObj.rotation.set(0, ma * 1.7, 0);
       _dummyObj.updateMatrix();
       mountainInst.setMatrixAt(m, _dummyObj.matrix);
+
+      _dummyObj.position.set(mx, 14.8 * sy, mz);
+      _dummyObj.scale.set(sxz, sy, sxz);
+      _dummyObj.updateMatrix();
+      snowCapInst.setMatrixAt(m, _dummyObj.matrix);
     }
     mountainInst.computeBoundingSphere();
-    scene.add(mountainInst);
+    snowCapInst.computeBoundingSphere();
+    scene.add(mountainInst, snowCapInst);
 
-    // 9. Pooled Ember & Magic Particle System
-    const particleGeo = new THREE.DodecahedronGeometry(0.06, 0);
-    const particleMat = new THREE.MeshBasicMaterial({ color: 0xfbbf24 });
+    // 9. Pooled Ember / Snowflake / Autumn Leaf Particle System
+    const particleGeo = new THREE.DodecahedronGeometry(0.07, 0);
+    const particleMat = new THREE.MeshBasicMaterial({ color: initPalette.ambientParticleColor });
     const particleInst = new THREE.InstancedMesh(particleGeo, particleMat, PARTICLE_COUNT);
     particleInst.frustumCulled = false;
     scene.add(particleInst);
 
     const particleData = Array.from({ length: PARTICLE_COUNT }, (_, i) => ({
-      x: (Math.random() - 0.5) * 1.4,
-      y: Math.random() * 4.5,
-      z: (Math.random() - 0.5) * 1.4,
+      x: (Math.random() - 0.5) * 14,
+      y: Math.random() * 6.5,
+      z: (Math.random() - 0.5) * 14,
       vy: 0.7 + Math.random() * 1.2,
       phase: i * 0.7,
     }));
 
-    // 10. Create 12 Detailed 10-Part Player Seat Characters + Spectral Ghost Souls
+    // 9B. Pooled 3D Glowing Vote / Accusation Arcs (Zero-GC Instanced Diamond Beads)
+    const VOTE_BEADS_PER_ARC = 7;
+    const MAX_VOTE_ARCS = MAX_SEATS;
+    const voteBeadGeo = new THREE.OctahedronGeometry(0.11, 0);
+    const voteBeadMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const voteArcInst = new THREE.InstancedMesh(
+      voteBeadGeo,
+      voteBeadMat,
+      MAX_VOTE_ARCS * VOTE_BEADS_PER_ARC
+    );
+    voteArcInst.frustumCulled = false;
+    voteArcInst.visible = false;
+    scene.add(voteArcInst);
+
+    // 10. Create 20 Agrou Stylized Low-Poly Characters on Wooden Log Stumps + 7 Hats + Mayor Crown
     const seats: SeatVisual[] = [];
-    const clickables: THREE.Mesh[] = [];
+    const clickables: THREE.Mesh[] = [campfireHitbox];
     const activeProjectiles: ActiveProjectile3D[] = [];
     const activeSplats: ActiveSplatEffect3D[] = [];
 
-    const pedestalGeo = new THREE.CylinderGeometry(0.66, 0.76, 0.28, 20);
-    const pedestalRimGeo = new THREE.TorusGeometry(0.68, 0.04, 8, 24);
-    const pedestalMat = new THREE.MeshStandardMaterial({
-      color: 0x1e293b,
-      roughness: 0.65,
-      metalness: 0.28,
-    });
-    const shadowDiscGeo = new THREE.CircleGeometry(0.88, 20);
+    const stumpBarkGeo = new THREE.CylinderGeometry(0.62, 0.72, 0.34, 8);
+    const stumpTopGeo = new THREE.CylinderGeometry(0.56, 0.58, 0.05, 8);
+    const shadowDiscGeo = new THREE.CircleGeometry(0.9, 14);
     const shadowDiscMat = new THREE.MeshBasicMaterial({
       color: 0x000000,
       transparent: true,
-      opacity: 0.45,
+      opacity: 0.38,
       depthWrite: false,
     });
 
-    const bootGeo = new THREE.BoxGeometry(0.16, 0.14, 0.26);
+    const bootGeo = new THREE.BoxGeometry(0.17, 0.14, 0.27);
     const bootMat = new THREE.MeshStandardMaterial({
-      color: 0x1c1917,
-      roughness: 0.8,
-      metalness: 0.1,
+      color: 0x382214,
+      roughness: 0.85,
+      flatShading: true,
     });
-    const torsoGeo = new THREE.CylinderGeometry(0.26, 0.42, 0.88, 16);
-    const beltGeo = new THREE.CylinderGeometry(0.35, 0.36, 0.1, 16);
-    const beltBuckleGeo = new THREE.BoxGeometry(0.14, 0.12, 0.08);
+    const torsoGeo = new THREE.CylinderGeometry(0.28, 0.44, 0.88, 7);
+    const beltGeo = new THREE.CylinderGeometry(0.37, 0.38, 0.11, 7);
+    const beltBuckleGeo = new THREE.BoxGeometry(0.14, 0.12, 0.09);
     const buckleMat = new THREE.MeshStandardMaterial({
-      color: 0xfbbf24,
-      roughness: 0.25,
-      metalness: 0.85,
+      color: 0xf5b82e,
+      roughness: 0.3,
+      metalness: 0.75,
+      flatShading: true,
     });
-    const capeGeo = new THREE.CylinderGeometry(0.3, 0.48, 0.36, 16);
-    const armGeo = new THREE.CapsuleGeometry(0.075, 0.38, 6, 8);
-    const handGeo = new THREE.SphereGeometry(0.08, 8, 8);
-    const headGeo = new THREE.SphereGeometry(0.26, 18, 18);
-    const noseGeo = new THREE.ConeGeometry(0.045, 0.11, 8);
+    const capeGeo = new THREE.CylinderGeometry(0.32, 0.5, 0.36, 7);
+    const armGeo = new THREE.CylinderGeometry(0.075, 0.085, 0.42, 6);
+    const handGeo = new THREE.DodecahedronGeometry(0.085, 0);
+    const headGeo = new THREE.IcosahedronGeometry(0.27, 1);
+    const noseGeo = new THREE.ConeGeometry(0.048, 0.11, 5);
     const headMat = new THREE.MeshStandardMaterial({
-      color: 0xfde68a,
-      roughness: 0.42,
-      metalness: 0.05,
+      color: 0xfad7a0,
+      roughness: 0.6,
+      flatShading: true,
     });
-    const hatBrimGeo = new THREE.CylinderGeometry(0.46, 0.46, 0.04, 16);
-    const hatConeGeo = new THREE.ConeGeometry(0.3, 0.54, 14);
-    const hatBandGeo = new THREE.CylinderGeometry(0.31, 0.32, 0.07, 14);
-    const hatMat = new THREE.MeshStandardMaterial({
-      color: 0x111827,
-      roughness: 0.55,
-      metalness: 0.25,
-    });
-    const earGeo = new THREE.ConeGeometry(0.095, 0.28, 6);
-    const earMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.65 });
-    const snoutGeo = new THREE.ConeGeometry(0.12, 0.22, 8);
-    const eyeGeo = new THREE.SphereGeometry(0.04, 10, 10);
 
-    const haloGeo = new THREE.RingGeometry(0.74, 0.9, 28);
-    const shieldGeo = new THREE.TorusGeometry(0.68, 0.038, 8, 24);
+    // Shared Low-Poly Hat Geometries & Materials (7 Agrou Variants!)
+    const hatDarkMat = new THREE.MeshStandardMaterial({ color: 0x261c2e, roughness: 0.72, flatShading: true });
+    const hairMat = new THREE.MeshStandardMaterial({ color: 0x4a2f1d, roughness: 0.85, flatShading: true });
+    const knightSteelMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.35, metalness: 0.7, flatShading: true });
+    const plumeRedMat = new THREE.MeshStandardMaterial({ color: 0xdc2626, roughness: 0.65, flatShading: true });
+    const strawMat = new THREE.MeshStandardMaterial({ color: 0xe6be63, roughness: 0.85, flatShading: true });
+    const antlerMat = new THREE.MeshStandardMaterial({ color: 0x784c2a, roughness: 0.88, flatShading: true });
+    const rubyMat = new THREE.MeshStandardMaterial({ color: 0xe11d48, roughness: 0.25, metalness: 0.3, flatShading: true });
+
+    const earGeo = new THREE.ConeGeometry(0.1, 0.29, 5);
+    const earMat = new THREE.MeshStandardMaterial({ color: 0x991b1b, roughness: 0.7, flatShading: true });
+    const snoutGeo = new THREE.ConeGeometry(0.12, 0.22, 5);
+    const eyeGeo = new THREE.BoxGeometry(0.065, 0.065, 0.05);
+
+    const haloGeo = new THREE.RingGeometry(0.76, 0.94, 18);
+    const shieldGeo = new THREE.TorusGeometry(0.68, 0.042, 6, 16);
     const shieldMat = new THREE.MeshBasicMaterial({ color: 0x10b981 });
     const heartGeo = new THREE.OctahedronGeometry(0.16, 0);
     const heartMat = new THREE.MeshBasicMaterial({ color: 0xf43f5e });
 
-    const postGeo = new THREE.BoxGeometry(0.08, 1.48, 0.08);
-    const lanternGeo = new THREE.SphereGeometry(0.14, 12, 12);
-    const lanternCapGeo = new THREE.ConeGeometry(0.18, 0.12, 8);
-    const tombGeo = new THREE.BoxGeometry(0.48, 0.78, 0.16);
+    const postGeo = new THREE.CylinderGeometry(0.05, 0.07, 1.48, 5);
+    const lanternGeo = new THREE.OctahedronGeometry(0.15, 0);
+    const lanternCapGeo = new THREE.ConeGeometry(0.19, 0.13, 6);
+    const tombGeo = new THREE.BoxGeometry(0.5, 0.78, 0.18);
     const tombCrossVGeo = new THREE.BoxGeometry(0.08, 0.34, 0.06);
     const tombCrossHGeo = new THREE.BoxGeometry(0.24, 0.08, 0.06);
-    const tombMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.82 });
+    const tombMat = new THREE.MeshStandardMaterial({ color: 0x78716c, roughness: 0.88, flatShading: true });
 
-    // Spectral Ghost Soul Geometries & Materials
-    const ghostShroudGeo = new THREE.ConeGeometry(0.38, 1.05, 14);
-    const ghostHeadGeo = new THREE.SphereGeometry(0.24, 14, 14);
+    // Spectral Ghost Soul Geometries & Materials (Low-Poly Faceted)
+    const ghostShroudGeo = new THREE.ConeGeometry(0.38, 1.05, 7);
+    const ghostHeadGeo = new THREE.IcosahedronGeometry(0.24, 1);
     const ghostWispGeo = new THREE.OctahedronGeometry(0.09, 0);
     const ghostMat = new THREE.MeshBasicMaterial({
-      color: 0x38bdf8,
+      color: 0x7dd3fc,
       transparent: true,
-      opacity: 0.62,
+      opacity: 0.65,
     });
-    const ghostEyeMat = new THREE.MeshBasicMaterial({ color: 0xe0f2fe });
+    const ghostEyeMat = new THREE.MeshBasicMaterial({ color: 0xf0f9ff });
 
     // Shared Materials & Geometries for Detailed Composite 3D Thrown Props & Splats
     const tomatoSkinMat = new THREE.MeshStandardMaterial({
@@ -1318,19 +1476,20 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
       const shadowDisc = new THREE.Mesh(shadowDiscGeo, shadowDiscMat);
       shadowDisc.rotation.x = -Math.PI / 2;
-      shadowDisc.position.y = 0.015;
+      shadowDisc.position.y = 0.02;
       group.add(shadowDisc);
 
-      const pedestal = new THREE.Mesh(pedestalGeo, pedestalMat);
-      pedestal.position.y = 0.14;
-      pedestal.receiveShadow = true;
-      const pedestalRim = new THREE.Mesh(pedestalRimGeo, buckleMat);
-      pedestalRim.rotation.x = Math.PI / 2;
-      pedestalRim.position.y = 0.27;
-      group.add(pedestal, pedestalRim);
+      // Wooden Campfire Log Stump Seat (Agrou style!)
+      const stumpBark = new THREE.Mesh(stumpBarkGeo, logMat);
+      stumpBark.position.y = 0.17;
+      stumpBark.receiveShadow = true;
+      const stumpTop = new THREE.Mesh(stumpTopGeo, paleWoodMat);
+      stumpTop.position.y = 0.34;
+      stumpTop.receiveShadow = true;
+      group.add(stumpBark, stumpTop);
 
       const haloMat = new THREE.MeshBasicMaterial({
-        color: 0x38bdf8,
+        color: 0xf59e0b,
         transparent: true,
         opacity: 0.35,
         side: THREE.DoubleSide,
@@ -1338,22 +1497,22 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       });
       const halo = new THREE.Mesh(haloGeo, haloMat);
       halo.rotation.x = -Math.PI / 2;
-      halo.position.y = 0.03;
+      halo.position.y = 0.04;
       group.add(halo);
 
       const shieldRing = new THREE.Mesh(shieldGeo, shieldMat);
       shieldRing.rotation.x = Math.PI / 2;
-      shieldRing.position.y = 0.78;
+      shieldRing.position.y = 0.82;
       shieldRing.visible = false;
       group.add(shieldRing);
 
       const loverHeart = new THREE.Mesh(heartGeo, heartMat);
-      loverHeart.position.set(0.45, 1.85, 0);
+      loverHeart.position.set(0.45, 1.88, 0);
       loverHeart.visible = false;
       group.add(loverHeart);
 
       const bodyGroup = new THREE.Group();
-      bodyGroup.position.y = 0.28;
+      bodyGroup.position.y = 0.34;
 
       const leftBoot = new THREE.Mesh(bootGeo, bootMat);
       leftBoot.position.set(-0.14, 0.07, 0.04);
@@ -1361,10 +1520,12 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       rightBoot.position.set(0.14, 0.07, 0.04);
       bodyGroup.add(leftBoot, rightBoot);
 
+      const defaultCosm = getBotCosmetics(i);
       const cloakMat = new THREE.MeshStandardMaterial({
-        color: SEAT_COLORS[i % SEAT_COLORS.length],
-        roughness: 0.62,
-        metalness: 0.18,
+        color: defaultCosm.cloakColor,
+        roughness: 0.72,
+        metalness: 0.08,
+        flatShading: true,
       });
       const torso = new THREE.Mesh(torsoGeo, cloakMat);
       torso.position.y = 0.52;
@@ -1374,15 +1535,15 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       const belt = new THREE.Mesh(beltGeo, bootMat);
       belt.position.y = 0.42;
       const buckle = new THREE.Mesh(beltBuckleGeo, buckleMat);
-      buckle.position.set(0, 0.42, 0.34);
+      buckle.position.set(0, 0.42, 0.35);
       bodyGroup.add(belt, buckle);
 
-      const cape = new THREE.Mesh(capeGeo, hatMat);
+      const cape = new THREE.Mesh(capeGeo, hatDarkMat);
       cape.position.y = 0.84;
       bodyGroup.add(cape);
 
       const leftArm = new THREE.Group();
-      leftArm.position.set(-0.36, 0.82, 0);
+      leftArm.position.set(-0.37, 0.82, 0);
       const lArmMesh = new THREE.Mesh(armGeo, cloakMat);
       lArmMesh.position.y = -0.18;
       const lHandMesh = new THREE.Mesh(handGeo, headMat);
@@ -1391,7 +1552,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       leftArm.rotation.z = 0.18;
 
       const rightArm = new THREE.Group();
-      rightArm.position.set(0.36, 0.82, 0);
+      rightArm.position.set(0.37, 0.82, 0);
       const rArmMesh = new THREE.Mesh(armGeo, cloakMat);
       rArmMesh.position.y = -0.18;
       const rHandMesh = new THREE.Mesh(handGeo, headMat);
@@ -1409,13 +1570,113 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       nose.position.set(0, 1.16, 0.27);
       bodyGroup.add(head, nose);
 
-      const hatBrim = new THREE.Mesh(hatBrimGeo, hatMat);
-      hatBrim.position.y = 1.36;
-      const hatBand = new THREE.Mesh(hatBandGeo, buckleMat);
-      hatBand.position.y = 1.4;
-      const hatCone = new THREE.Mesh(hatConeGeo, hatMat);
-      hatCone.position.y = 1.62;
-      bodyGroup.add(hatBrim, hatBand, hatCone);
+      // Build 7 Low-Poly Agrou Customizable Hats
+      const hatAnchor = new THREE.Group();
+      hatAnchor.position.y = 1.38;
+      bodyGroup.add(hatAnchor);
+
+      const hNone = new THREE.Group();
+      const hairCap = new THREE.Mesh(new THREE.DodecahedronGeometry(0.25, 0), hairMat);
+      hairCap.scale.set(1.06, 0.65, 1.06);
+      hairCap.position.set(0, -0.02, -0.02);
+      hNone.add(hairCap);
+
+      const hWitch = new THREE.Group();
+      const wBrim = new THREE.Mesh(new THREE.CylinderGeometry(0.46, 0.48, 0.05, 8), hatDarkMat);
+      const wBand = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.3, 0.08, 7), buckleMat);
+      wBand.position.y = 0.05;
+      const wCone = new THREE.Mesh(new THREE.ConeGeometry(0.29, 0.56, 7), hatDarkMat);
+      wCone.position.set(0, 0.32, -0.03);
+      wCone.rotation.x = -0.14;
+      hWitch.add(wBrim, wBand, wCone);
+
+      const hKnight = new THREE.Group();
+      const kDome = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.3, 0.32, 7), knightSteelMat);
+      kDome.position.y = -0.03;
+      const kVisor = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.09, 0.14), ironMat);
+      kVisor.position.set(0, -0.08, 0.24);
+      const kPlume = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.22, 0.36), plumeRedMat);
+      kPlume.position.set(0, 0.2, -0.02);
+      hKnight.add(kDome, kVisor, kPlume);
+
+      const hStraw = new THREE.Group();
+      const sBrim = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.55, 0.05, 9), strawMat);
+      const sCrown = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.3, 0.24, 8), strawMat);
+      sCrown.position.y = 0.13;
+      const sRibbon = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.3, 0.06, 8), plumeRedMat);
+      sRibbon.position.y = 0.05;
+      hStraw.add(sBrim, sCrown, sRibbon);
+
+      const hAntlers = new THREE.Group();
+      const aBand = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.27, 0.07, 7), hairMat);
+      const aL1 = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, 0.42, 5), antlerMat);
+      aL1.position.set(-0.22, 0.18, 0);
+      aL1.rotation.z = 0.48;
+      const aL2 = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.03, 0.22, 5), antlerMat);
+      aL2.position.set(-0.34, 0.32, 0.04);
+      aL2.rotation.z = -0.35;
+      const aR1 = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, 0.42, 5), antlerMat);
+      aR1.position.set(0.22, 0.18, 0);
+      aR1.rotation.z = -0.48;
+      const aR2 = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.03, 0.22, 5), antlerMat);
+      aR2.position.set(0.34, 0.32, 0.04);
+      aR2.rotation.z = 0.35;
+      hAntlers.add(aBand, aL1, aL2, aR1, aR2);
+
+      const hPirate = new THREE.Group();
+      const pBase = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.38, 0.16, 3), hatDarkMat);
+      pBase.position.y = 0.08;
+      const pTrim = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.05, 0.08), buckleMat);
+      pTrim.position.set(0, 0.12, 0.26);
+      const pBadge = new THREE.Mesh(new THREE.OctahedronGeometry(0.07, 0), paleWoodMat);
+      pBadge.position.set(0, 0.14, 0.3);
+      hPirate.add(pBase, pTrim, pBadge);
+
+      const hCrown = new THREE.Group();
+      const cRing = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.25, 0.18, 6), buckleMat);
+      cRing.position.y = 0.08;
+      const cGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.065, 0), rubyMat);
+      cGem.position.set(0, 0.12, 0.27);
+      for (let sp = 0; sp < 5; sp++) {
+        const sa = (sp / 5) * Math.PI * 2;
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.055, 0.16, 4), buckleMat);
+        spike.position.set(Math.cos(sa) * 0.24, 0.23, Math.sin(sa) * 0.24);
+        hCrown.add(spike);
+      }
+      hCrown.add(cRing, cGem);
+
+      const hatVariants: Record<AgrouHatId, THREE.Group> = {
+        none: hNone,
+        witch: hWitch,
+        knight: hKnight,
+        straw: hStraw,
+        antlers: hAntlers,
+        pirate: hPirate,
+        crown: hCrown,
+      };
+      (Object.keys(hatVariants) as AgrouHatId[]).forEach((k) => {
+        hatVariants[k].visible = k === defaultCosm.hat;
+        hatAnchor.add(hatVariants[k]);
+      });
+
+      // Floating Golden Mayor Crown (hovers neatly above the living Village Mayor!)
+      const mayorCrownGroup = new THREE.Group();
+      mayorCrownGroup.position.set(0, 1.94, 0);
+      mayorCrownGroup.scale.setScalar(0.76);
+      const mcBand = new THREE.Mesh(new THREE.TorusGeometry(0.26, 0.045, 5, 6), buckleMat);
+      mcBand.rotation.x = Math.PI / 2;
+      mayorCrownGroup.add(mcBand);
+      for (let sp = 0; sp < 4; sp++) {
+        const sa = (sp / 4) * Math.PI * 2;
+        const spike = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.18, 4), buckleMat);
+        spike.position.set(Math.cos(sa) * 0.24, 0.1, Math.sin(sa) * 0.24);
+        mayorCrownGroup.add(spike);
+      }
+      const mcGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.08, 0), rubyMat);
+      mcGem.position.y = 0.08;
+      mayorCrownGroup.add(mcGem);
+      mayorCrownGroup.visible = false;
+      bodyGroup.add(mayorCrownGroup);
 
       const wolfEarsGroup = new THREE.Group();
       const leftEar = new THREE.Mesh(earGeo, earMat);
@@ -1434,14 +1695,14 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       const eyeLeftMat = new THREE.MeshBasicMaterial({ color: 0x1e293b });
       const eyeRightMat = new THREE.MeshBasicMaterial({ color: 0x1e293b });
       const eyeL = new THREE.Mesh(eyeGeo, eyeLeftMat);
-      eyeL.position.set(-0.09, 1.2, 0.23);
+      eyeL.position.set(-0.09, 1.2, 0.24);
       const eyeR = new THREE.Mesh(eyeGeo, eyeRightMat);
-      eyeR.position.set(0.09, 1.2, 0.23);
+      eyeR.position.set(0.09, 1.2, 0.24);
       bodyGroup.add(eyeL, eyeR);
 
-      // 3D Anger Reaction Aura (Red Cross-Vein & Fiery Rage Puffs when hit by Egg/Tomato/Water)
+      // 3D Anger Reaction Aura
       const angerAuraGroup = new THREE.Group();
-      angerAuraGroup.position.set(0, 1.88, 0);
+      angerAuraGroup.position.set(0, 1.92, 0);
       const angerBarGeo = new THREE.BoxGeometry(0.32, 0.075, 0.075);
       const angerMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
       const angerCross1 = new THREE.Mesh(angerBarGeo, angerMat);
@@ -1451,7 +1712,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       angerCross2.rotation.z = -Math.PI / 4;
       angerCross2.position.set(0.28, 0.12, 0.16);
       const rageRing = new THREE.Mesh(
-        new THREE.TorusGeometry(0.46, 0.035, 8, 20),
+        new THREE.TorusGeometry(0.46, 0.035, 6, 14),
         angerMat
       );
       rageRing.rotation.x = Math.PI / 2;
@@ -1460,9 +1721,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       angerAuraGroup.visible = false;
       bodyGroup.add(angerAuraGroup);
 
-      // 3D Happy Dance Aura (Floating Pink Hearts & Golden Stars when gifted a Rose)
+      // 3D Happy Dance Aura
       const happyAuraGroup = new THREE.Group();
-      happyAuraGroup.position.set(0, 1.78, 0);
+      happyAuraGroup.position.set(0, 1.82, 0);
       for (let h = 0; h < 4; h++) {
         const ha = (h / 4) * Math.PI * 2;
         const hMesh = new THREE.Mesh(
@@ -1479,17 +1740,18 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       group.add(bodyGroup);
 
       const post = new THREE.Mesh(postGeo, logMat);
-      post.position.set(-0.54, 0.74, 0.25);
+      post.position.set(-0.56, 0.74, 0.25);
       const lanternMat = new THREE.MeshStandardMaterial({
         color: 0xfef08a,
         emissive: 0xf59e0b,
         emissiveIntensity: 1.5,
-        roughness: 0.2,
+        roughness: 0.25,
+        flatShading: true,
       });
       const lantern = new THREE.Mesh(lanternGeo, lanternMat);
-      lantern.position.set(-0.54, 1.48, 0.25);
-      const lanternCap = new THREE.Mesh(lanternCapGeo, hatMat);
-      lanternCap.position.set(-0.54, 1.62, 0.25);
+      lantern.position.set(-0.56, 1.48, 0.25);
+      const lanternCap = new THREE.Mesh(lanternCapGeo, hatDarkMat);
+      lanternCap.position.set(-0.56, 1.62, 0.25);
       group.add(post, lantern, lanternCap);
 
       const tombstoneGroup = new THREE.Group();
@@ -1510,9 +1772,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       const ghostHead = new THREE.Mesh(ghostHeadGeo, ghostMat);
       ghostHead.position.y = 1.15;
       const gEyeL = new THREE.Mesh(eyeGeo, ghostEyeMat);
-      gEyeL.position.set(-0.08, 1.18, 0.2);
+      gEyeL.position.set(-0.08, 1.18, 0.21);
       const gEyeR = new THREE.Mesh(eyeGeo, ghostEyeMat);
-      gEyeR.position.set(0.08, 1.18, 0.2);
+      gEyeR.position.set(0.08, 1.18, 0.21);
       const wisp1 = new THREE.Mesh(ghostWispGeo, ghostEyeMat);
       wisp1.position.set(0.45, 0.9, 0);
       const wisp2 = new THREE.Mesh(ghostWispGeo, ghostEyeMat);
@@ -1547,11 +1809,15 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         wolfEarsGroup,
         angerAuraGroup,
         happyAuraGroup,
+        mayorCrownGroup,
+        hatVariants,
         koProgress: 0,
         wobbleTimer: 0,
         throwAnimTimer: 0,
         reactionType: 'none',
         reactionTimer: 0,
+        emoteType: null,
+        emoteTimer: 0,
         baseAngle: 0,
         homePos: new THREE.Vector3(),
         currentPos: new THREE.Vector3(),
@@ -1565,7 +1831,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       renderer.compile(scene, camera);
     }
 
-    // 11. Pointer, 360° Orbit Drag & Raycasting Handlers
+    // 11. Pointer, 360° Orbit Drag & Raycasting Handlers (Includes Campfire Abstain Click!)
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -1576,21 +1842,30 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     let isPointerDown = false;
     let dragDistance = 0;
 
-    const getIntersectedPlayerId = (clientX: number, clientY: number): string | null => {
+    const getRayHitTarget = (
+      clientX: number,
+      clientY: number
+    ): { playerId: string | null; isCampfire: boolean } => {
       const rect = renderer.domElement.getBoundingClientRect();
-      if (rect.width === 0 || rect.height === 0) return null;
+      if (rect.width === 0 || rect.height === 0) return { playerId: null, isCampfire: false };
       pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
       const hits = raycaster.intersectObjects(clickables, false);
-      if (hits.length > 0) {
-        const seatIdx = hits[0].object.userData.seatIndex;
+      for (const hit of hits) {
+        if (hit.object.userData.isCampfire) {
+          if (stateRef.current.phase === 'day_voting' && !stateRef.current.isTitleScreen) {
+            return { playerId: null, isCampfire: true };
+          }
+          continue;
+        }
+        const seatIdx = hit.object.userData.seatIndex;
         const seat = seats[seatIdx];
         if (seat && seat.group.visible && seat.playerId) {
-          return seat.playerId;
+          return { playerId: seat.playerId, isCampfire: false };
         }
       }
-      return null;
+      return { playerId: null, isCampfire: false };
     };
 
     const onPointerDown = (e: PointerEvent) => {
@@ -1639,10 +1914,11 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       const now = performance.now();
       if (now - lastHoverTime < 45) return;
       lastHoverTime = now;
-      const pid = getIntersectedPlayerId(e.clientX, e.clientY);
-      st.hoveredPlayerId = pid;
+      const hit = getRayHitTarget(e.clientX, e.clientY);
+      st.hoveredPlayerId = hit.playerId;
+      st.hoveredCampfire = hit.isCampfire;
       renderer.domElement.style.cursor =
-        pid || (isFpv && st.aimedPlayerId)
+        hit.playerId || hit.isCampfire || (isFpv && st.aimedPlayerId)
           ? 'pointer'
           : isPointerDown
           ? 'grabbing'
@@ -1658,7 +1934,12 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
       const st = stateRef.current;
       const isFpv = st.cameraPreset === 'first_person';
-      const pid = getIntersectedPlayerId(e.clientX, e.clientY) || (isFpv ? st.aimedPlayerId : null);
+      const hit = getRayHitTarget(e.clientX, e.clientY);
+      if (hit.isCampfire && st.phase === 'day_voting') {
+        st.onVoteCampfireAbstain?.();
+        return;
+      }
+      const pid = hit.playerId || (isFpv ? st.aimedPlayerId : null);
       if (pid) {
         st.onSelectPlayer(pid);
       } else {
@@ -1783,47 +2064,99 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         Boolean(me?.isAlive) &&
         !st.isPlayerAwakeAtNight;
 
-      // Day vs Night vs Blindfold Atmosphere Interpolation
-      const isDay = st.phase === 'day_discussion' || st.phase === 'day_voting';
-      const targetBg = isDay ? bgDay : isNightBlindfolded ? bgBlindNight : bgNight;
-      (scene.background as THREE.Color).lerp(targetBg, 1 - Math.exp(-3.8 * dt));
+      // Biome-Aware Day vs Night vs Blindfold Atmosphere Interpolation (Agrou Stylized Biomes)
+      const activeBiomeKey = st.mapBiome || 'forest';
+      const biome = AGROU_BIOMES[activeBiomeKey];
+      const isDay =
+        st.isTitleScreen || st.phase === 'day_discussion' || st.phase === 'day_voting';
+      const targetBgHex = isDay
+        ? biome.daySky
+        : isNightBlindfolded
+        ? biome.blindNightSky
+        : biome.nightSky;
+      const bgLerp = isSoftwareGl ? 0.65 : 1 - Math.exp(-5.5 * dt);
+      _scratchColor.setHex(targetBgHex);
+      (scene.background as THREE.Color).lerp(_scratchColor, bgLerp);
       if (scene.fog instanceof THREE.FogExp2) {
         scene.fog.color.copy(scene.background as THREE.Color);
         scene.fog.density = THREE.MathUtils.damp(
           scene.fog.density,
-          isNightBlindfolded ? 0.075 : isDay ? 0.0085 : 0.017,
-          4,
+          isNightBlindfolded ? 0.075 : isDay ? 0.0075 : 0.0175,
+          6,
           dt
         );
       }
 
-      hemiLight.color.setHex(isDay ? 0xdbeafe : 0x4765a0);
-      hemiLight.groundColor.setHex(isDay ? 0x6b7f4e : 0x111522);
-      hemiLight.intensity = THREE.MathUtils.damp(
-        hemiLight.intensity,
-        isDay ? 1.55 : isNightBlindfolded ? 0.15 : 0.96,
-        3.5,
-        dt
-      );
-      dirLight.intensity = THREE.MathUtils.damp(
-        dirLight.intensity,
-        isDay ? 2.6 : isNightBlindfolded ? 0.12 : 1.25,
-        3.5,
-        dt
-      );
-      dirLight.color.setHex(isDay ? 0xfff5d6 : 0x93c5fd);
-      moonMat.color.setHex(isDay ? 0xfef08a : 0xfda4af);
+      // Smoothly (and crisply on low-FPS software WebGL) tint Biome Materials
+      const colorDamp = isSoftwareGl ? 0.85 : 1 - Math.exp(-9 * dt);
+      _scratchColor.setHex(isDay ? biome.groundDay : biome.groundNight);
+      groundMat.color.lerp(_scratchColor, colorDamp);
+      _scratchColor.setHex(isDay ? biome.clearingDirt : 0x523925);
+      clearingDirtMat.color.lerp(_scratchColor, colorDamp);
+      _scratchColor.setHex(biome.foliagePrimary);
+      foliageMatLower.color.lerp(_scratchColor, colorDamp);
+      _scratchColor.setHex(biome.foliageSecondary);
+      foliageMatUpper.color.lerp(_scratchColor, colorDamp);
+      _scratchColor.setHex(biome.rockColor);
+      rockMat.color.lerp(_scratchColor, colorDamp);
+      _scratchColor.setHex(biome.mountainColor);
+      mountainMat.color.lerp(_scratchColor, colorDamp);
+      _scratchColor.setHex(biome.mountainSnowCap);
+      snowCapMat.color.lerp(_scratchColor, colorDamp);
+      _scratchColor.setHex(biome.roofColor);
+      roofMat.color.lerp(_scratchColor, colorDamp);
+      _scratchColor.setHex(biome.wallColor);
+      wallMat.color.lerp(_scratchColor, colorDamp);
+      _scratchColor.setHex(biome.ambientParticleColor);
+      particleMat.color.lerp(_scratchColor, colorDamp);
+      pumpkinGroup.visible = activeBiomeKey === 'autumn';
+
+      hemiLight.color.setHex(isDay ? biome.dayHemiSky : biome.nightHemiSky);
+      hemiLight.groundColor.setHex(isDay ? biome.dayHemiGround : biome.nightHemiGround);
+      const targetHemi = isDay ? 1.55 : isNightBlindfolded ? 0.14 : 0.46;
+      const targetDir = isDay ? 2.45 : isNightBlindfolded ? 0.12 : 0.62;
+      hemiLight.intensity = isSoftwareGl
+        ? targetHemi
+        : THREE.MathUtils.damp(hemiLight.intensity, targetHemi, 5.5, dt);
+      dirLight.intensity = isSoftwareGl
+        ? targetDir
+        : THREE.MathUtils.damp(dirLight.intensity, targetDir, 5.5, dt);
+      dirLight.color.setHex(isDay ? biome.daySunColor : biome.nightMoonLight);
+      moonMat.color.setHex(isDay ? 0xfff3b0 : 0xfda4af);
       moonHaloMat.color.setHex(isDay ? 0xfbbf24 : 0xf43f5e);
       starInst.visible = !isDay;
-      starMat.opacity = isDay ? 0 : 0.72 + Math.sin(elapsedTotal * 3) * 0.18;
-      // Switch cottage windows & streetlamps from glowing night amber to reflective daylight glass
+      starMat.opacity = isDay ? 0 : 0.78 + Math.sin(elapsedTotal * 3) * 0.18;
+      cloudGroup.visible = isDay;
+      if (isDay) {
+        for (const cl of cloudClusters) {
+          const a = cl.baseAngle + elapsedTotal * cl.speed;
+          cl.mesh.position.set(
+            Math.cos(a) * cl.radius,
+            cl.height + Math.sin(elapsedTotal * 0.6 + cl.baseAngle) * 0.35,
+            Math.sin(a) * cl.radius
+          );
+          cl.mesh.lookAt(0, cl.height, 0);
+        }
+      }
       winMat.color.setHex(isDay ? 0x93c5fd : 0xfbbf24);
-      lampGlowMat.color.setHex(isDay ? 0xcbd5e1 : 0xfde047);
+      lampGlowMat.color.setHex(isDay ? 0xfffbeb : 0xfde047);
 
-      // Rotate Windmill Sails & Flicker Campfire (subtle daytime embers vs blazing night fire)
+      // Campfire Voting Abstention Ring Pulse
+      const isVotingPhase = st.phase === 'day_voting' && !st.isTitleScreen;
+      const isAbstaining = st.selectedTargetId === CAMPFIRE_ABSTAIN_ID;
+      campfireVoteRingMat.color.setHex(
+        isAbstaining ? 0x22c55e : st.hoveredCampfire ? 0xfef08a : 0xf59e0b
+      );
+      campfireVoteRingMat.opacity = isVotingPhase
+        ? isAbstaining || st.hoveredCampfire
+          ? 0.92
+          : 0.42 + Math.sin(elapsedTotal * 4.5) * 0.18
+        : 0.18;
+
+      // Rotate Windmill Sails & Flicker Campfire
       windmillBlades.rotation.z += simDt * 0.55;
       const flicker = Math.sin(elapsedTotal * 11) * 0.12 + Math.cos(elapsedTotal * 17) * 0.08;
-      const fireScale = isDay ? 0.42 : 1.0;
+      const fireScale = isDay && !st.isTitleScreen ? 0.62 : 1.02;
       flameOuter.scale.set(
         fireScale * (1 + flicker * 0.4),
         fireScale * (1 + flicker),
@@ -1840,27 +2173,57 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         fireScale * (1 + flicker * 0.35)
       );
       fireLight.intensity =
-        (isDay ? 0.85 : isNightBlindfolded ? 0.9 : 5.2) + flicker * (isDay ? 0.6 : 3.5);
+        (isDay && !st.isTitleScreen ? 2.0 : isNightBlindfolded ? 1.1 : 7.4) +
+        flicker * (isDay && !st.isTitleScreen ? 0.8 : 3.6);
       runeOrb.rotation.y += simDt * 1.4;
-      runeOrb.position.y = 5.85 + Math.sin(elapsedTotal * 2.5) * 0.15;
+      runeOrb.position.y = 3.82 + Math.sin(elapsedTotal * 2.5) * 0.12;
 
-      // Update Pooled Ember Particles
+      // Biome-Specific Ambient Particles (Snow falls in frostpeak, leaves drift in autumn, embers rise in forest!)
+      const isSnow = st.mapBiome === 'frostpeak';
+      const isAutumn = st.mapBiome === 'autumn';
       for (let i = 0; i < PARTICLE_COUNT; i++) {
         const p = particleData[i];
-        p.y += p.vy * simDt;
-        if (p.y > 4.8) {
-          p.y = 0.3;
-          p.x = (Math.random() - 0.5) * 1.2;
-          p.z = (Math.random() - 0.5) * 1.2;
+        if (isSnow || isAutumn) {
+          p.y -= (isSnow ? 1.15 : 0.85) * p.vy * simDt;
+          if (p.y < 0.15) {
+            p.y = 8.5 + (i % 4) * 1.2;
+            p.x = (Math.random() - 0.5) * 18;
+            p.z = (Math.random() - 0.5) * 18;
+          }
+          const swayX = Math.sin(elapsedTotal * 1.8 + p.phase) * (isAutumn ? 0.75 : 0.38);
+          const swayZ = Math.cos(elapsedTotal * 1.4 + p.phase) * (isAutumn ? 0.65 : 0.35);
+          _dummyObj.position.set(p.x + swayX, p.y, p.z + swayZ);
+          _dummyObj.rotation.set(elapsedTotal + p.phase, elapsedTotal * 1.4, p.phase);
+          _dummyObj.scale.set(isAutumn ? 1.6 : 1.0, isAutumn ? 0.35 : 1.0, isAutumn ? 1.2 : 1.0);
+        } else {
+          p.y += p.vy * simDt;
+          if (p.y > 4.8) {
+            p.y = 0.3;
+            p.x = (Math.random() - 0.5) * 1.4;
+            p.z = (Math.random() - 0.5) * 1.4;
+          }
+          const sway = Math.sin(elapsedTotal * 2.5 + p.phase) * 0.22;
+          const s = Math.max(0.15, 1 - p.y / 4.8);
+          _dummyObj.position.set(p.x + sway, p.y, p.z + sway);
+          _dummyObj.rotation.set(0, 0, 0);
+          _dummyObj.scale.set(s, s, s);
         }
-        const sway = Math.sin(elapsedTotal * 2.5 + p.phase) * 0.18;
-        const s = Math.max(0.1, 1 - p.y / 4.8);
-        _dummyObj.position.set(p.x + sway, p.y, p.z + sway);
-        _dummyObj.scale.set(s, s, s);
         _dummyObj.updateMatrix();
         particleInst.setMatrixAt(i, _dummyObj.matrix);
       }
       particleInst.instanceMatrix.needsUpdate = true;
+
+      // Trigger New 3D Agrou Campfire Emotes
+      for (const emEv of st.emoteEvents) {
+        if (!processedEmotesRef.current.has(emEv.id)) {
+          processedEmotesRef.current.add(emEv.id);
+          const seatIdx = activePlayers.findIndex((p) => p.id === emEv.playerId);
+          if (seatIdx !== -1 && seats[seatIdx]) {
+            seats[seatIdx].emoteType = emEv.emote;
+            seats[seatIdx].emoteTimer = 3.6;
+          }
+        }
+      }
 
       // Spawn New Detailed Composite 3D Thrown Prop Projectiles
       for (const propEv of st.thrownProps) {
@@ -2108,10 +2471,25 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         // Hide own 3rd-person body mesh in First-Person View so camera is unobstructed
         seat.bodyGroup.visible = !(isMe && isFirstPerson);
 
+        // Sync Custom Agrou Hat, Cloak Color & Floating Golden Mayor Crown
+        const fallbackCosm = getBotCosmetics(i);
+        const activeHat: AgrouHatId = p.hat ?? fallbackCosm.hat;
+        (Object.keys(seat.hatVariants) as AgrouHatId[]).forEach((hk) => {
+          seat.hatVariants[hk].visible = hk === activeHat;
+        });
+        seat.cloakMat.color.setHex(p.cloakColor ?? fallbackCosm.cloakColor);
+
+        const isMayor = Boolean(st.mayorId && p.id === st.mayorId && p.isAlive);
+        seat.mayorCrownGroup.visible = isMayor;
+        if (isMayor) {
+          seat.mayorCrownGroup.rotation.y += simDt * 1.9;
+          seat.mayorCrownGroup.position.y = 1.94 + Math.sin(elapsedTotal * 3.5) * 0.04;
+        }
+
         const targetKo = p.isAlive ? 0 : 1;
         seat.koProgress = THREE.MathUtils.damp(seat.koProgress, targetKo, 6, dt);
         seat.bodyGroup.rotation.x = -seat.koProgress * 1.25;
-        seat.bodyGroup.position.y = 0.28 - seat.koProgress * 0.15;
+        seat.bodyGroup.position.y = 0.34 - seat.koProgress * 0.15;
         seat.tombstoneGroup.visible = !p.isAlive && !(isMe && isFirstPerson);
         seat.lanternMat.emissiveIntensity = p.isAlive ? (isNightBlindfolded ? 0.15 : 1.5) : 0.05;
 
@@ -2121,30 +2499,51 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.reactionTimer = 0;
         }
 
+        if (seat.emoteTimer > 0 && p.isAlive) {
+          seat.emoteTimer = Math.max(0, seat.emoteTimer - simDt);
+          if (seat.emoteTimer === 0) seat.emoteType = null;
+        } else if (!p.isAlive) {
+          seat.emoteTimer = 0;
+          seat.emoteType = null;
+        }
+
         const isAngryReacting = seat.reactionTimer > 0 && seat.reactionType === 'angry' && p.isAlive;
         const isHappyDancing =
           seat.reactionTimer > 0 && seat.reactionType === 'happy_dance' && p.isAlive;
+        const activeEmote = seat.emoteTimer > 0 && p.isAlive ? seat.emoteType : null;
 
         seat.angerAuraGroup.visible = isAngryReacting;
         seat.happyAuraGroup.visible = isHappyDancing;
 
         if (isAngryReacting) {
-          // Angry stomp & furious head/torso shake + waving arms in rage
           const stomp = Math.abs(Math.sin(elapsedTotal * 22)) * 0.24;
-          seat.bodyGroup.position.y = 0.28 + stomp;
+          seat.bodyGroup.position.y = 0.34 + stomp;
           seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 32) * 0.28;
           seat.bodyGroup.rotation.y = Math.sin(elapsedTotal * 20) * 0.45;
           seat.angerAuraGroup.rotation.y += simDt * 4.5;
           const pulseScale = 1 + Math.sin(elapsedTotal * 18) * 0.22;
           seat.angerAuraGroup.scale.setScalar(pulseScale);
         } else if (isHappyDancing) {
-          // Joyful jumping & twirling happy dance
           const danceJump = Math.abs(Math.sin(elapsedTotal * 11)) * 0.36;
-          seat.bodyGroup.position.y = 0.28 + danceJump;
+          seat.bodyGroup.position.y = 0.34 + danceJump;
           seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 11) * 0.22;
           seat.bodyGroup.rotation.y = Math.sin(elapsedTotal * 7.5) * 1.35;
           seat.happyAuraGroup.rotation.y += simDt * 3.6;
-          seat.happyAuraGroup.position.y = 1.78 + Math.sin(elapsedTotal * 10) * 0.12;
+          seat.happyAuraGroup.position.y = 1.82 + Math.sin(elapsedTotal * 10) * 0.12;
+        } else if (activeEmote === 'dance') {
+          seat.bodyGroup.position.y = 0.34 + Math.abs(Math.sin(elapsedTotal * 10)) * 0.28;
+          seat.bodyGroup.rotation.y = Math.sin(elapsedTotal * 6) * 0.95;
+          seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 10) * 0.18;
+        } else if (activeEmote === 'laugh') {
+          seat.bodyGroup.rotation.x = -0.22 + Math.sin(elapsedTotal * 18) * 0.1;
+          seat.bodyGroup.position.y = 0.34 + Math.abs(Math.sin(elapsedTotal * 14)) * 0.12;
+          seat.bodyGroup.rotation.z = 0;
+        } else if (activeEmote === 'panic') {
+          seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 34) * 0.22;
+          seat.bodyGroup.position.y = 0.34 + Math.abs(Math.sin(elapsedTotal * 20)) * 0.16;
+        } else if (activeEmote === 'accuse') {
+          seat.bodyGroup.rotation.x = 0.18;
+          seat.bodyGroup.rotation.z = 0;
         } else if (seat.wobbleTimer > 0) {
           seat.wobbleTimer = Math.max(0, seat.wobbleTimer - simDt);
           seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 38) * seat.wobbleTimer * 0.48;
@@ -2158,16 +2557,37 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         if (seat.throwAnimTimer > 0) {
           seat.throwAnimTimer = Math.max(0, seat.throwAnimTimer - simDt);
           seat.rightArm.rotation.x = -Math.sin(seat.throwAnimTimer * Math.PI * 2.2) * 1.8;
-        } else if (isAngryReacting) {
+        } else if (isAngryReacting || activeEmote === 'panic') {
           seat.leftArm.rotation.x = -2.35 + Math.sin(elapsedTotal * 26) * 0.75;
           seat.rightArm.rotation.x = -2.35 - Math.sin(elapsedTotal * 26) * 0.75;
           seat.leftArm.rotation.z = 0.45;
           seat.rightArm.rotation.z = -0.45;
-        } else if (isHappyDancing) {
-          seat.leftArm.rotation.x = -2.65 + Math.sin(elapsedTotal * 14) * 0.45;
-          seat.rightArm.rotation.x = -2.65 - Math.sin(elapsedTotal * 14) * 0.45;
-          seat.leftArm.rotation.z = 0.55 + Math.sin(elapsedTotal * 14) * 0.25;
-          seat.rightArm.rotation.z = -0.55 - Math.sin(elapsedTotal * 14) * 0.25;
+        } else if (isHappyDancing || activeEmote === 'dance') {
+          seat.leftArm.rotation.x = -2.45 + Math.sin(elapsedTotal * 12) * 0.55;
+          seat.rightArm.rotation.x = -2.45 - Math.sin(elapsedTotal * 12) * 0.55;
+          seat.leftArm.rotation.z = 0.5 + Math.sin(elapsedTotal * 12) * 0.25;
+          seat.rightArm.rotation.z = -0.5 - Math.sin(elapsedTotal * 12) * 0.25;
+        } else if (activeEmote === 'wave') {
+          seat.rightArm.rotation.x = -2.6;
+          seat.rightArm.rotation.z = -0.45 + Math.sin(elapsedTotal * 14) * 0.48;
+          seat.leftArm.rotation.x = 0;
+          seat.leftArm.rotation.z = 0.18;
+        } else if (activeEmote === 'accuse') {
+          seat.rightArm.rotation.x = -1.55;
+          seat.rightArm.rotation.z = -0.05;
+          seat.leftArm.rotation.x = 0.25;
+          seat.leftArm.rotation.z = 0.25;
+        } else if (activeEmote === 'clap') {
+          seat.leftArm.rotation.x = -1.1;
+          seat.rightArm.rotation.x = -1.1;
+          const clapAmt = Math.abs(Math.sin(elapsedTotal * 16)) * 0.42;
+          seat.leftArm.rotation.z = -0.35 + clapAmt;
+          seat.rightArm.rotation.z = 0.35 - clapAmt;
+        } else if (activeEmote === 'laugh') {
+          seat.leftArm.rotation.x = -0.65 + Math.sin(elapsedTotal * 16) * 0.2;
+          seat.rightArm.rotation.x = -0.65 - Math.sin(elapsedTotal * 16) * 0.2;
+          seat.leftArm.rotation.z = 0.35;
+          seat.rightArm.rotation.z = -0.35;
         } else if (isWalking) {
           seat.leftArm.rotation.x = Math.sin(elapsedTotal * 14) * 0.65;
           seat.rightArm.rotation.x = -Math.sin(elapsedTotal * 14) * 0.65;
@@ -2295,21 +2715,79 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           st.hoveredPlayerId === p.id || (isFirstPerson && st.aimedPlayerId === p.id);
 
         if (isSelected) {
-          seat.haloMat.color.setHex(0xf43f5e);
-          seat.haloMat.opacity = 0.92;
+          seat.haloMat.color.setHex(0xe86f24);
+          seat.haloMat.opacity = 0.95;
         } else if (isHovered) {
           seat.haloMat.color.setHex(0xfbbf24);
           seat.haloMat.opacity = 0.88;
+        } else if (isMayor) {
+          seat.haloMat.color.setHex(0xf59e0b);
+          seat.haloMat.opacity = 0.72;
         } else if (isMe) {
           seat.haloMat.color.setHex(0x38bdf8);
           seat.haloMat.opacity = 0.65;
         } else if (!p.isAlive) {
-          seat.haloMat.color.setHex(0x475569);
+          seat.haloMat.color.setHex(0x64748b);
           seat.haloMat.opacity = 0.2;
         } else {
-          seat.haloMat.color.setHex(0x94a3b8);
-          seat.haloMat.opacity = 0.28;
+          seat.haloMat.color.setHex(0xd6bfa2);
+          seat.haloMat.opacity = 0.25;
         }
+      }
+
+      // Render Flowing 3D Vote/Accusation Arcs during Day Voting!
+      if (isVotingPhase && st.votes.length > 0) {
+        voteArcInst.visible = true;
+        let beadCursor = 0;
+        const latestByVoter = new Map<string, string>();
+        for (const v of st.votes) {
+          if (v.voterId && v.targetId) latestByVoter.set(v.voterId, v.targetId);
+        }
+        let arcIdx = 0;
+        for (const [voterId, targetId] of latestByVoter.entries()) {
+          if (arcIdx >= MAX_VOTE_ARCS) break;
+          const vSeatIdx = activePlayers.findIndex((p) => p.id === voterId);
+          if (vSeatIdx === -1 || !seats[vSeatIdx]) continue;
+          const fromPos = seats[vSeatIdx].currentPos;
+          const isAbstainArc = targetId === CAMPFIRE_ABSTAIN_ID;
+          const tSeatIdx = isAbstainArc
+            ? -1
+            : activePlayers.findIndex((p) => p.id === targetId);
+          if (!isAbstainArc && (tSeatIdx === -1 || !seats[tSeatIdx])) continue;
+
+          const toX = isAbstainArc ? 0 : seats[tSeatIdx].currentPos.x;
+          const toZ = isAbstainArc ? 0 : seats[tSeatIdx].currentPos.z;
+          const isMayorVote = Boolean(st.mayorId && voterId === st.mayorId);
+          _scratchColor.setHex(
+            isAbstainArc ? 0xfbbf24 : isMayorVote ? 0xf59e0b : 0xf43f5e
+          );
+
+          for (let b = 0; b < VOTE_BEADS_PER_ARC; b++) {
+            const tFlow = ((b / VOTE_BEADS_PER_ARC) + elapsedTotal * 0.55) % 1;
+            const bx = THREE.MathUtils.lerp(fromPos.x, toX, tFlow);
+            const bz = THREE.MathUtils.lerp(fromPos.z, toZ, tFlow);
+            const by = 1.45 + Math.sin(tFlow * Math.PI) * (isAbstainArc ? 1.45 : 2.35);
+            const bScale = (isMayorVote ? 1.35 : 1.0) * (0.6 + Math.sin(tFlow * Math.PI) * 0.55);
+            _dummyObj.position.set(bx, by, bz);
+            _dummyObj.scale.setScalar(bScale);
+            _dummyObj.rotation.set(elapsedTotal * 3, elapsedTotal * 2, 0);
+            _dummyObj.updateMatrix();
+            voteArcInst.setMatrixAt(beadCursor, _dummyObj.matrix);
+            voteArcInst.setColorAt(beadCursor, _scratchColor);
+            beadCursor++;
+          }
+          arcIdx++;
+        }
+        // Park unused beads at scale 0
+        _dummyObj.scale.setScalar(0);
+        _dummyObj.updateMatrix();
+        for (let rem = beadCursor; rem < MAX_VOTE_ARCS * VOTE_BEADS_PER_ARC; rem++) {
+          voteArcInst.setMatrixAt(rem, _dummyObj.matrix);
+        }
+        voteArcInst.instanceMatrix.needsUpdate = true;
+        if (voteArcInst.instanceColor) voteArcInst.instanceColor.needsUpdate = true;
+      } else {
+        voteArcInst.visible = false;
       }
 
       // Camera Choreography: 360° Third-Person Presets vs First-Person Eye-Level Rig
@@ -2478,6 +2956,24 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             el.style.display = 'none';
           }
         }
+
+        // Project Central Campfire Abstain Hint during Day Voting
+        const cfEl = campfireLabelRef.current;
+        if (cfEl) {
+          if (isVotingPhase) {
+            _projVec.set(0, 2.35, 0).project(camera);
+            if (_projVec.z >= -1 && _projVec.z <= 1) {
+              const sx = (_projVec.x + 1) * 0.5 * cW;
+              const sy = (-_projVec.y + 1) * 0.5 * cH;
+              cfEl.style.display = 'flex';
+              cfEl.style.transform = `translate3d(${Math.round(sx)}px, ${Math.round(sy)}px, 0) translate(-50%, -100%)`;
+            } else {
+              cfEl.style.display = 'none';
+            }
+          } else {
+            cfEl.style.display = 'none';
+          }
+        }
       }
 
       if (isSoftwareGl) afterDraw(tick);
@@ -2503,9 +2999,10 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
   const me = players.find((p) => p.id === userPlayerId);
   const nowRender = Date.now();
   const t = UI_TEXT[lang];
+  const abstainVotesCount = votesMap[CAMPFIRE_ABSTAIN_ID] || 0;
 
   return (
-    <div className="fixed inset-0 z-0 overflow-hidden select-none bg-[#070a14]">
+    <div className="fixed inset-0 z-0 overflow-hidden select-none bg-[#15100c]">
       {/* Isolated WebGL Canvas Container */}
       <div
         ref={mountRef}
@@ -2513,11 +3010,38 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         className="w-full h-full touch-none"
       />
 
-      {/* World-Projected 3D Character Floating Nameplates (Mobile-Streamlined & Multi-Language) */}
+      {/* World-Projected 3D Character Floating Nameplates (Agrou Warm Wood & Parchment Style) */}
       <div
         ref={labelContainerRef}
         className="fixed inset-0 pointer-events-none overflow-hidden z-10"
       >
+        {/* Central Campfire Abstention Vote Indicator (Visible during Day Voting) */}
+        <div
+          ref={campfireLabelRef}
+          style={{ display: 'none', left: 0, top: 0 }}
+          className="absolute flex-col items-center pointer-events-none"
+        >
+          <div
+            className={`px-2.5 py-1 rounded-xl border text-center shadow-lg ${
+              selectedTargetId === CAMPFIRE_ABSTAIN_ID
+                ? 'bg-[#1c3621]/95 border-[#6ee7b7] text-[#ecfdf5]'
+                : 'bg-[#2a1c12]/92 border-[#e89c3e] text-[#fde7c3]'
+            }`}
+          >
+            <div className="text-[10px] font-black whitespace-nowrap flex items-center gap-1">
+              <span>🔥</span>
+              <span>
+                {lang === 'vi' ? 'Lửa Trại · Phiếu Trắng' : 'Campfire · Abstain'}
+              </span>
+              {abstainVotesCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded bg-[#e86f24] text-[#fff8ed] font-mono text-[9px]">
+                  {abstainVotesCount}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
         {Array.from({ length: MAX_SEATS }).map((_, idx) => {
           const p = players[idx];
           if (!p) {
@@ -2533,6 +3057,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           }
 
           const isMe = p.id === userPlayerId;
+          const isMayor = Boolean(mayorId && p.id === mayorId && p.isAlive);
           const isSelected = selectedTargetId === p.id || secondaryTargetId === p.id;
           const voteCount = votesMap[p.id] || 0;
           const isSpeaking = activeSpeakers.includes(p.name) && p.isAlive;
@@ -2549,6 +3074,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           const propStyle = recentProp ? PROP_STYLE_MAP[recentProp.propType] : null;
           const propReaction = recentProp ? PROP_REACTION_META[recentProp.propType] : null;
 
+          const recentEmote = [...emoteEvents]
+            .reverse()
+            .find((ev) => ev.playerId === p.id && nowRender - ev.timestamp < 4200);
+          const emoteMeta = recentEmote
+            ? AGROU_EMOTES.find((e) => e.id === recentEmote.emote)
+            : null;
+
           return (
             <div
               key={p.id}
@@ -2558,26 +3090,36 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
               style={{ display: 'none', left: 0, top: 0 }}
               className="absolute flex flex-col items-center gap-0.5 transition-opacity duration-150"
             >
+              {/* Agrou Campfire Comic Emote Bubble */}
+              {emoteMeta && !propStyle && (
+                <div
+                  data-testid="character-emote-bubble"
+                  className="px-2 py-0.5 rounded-xl bg-[#f5ead4] border border-[#8d6134] text-[#2c1a0e] shadow-lg text-[10px] font-extrabold whitespace-nowrap"
+                >
+                  {emoteMeta.bubble[lang]}
+                </div>
+              )}
+
               {/* Thrown Prop Impact + Character Emotional Reaction Badge */}
               {propStyle && propReaction && (
                 <div
                   data-testid="character-prop-reaction"
                   data-emotion={propReaction.emotion}
-                  className={`px-2 py-0.5 rounded-full border shadow-xl flex items-center justify-center text-center animate-bounce ${
+                  className={`px-2 py-0.5 rounded-xl border shadow-xl flex items-center justify-center text-center animate-bounce ${
                     propReaction.emotion === 'happy_dance'
-                      ? 'bg-pink-950/92 border-pink-400 text-pink-100'
-                      : 'bg-rose-950/92 border-red-400 text-rose-100'
+                      ? 'bg-[#4f1930] border-[#f472b6] text-[#fce7f3]'
+                      : 'bg-[#4f1814] border-[#f87171] text-[#fee2e2]'
                   }`}
                 >
-                  <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-amber-300 whitespace-nowrap">
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-amber-200 whitespace-nowrap">
                     {propStyle.icon} {propReaction.badgeText[lang]}
                   </span>
                 </div>
               )}
 
-              {/* Vote Count + Voters Pill */}
+              {/* Vote Count + Voters Tag */}
               {voteCount > 0 && (
-                <div className="px-1.5 py-0.5 rounded bg-rose-700/95 text-white text-[9px] sm:text-[10px] font-extrabold shadow-lg border border-rose-400 leading-tight text-center max-w-[170px]">
+                <div className="px-1.5 py-0.5 rounded-lg bg-[#b91c1c] text-white text-[9px] sm:text-[10px] font-extrabold shadow-lg border border-[#fca5a5] leading-tight text-center max-w-[175px]">
                   <div className="font-mono leading-none">
                     {voteCount} {t.votesUnit}
                   </div>
@@ -2594,31 +3136,34 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
               {/* Ghost Soul Indicator if dead */}
               {!p.isAlive && (
-                <div className="px-1.5 py-0.5 rounded-full bg-cyan-950/90 border border-cyan-400/60 text-cyan-200 font-bold text-[8px] sm:text-[9px] shadow leading-none">
+                <div className="px-1.5 py-0.5 rounded-lg bg-[#0d2838] border border-[#67e8f9]/60 text-[#cffafe] font-bold text-[8px] sm:text-[9px] shadow leading-none">
                   {t.ghostFloatingBadge}
                 </div>
               )}
 
-              {/* Nameplate Badge */}
+              {/* Warm Carved-Wood Agrou Nameplate */}
               <div
-                className={`px-1.5 py-0.5 sm:px-2 sm:py-0.5 rounded-lg border text-center shadow-lg ${
+                className={`px-2 py-0.5 rounded-lg border text-center shadow-lg ${
                   !p.isAlive
-                    ? 'bg-slate-950/85 border-cyan-800/50 text-cyan-300/80'
+                    ? 'bg-[#1a1614]/88 border-[#67e8f9]/45 text-[#a5f3fc]/80'
                     : isSelected
-                    ? 'bg-rose-950/95 border-rose-400 text-rose-100 scale-105'
+                    ? 'bg-[#5c1d16]/95 border-[#f97316] text-[#fff7ed] scale-105'
+                    : isMayor
+                    ? 'bg-[#362312]/95 border-[#f5b82e] text-[#fef3c7]'
                     : isMe
-                    ? 'bg-sky-950/92 border-sky-400 text-sky-100'
-                    : 'bg-slate-950/85 border-amber-700/50 text-amber-100'
+                    ? 'bg-[#1b2d3c]/95 border-[#60a5fa] text-[#eff6ff]'
+                    : 'bg-[#261a12]/90 border-[#9c7248]/65 text-[#f6ebd8]'
                 }`}
               >
                 <div className="flex items-center gap-0.5 sm:gap-1 text-[9px] sm:text-[11px] font-bold whitespace-nowrap leading-tight">
-                  <span className="text-amber-400">#{idx + 1}</span>
-                  <span className="max-w-[62px] sm:max-w-none truncate">{p.name}</span>
-                  {isMe && <span className="text-sky-400 hidden sm:inline">{t.youSuffix}</span>}
-                  {isSpeaking && <span className="text-emerald-400">🔊</span>}
+                  {isMayor && <span title="Mayor">👑</span>}
+                  <span className="text-[#f5b82e] font-mono">#{idx + 1}</span>
+                  <span className="max-w-[66px] sm:max-w-none truncate">{p.name}</span>
+                  {isMe && <span className="text-[#7dd3fc] hidden sm:inline">{t.youSuffix}</span>}
+                  {isSpeaking && <span className="text-[#4ade80]">🔊</span>}
                 </div>
                 {showRole && (
-                  <div className="text-[8px] sm:text-[9px] font-mono text-amber-300 font-semibold leading-tight">
+                  <div className="text-[8px] sm:text-[9px] font-mono text-[#fcd34d] font-semibold leading-tight">
                     {ROLES[p.roleId].name[lang]}
                   </div>
                 )}

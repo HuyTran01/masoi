@@ -1,7 +1,8 @@
 import React from 'react';
-import { CheckCircle2, FastForward, Megaphone, RotateCcw } from 'lucide-react';
+import { CheckCircle2, FastForward, Flame, Megaphone, RotateCcw } from 'lucide-react';
 import { ChatMessage, Language, Phase, Player, VoteRecord } from '../types/game';
 import { buildVoteTallyEntries } from '../game/rules';
+import { CAMPFIRE_ABSTAIN_ID, tallyVotesWithMayor } from '../game/agrouMechanics';
 import { UI_TEXT } from '../utils/i18n';
 
 interface DayActionBarProps {
@@ -14,11 +15,13 @@ interface DayActionBarProps {
   players: Player[];
   me: Player;
   votes: VoteRecord[];
+  mayorId?: string | null;
   hasVoted: boolean;
   selectedTargetId: string | null;
   timerSeconds: number;
   onStartDayVoting: () => void;
   onResolveDayVoting: () => void;
+  onVoteCampfireAbstain?: () => void;
   onClearVote?: () => void;
   onReopenGMAnnouncement?: () => void;
 }
@@ -33,11 +36,13 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
   players,
   me,
   votes,
+  mayorId = null,
   hasVoted,
   selectedTargetId,
   timerSeconds,
   onStartDayVoting,
   onResolveDayVoting,
+  onVoteCampfireAbstain,
   onClearVote,
   onReopenGMAnnouncement,
 }) => {
@@ -55,25 +60,25 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
     return (
       <div
         data-testid="day-discussion-console"
-        className={`pointer-events-auto w-full max-w-lg bg-[#090e1c]/94 border rounded-2xl px-3 py-2 shadow-xl space-y-1.5 ${
-          hasDeathInSummary ? 'border-rose-500/60' : 'border-amber-500/55'
+        className={`pointer-events-auto w-full max-w-lg agrou-wood-panel rounded-2xl px-3 py-2 space-y-1.5 ${
+          hasDeathInSummary ? '!border-[#dc4c3e]' : '!border-[#e89c3e]'
         }`}
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="px-1.5 py-0.5 rounded bg-amber-500 text-slate-950 font-black text-[10px] uppercase shrink-0">
+            <span className="px-1.5 py-0.5 rounded bg-[#e86f24] text-[#fff8ed] font-black text-[10px] uppercase shrink-0">
               ☀️ {t.dayDiscussTitle(round)}
             </span>
             <span
               data-testid="day-morning-summary-text"
               className={`text-[11px] font-extrabold truncate ${
-                hasDeathInSummary ? 'text-rose-200' : 'text-emerald-200'
+                hasDeathInSummary ? 'text-[#fecaca]' : 'text-[#d1fae5]'
               }`}
             >
               {cleanSummary ||
                 (lang === 'vi'
-                  ? 'Chia sẻ manh mối trước khi bỏ phiếu'
-                  : 'Share clues before voting')}
+                  ? 'Chia sẻ manh mối quanh lửa trại trước khi bỏ phiếu'
+                  : 'Share campfire clues before voting')}
             </span>
           </div>
 
@@ -85,9 +90,9 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                 onClick={onReopenGMAnnouncement}
                 title={lang === 'vi' ? 'Xem lại thông báo buổi sáng của Quản Trò' : 'Reopen GM Morning Briefing'}
                 aria-label={lang === 'vi' ? 'Xem lại thông báo buổi sáng' : 'Reopen GM Briefing'}
-                className="px-2 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-200 font-bold text-[10px] flex items-center gap-1 cursor-pointer shrink-0"
+                className="px-2 py-1 rounded-xl bg-[#1b120b] hover:bg-[#312115] border border-[#9c7248] text-[#fde7c3] font-bold text-[10px] flex items-center gap-1 cursor-pointer shrink-0"
               >
-                <Megaphone className="w-3 h-3 text-amber-400" />
+                <Megaphone className="w-3 h-3 text-[#f5b82e]" />
                 <span className="hidden sm:inline">{lang === 'vi' ? 'Tin sáng' : 'Briefing'}</span>
               </button>
             )}
@@ -95,7 +100,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
               type="button"
               data-testid="day-console-go-vote-btn"
               onClick={onStartDayVoting}
-              className="px-2.5 py-1 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-[11px] flex items-center gap-1 cursor-pointer shrink-0 shadow"
+              className="px-2.5 py-1 rounded-xl bg-[#b83227] hover:bg-[#cf3e32] border border-[#fca5a5]/60 text-white font-extrabold text-[11px] flex items-center gap-1 cursor-pointer shrink-0 shadow"
             >
               <FastForward className="w-3 h-3 fill-white" />
               <span>{lang === 'vi' ? 'Bỏ Phiếu' : 'Vote'}</span>
@@ -104,8 +109,8 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
         </div>
 
         {latestClue && (
-          <div className="text-[11px] bg-slate-900/90 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 truncate">
-            <span className="font-extrabold text-amber-400 mr-1">{latestClue.senderName}:</span>
+          <div className="text-[11px] bg-[#1a110a] border border-[#6b4a2e] rounded-lg px-2 py-1 text-[#f6ebd8] truncate">
+            <span className="font-extrabold text-[#f5b82e] mr-1">{latestClue.senderName}:</span>
             <span>{latestClue.text}</span>
           </div>
         )}
@@ -114,44 +119,84 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
   }
 
   if (phase === 'day_voting') {
-    const chosenPlayer = players.find((p) => p.id === selectedTargetId);
+    const isAbstaining = selectedTargetId === CAMPFIRE_ABSTAIN_ID;
+    const chosenPlayer = !isAbstaining ? players.find((p) => p.id === selectedTargetId) : null;
     const chosenName = chosenPlayer?.name;
-    const voteEntries = buildVoteTallyEntries(players, votes);
+    const mayorTally = tallyVotesWithMayor(votes, mayorId);
+    const voteEntries = buildVoteTallyEntries(
+      players,
+      votes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID)
+    )
+      .map((entry) => ({
+        ...entry,
+        weightedVotes: mayorTally.counts[entry.playerId] ?? entry.votes,
+      }))
+      .sort((a, b) => b.weightedVotes - a.weightedVotes);
+
+    const abstainerPlayers = mayorTally.abstainerIds
+      .map((id) => players.find((p) => p.id === id))
+      .filter((p): p is Player => Boolean(p));
 
     return (
       <div
         data-testid="active-day-voting-console"
-        className="pointer-events-auto w-full max-w-lg bg-[#090e1c]/95 border-2 border-rose-500/80 rounded-2xl px-3 py-2 shadow-2xl space-y-1.5"
+        className="pointer-events-auto w-full max-w-lg agrou-wood-panel !border-2 !border-[#dc4c3e] rounded-2xl px-3 py-2 space-y-1.5"
       >
-        <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-1.5">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white font-black text-[10px] uppercase shrink-0">
+            <span className="px-1.5 py-0.5 rounded bg-[#b83227] text-white font-black text-[10px] uppercase shrink-0">
               ⚖️ {lang === 'vi' ? 'Bỏ Phiếu' : 'Vote'}
             </span>
-            <span className="text-[11px] font-bold text-rose-100 truncate">
-              {hasVoted && chosenName
+            <span className="text-[11px] font-bold text-[#fde7c3] truncate">
+              {hasVoted && isAbstaining
                 ? lang === 'vi'
-                  ? `Bạn bầu: ${chosenName}`
-                  : `Your vote: ${chosenName}`
+                  ? '🔥 Bạn chọn Phiếu Trắng (Lửa Trại)'
+                  : '🔥 You voted Campfire Abstain'
+                : hasVoted && chosenName
+                ? lang === 'vi'
+                  ? `Bạn bầu: ${chosenName}${me.id === mayorId ? ' (👑 x2)' : ''}`
+                  : `Your vote: ${chosenName}${me.id === mayorId ? ' (👑 x2)' : ''}`
                 : lang === 'vi'
-                ? 'Chọn duy nhất 1 người để treo cổ!'
-                : 'Select exactly 1 player to execute!'}
+                ? 'Chọn 1 nghi phạm hoặc bấm Lửa Trại để bỏ phiếu trắng!'
+                : 'Select 1 suspect or click the Campfire to abstain!'}
             </span>
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {hasVoted && chosenName && onClearVote && (
+            {me.isAlive && onVoteCampfireAbstain && (
+              <button
+                type="button"
+                data-testid="vote-campfire-abstain-btn"
+                onClick={onVoteCampfireAbstain}
+                title={
+                  lang === 'vi'
+                    ? 'Bỏ phiếu trắng vào Lửa Trại (Không treo cổ ai)'
+                    : 'Cast Abstention vote into the Campfire'
+                }
+                className={`px-2 py-1 rounded-xl border text-[10px] font-extrabold flex items-center gap-1 cursor-pointer ${
+                  isAbstaining
+                    ? 'bg-[#1c3621] border-[#6ee7b7] text-[#d1fae5]'
+                    : 'bg-[#362417] hover:bg-[#49311f] border-[#e89c3e] text-[#fde7c3]'
+                }`}
+              >
+                <Flame className="w-3 h-3 text-[#f59e0b]" />
+                <span>{lang === 'vi' ? 'Lửa Trại' : 'Abstain'}</span>
+              </button>
+            )}
+
+            {hasVoted && (chosenName || isAbstaining) && onClearVote && (
               <button
                 type="button"
                 data-testid="voting-console-clear-btn"
                 onClick={onClearVote}
-                title={lang === 'vi' ? 'Hủy lựa chọn hiện tại để bầu người khác' : 'Clear current selection to change vote'}
-                className="px-2 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-200 font-bold text-[10px] flex items-center gap-1 cursor-pointer"
+                title={lang === 'vi' ? 'Hủy lựa chọn hiện tại để bầu người khác' : 'Clear current selection'}
+                className="px-2 py-1 rounded-xl bg-[#1b120b] hover:bg-[#312115] border border-[#785334] text-[#e6d5b8] font-bold text-[10px] flex items-center gap-1 cursor-pointer"
               >
-                <RotateCcw className="w-3 h-3 text-amber-300" />
-                <span>{lang === 'vi' ? 'Đổi phiếu' : 'Change'}</span>
+                <RotateCcw className="w-3 h-3 text-[#f5b82e]" />
+                <span className="hidden sm:inline">{lang === 'vi' ? 'Đổi phiếu' : 'Change'}</span>
               </button>
             )}
+
             {onReopenGMAnnouncement && (
               <button
                 type="button"
@@ -159,19 +204,21 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                 onClick={onReopenGMAnnouncement}
                 title={lang === 'vi' ? 'Xem lại thông báo buổi sáng' : 'Reopen Morning Briefing'}
                 aria-label={lang === 'vi' ? 'Xem lại thông báo buổi sáng' : 'Reopen Morning Briefing'}
-                className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 cursor-pointer"
+                className="p-1 rounded-lg bg-[#1b120b] hover:bg-[#312115] border border-[#9c7248] text-[#f5b82e] cursor-pointer"
               >
                 <Megaphone className="w-3.5 h-3.5" />
               </button>
             )}
-            <span className="text-[11px] font-mono font-bold text-amber-300">
+
+            <span className="text-[11px] font-mono font-bold text-[#f5b82e]">
               {timerSeconds === 0 && me.isAlive && !hasVoted ? '⏳' : `${Math.round(timerSeconds)}s`}
             </span>
+
             <button
               type="button"
               data-testid="voting-console-confirm-btn"
               onClick={onResolveDayVoting}
-              className="px-2.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[11px] flex items-center gap-1 cursor-pointer shadow"
+              className="px-2.5 py-1 rounded-xl bg-[#e86f24] hover:bg-[#f28139] border border-[#fbc266] text-[#fff8ed] font-extrabold text-[11px] flex items-center gap-1 cursor-pointer shadow"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
               <span>
@@ -180,18 +227,18 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                     ? 'Chốt Phiếu'
                     : 'Confirm Vote'
                   : lang === 'vi'
-                  ? 'Phiếu Trắng'
-                  : 'Abstain'}
+                  ? 'Kết Thúc'
+                  : 'Finish'}
               </span>
             </button>
           </div>
         </div>
 
-        {/* Live Transparent Vote Breakdown: Shows BOTH count AND exact voters */}
-        {voteEntries.length > 0 && (
+        {/* Live Transparent Vote Breakdown (Shows Mayor x2 weight + Campfire Abstentions) */}
+        {(voteEntries.length > 0 || mayorTally.abstainCount > 0) && (
           <div
             data-testid="live-vote-breakdown"
-            className="bg-[#060913]/95 border border-slate-800 rounded-xl px-2 py-1.5 max-h-24 overflow-y-auto space-y-1"
+            className="bg-[#1a110a] border border-[#6b4a2e] rounded-xl px-1.5 py-1 max-h-[68px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1"
           >
             {voteEntries.map((entry) => {
               const isMyTarget = selectedTargetId === entry.playerId;
@@ -200,32 +247,35 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                   key={entry.playerId}
                   data-testid={`live-vote-row-${entry.playerId}`}
                   className={`flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-snug rounded-lg px-1.5 py-0.5 ${
-                    isMyTarget ? 'bg-rose-950/70 border border-rose-500/50' : ''
+                    isMyTarget ? 'bg-[#5c1d16] border border-[#f97316]/60' : ''
                   }`}
                 >
-                  <span className="font-extrabold text-rose-200 whitespace-nowrap flex items-center gap-1">
+                  <span className="font-extrabold text-[#fde7c3] whitespace-nowrap flex items-center gap-1">
                     <span>{entry.avatar}</span>
-                    <span className="text-amber-400 font-mono">#{entry.seatNumber}</span>
+                    <span className="text-[#f5b82e] font-mono">#{entry.seatNumber}</span>
                     <span>{entry.name}</span>
-                    <span className="px-1 py-0.2 rounded bg-rose-700 text-white font-mono text-[9px]">
-                      {entry.votes} {t.votesUnit}
+                    <span className="px-1 py-0.2 rounded bg-[#b83227] text-white font-mono text-[9px]">
+                      {entry.weightedVotes} {t.votesUnit}
                     </span>
                   </span>
-                  <span className="text-slate-400">←</span>
+                  <span className="text-[#bfa586]">←</span>
                   <span className="flex flex-wrap items-center gap-1">
                     {entry.voters.map((voter) => {
                       const isVoterMe = voter.id === me.id;
+                      const isVoterMayor = Boolean(mayorId && voter.id === mayorId);
                       return (
                         <span
                           key={voter.id}
                           className={`px-1 py-0.2 rounded font-semibold ${
-                            isVoterMe
-                              ? 'bg-amber-500/25 border border-amber-400/60 text-amber-200'
-                              : 'bg-slate-800/90 text-slate-200'
+                            isVoterMayor
+                              ? 'bg-[#4f2c12] border border-[#f5b82e] text-[#fef3c7]'
+                              : isVoterMe
+                              ? 'bg-[#e86f24]/30 border border-[#fbc266] text-[#fff8ed]'
+                              : 'bg-[#2a1c12] text-[#e6d5b8]'
                           }`}
                         >
-                          #{voter.seatNumber} {voter.name}
-                          {isVoterMe ? (lang === 'vi' ? ' (Bạn)' : ' (You)') : ''}
+                          {isVoterMayor ? '👑 ' : ''}#{voter.seatNumber} {voter.name}
+                          {isVoterMayor ? ' (x2)' : isVoterMe ? (lang === 'vi' ? ' (Bạn)' : ' (You)') : ''}
                         </span>
                       );
                     })}
@@ -233,6 +283,36 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                 </div>
               );
             })}
+
+            {mayorTally.abstainCount > 0 && (
+              <div
+                data-testid="live-vote-row-campfire-abstain"
+                className={`flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-snug rounded-lg px-1.5 py-0.5 ${
+                  isAbstaining ? 'bg-[#1c3621] border border-[#6ee7b7]/60' : ''
+                }`}
+              >
+                <span className="font-extrabold text-[#fde7c3] whitespace-nowrap flex items-center gap-1">
+                  <span>🔥</span>
+                  <span>{lang === 'vi' ? 'Phiếu Trắng (Lửa Trại)' : 'Campfire Abstain'}</span>
+                  <span className="px-1 py-0.2 rounded bg-[#e86f24] text-[#fff8ed] font-mono text-[9px]">
+                    {mayorTally.abstainCount} {t.votesUnit}
+                  </span>
+                </span>
+                <span className="text-[#bfa586]">←</span>
+                <span className="flex flex-wrap items-center gap-1">
+                  {abstainerPlayers.map((ap) => (
+                    <span
+                      key={ap.id}
+                      className="px-1 py-0.2 rounded bg-[#2a1c12] text-[#fde7c3] font-semibold"
+                    >
+                      {ap.id === mayorId ? '👑 ' : ''}
+                      {ap.name}
+                      {ap.id === mayorId ? ' (x2)' : ''}
+                    </span>
+                  ))}
+                </span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -241,7 +321,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
 
   if (phase === 'hunter_revenge') {
     return (
-      <div className="px-3 py-1 rounded-full bg-rose-950/95 border border-rose-400 text-xs font-extrabold text-amber-200 shadow text-center pointer-events-none">
+      <div className="px-3 py-1 rounded-xl bg-[#4f1814] border border-[#f87171] text-xs font-extrabold text-[#fde7c3] shadow text-center pointer-events-none">
         {eventBanner}
       </div>
     );

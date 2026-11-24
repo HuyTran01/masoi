@@ -38,6 +38,8 @@ import {
   View,
   RotateCcw,
   RotateCw,
+  BookMarked,
+  Crown,
 } from 'lucide-react';
 import { WerewolfVillage3D } from './components/WerewolfVillage3D';
 import { CameraViewPreset, getNextCameraPreset } from './game/fpvCamera';
@@ -62,6 +64,9 @@ import { GameTopHud } from './components/GameTopHud';
 import { NightActionConsole } from './components/NightActionConsole';
 import { DayActionBar } from './components/DayActionBar';
 import { GMAnnouncementModal } from './components/GMAnnouncementModal';
+import { AgrouAvatarLockerModal } from './components/AgrouAvatarLockerModal';
+import { AgrouNotebookDrawer } from './components/AgrouNotebookDrawer';
+import { AgrouEmoteWheel } from './components/AgrouEmoteWheel';
 import { realtimeClient } from './utils/realtimeClient';
 import type { GMDeckMode } from './server/gmRooms';
 import {
@@ -82,12 +87,30 @@ import {
   assignPreferredRoleToDeck,
   resolveNightActions,
   applyDayLynch,
-  tallyVotes,
   castSingleDayVote,
   buildVoteTallyEntries,
   checkWinCondition,
   resolveHunterShot,
 } from './game/rules';
+import {
+  AgrouAvatarConfig,
+  AgrouEmoteEvent,
+  AgrouEmoteId,
+  AgrouMapBiome,
+  AgrouNotebookState,
+  CAMPFIRE_ABSTAIN_ID,
+  PlayerNotebookNote,
+  appendNotebookTimelineEvent,
+  createInitialNotebook,
+  electMayorForVillage,
+  formatNotebookShareSummary,
+  getBotCosmetics,
+  loadAgrouAvatarConfig,
+  resolveNextMayorIfNeeded,
+  saveAgrouAvatarConfig,
+  tallyVotesWithMayor,
+  updateNotebookPlayerEntry,
+} from './game/agrouMechanics';
 import {
   buildAutoGMNightSchedule,
   isPlayerAwakeForNightStep,
@@ -237,9 +260,16 @@ export default function App() {
   // Mobile / Open-World Virtual D-Pad Vector
   const [moveVector, setMoveVector] = useState<{ x: number; z: number }>({ x: 0, z: 0 });
 
-  // Fun Day Discussion Props (Tomatoes, Rotten Eggs, Roses, Water)
+  // Fun Day Discussion Props (Tomatoes, Rotten Eggs, Roses, Water) & Agrou 3D Emotes
   const [activePropTool, setActivePropTool] = useState<PropType | null>(null);
   const [thrownProps, setThrownProps] = useState<ThrownPropEvent[]>([]);
+  const [avatarConfig, setAvatarConfig] = useState<AgrouAvatarConfig>(() =>
+    loadAgrouAvatarConfig()
+  );
+  const [showAvatarLocker, setShowAvatarLocker] = useState<boolean>(false);
+  const [isNotebookOpen, setIsNotebookOpen] = useState<boolean>(false);
+  const [notebook, setNotebook] = useState<AgrouNotebookState>(() => createInitialNotebook());
+  const [emoteEvents, setEmoteEvents] = useState<AgrouEmoteEvent[]>([]);
 
   // Role Callout Voice Toast Banner
   const [roleCalloutToast, setRoleCalloutToast] = useState<{
@@ -341,6 +371,7 @@ export default function App() {
   // Players in the 3D Village Circle (Initialized with an active night role for the human player)
   const [initialBootState] = useState(() => {
     const initialCount = 8;
+    const savedCosmetics = loadAgrouAvatarConfig();
     const roles = assignPreferredRoleToDeck(generateBalancedRoster(initialCount), 'random');
     const basePlayers: Player[] = [
       {
@@ -350,17 +381,25 @@ export default function App() {
         roleId: roles[0],
         isAlive: true,
         isHost: true,
+        isMayor: true,
+        hat: savedCosmetics.hat,
+        cloakColor: savedCosmetics.cloakColor,
         elderLives: roles[0] === 'elder' ? 2 : undefined,
       },
-      ...BOT_NAMES.slice(0, initialCount - 1).map((name, i) => ({
-        id: `bot_${i + 1}`,
-        name,
-        avatar: BOT_AVATARS[i % BOT_AVATARS.length],
-        roleId: roles[i + 1],
-        isAlive: true,
-        isBot: true,
-        elderLives: roles[i + 1] === 'elder' ? 2 : undefined,
-      })),
+      ...BOT_NAMES.slice(0, initialCount - 1).map((name, i) => {
+        const botLook = getBotCosmetics(i);
+        return {
+          id: `bot_${i + 1}`,
+          name,
+          avatar: BOT_AVATARS[i % BOT_AVATARS.length],
+          roleId: roles[i + 1],
+          isAlive: true,
+          isBot: true,
+          hat: botLook.hat,
+          cloakColor: botLook.cloakColor,
+          elderLives: roles[i + 1] === 'elder' ? 2 : undefined,
+        };
+      }),
     ];
     const prepared = prepareNightStartForHuman(
       basePlayers,
@@ -381,6 +420,9 @@ export default function App() {
   });
 
   const [players, setPlayers] = useState<Player[]>(() => initialBootState.readyPlayers);
+  const [mayorId, setMayorId] = useState<string | null>(
+    () => initialBootState.readyPlayers[0]?.id || 'usr_me'
+  );
   const playersRef = useRef<Player[]>(players);
   useEffect(() => {
     playersRef.current = players;
@@ -787,6 +829,88 @@ export default function App() {
     [gameMode, roomId]
   );
 
+  // Agrou Cosmetic Locker & Map Biome Persistence + Live 3D Avatar Sync
+  const handleUpdateAvatarConfig = useCallback(
+    (next: AgrouAvatarConfig) => {
+      setAvatarConfig(next);
+      saveAgrouAvatarConfig(next);
+      setPlayers((prev) =>
+        prev.map((p) =>
+          p.id === currentUser.id
+            ? { ...p, hat: next.hat, cloakColor: next.cloakColor }
+            : p
+        )
+      );
+    },
+    [currentUser.id]
+  );
+
+  const handleChangeBiome = useCallback(
+    (mapBiome: AgrouMapBiome) => {
+      sound.playCardFlip();
+      const next: AgrouAvatarConfig = { ...avatarConfig, mapBiome };
+      setAvatarConfig(next);
+      saveAgrouAvatarConfig(next);
+    },
+    [avatarConfig]
+  );
+
+  const handleTriggerEmote = useCallback(
+    (emote: AgrouEmoteId, actorId?: string) => {
+      const targetActor = actorId || currentUser.id;
+      const ev: AgrouEmoteEvent = {
+        id: `emote_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        playerId: targetActor,
+        emote,
+        timestamp: Date.now(),
+      };
+      setEmoteEvents((prev) => [...prev.slice(-12), ev]);
+    },
+    [currentUser.id]
+  );
+
+  const handleUpdateNotebookPlayer = useCallback(
+    (playerId: string, patch: Partial<PlayerNotebookNote>) => {
+      setNotebook((prev) => updateNotebookPlayerEntry(prev, playerId, patch));
+      if (patch.trust !== undefined) {
+        setSuspectTags((prev) => ({
+          ...prev,
+          [playerId]:
+            patch.trust === 'trusted'
+              ? 'trusted'
+              : patch.trust === 'suspicious' || patch.trust === 'wolf_lock'
+              ? 'wolf_suspect'
+              : undefined,
+        }));
+      }
+    },
+    []
+  );
+
+  const handleShareNotebookToChat = useCallback(() => {
+    const summaryText = formatNotebookShareSummary(notebook, players, lang);
+    const nextMsg: ChatMessage = {
+      id: `nb_share_${Date.now()}`,
+      senderId: me.id,
+      senderName: me.name,
+      senderRole: me.roleId,
+      text: summaryText,
+      timestamp: Date.now(),
+      isGhost: !me.isAlive,
+    };
+    setMessages((prev) => [...prev, nextMsg]);
+    if (gameMode === 'online') {
+      realtimeClient.sendChat(roomId, nextMsg);
+    }
+    setEventBanner(
+      lang === 'vi'
+        ? '📒 Đã gửi tóm tắt Sổ Tay Suy Luận vào chat làng!'
+        : '📒 Shared your Deduction Notebook summary to village chat!'
+    );
+    setIsNotebookOpen(false);
+    setActiveDrawer('chat');
+  }, [notebook, players, lang, me.id, me.name, me.roleId, me.isAlive, gameMode, roomId]);
+
   // Start / Restart a 3D Match (Supports Online Room with exact participants, or AI Practice)
   const handleStartMatch = useCallback(
     (
@@ -811,18 +935,23 @@ export default function App() {
       const roleChoice = forcedRole ?? preferredRole;
       const deck = assignPreferredRoleToDeck(generateBalancedRoster(count), roleChoice);
 
-      const freshPlayers: Player[] =
+      const rawPlayers: Player[] =
         customParticipants && customParticipants.length >= 4
-          ? customParticipants.map((part, idx) => ({
-              id: idx === 0 ? currentUser.id : part.id,
-              name: idx === 0 ? currentUser.name : part.name,
-              avatar: idx === 0 ? currentUser.avatar : part.avatar,
-              roleId: deck[idx] || 'villager',
-              isAlive: true,
-              isHost: idx === 0 || Boolean(part.isHost),
-              isBot: idx === 0 ? false : part.isBot,
-              elderLives: deck[idx] === 'elder' ? 2 : undefined,
-            }))
+          ? customParticipants.map((part, idx) => {
+              const botLook = getBotCosmetics(idx);
+              return {
+                id: idx === 0 ? currentUser.id : part.id,
+                name: idx === 0 ? currentUser.name : part.name,
+                avatar: idx === 0 ? currentUser.avatar : part.avatar,
+                roleId: deck[idx] || 'villager',
+                isAlive: true,
+                isHost: idx === 0 || Boolean(part.isHost),
+                isBot: idx === 0 ? false : part.isBot,
+                hat: idx === 0 ? avatarConfig.hat : botLook.hat,
+                cloakColor: idx === 0 ? avatarConfig.cloakColor : botLook.cloakColor,
+                elderLives: deck[idx] === 'elder' ? 2 : undefined,
+              };
+            })
           : [
               {
                 id: currentUser.id,
@@ -831,19 +960,34 @@ export default function App() {
                 roleId: deck[0],
                 isAlive: true,
                 isHost: true,
+                hat: avatarConfig.hat,
+                cloakColor: avatarConfig.cloakColor,
                 elderLives: deck[0] === 'elder' ? 2 : undefined,
               },
-              ...Array.from({ length: count - 1 }).map((_, i) => ({
-                id: `bot_${i + 1}`,
-                name: BOT_NAMES[i % BOT_NAMES.length],
-                avatar: BOT_AVATARS[i % BOT_AVATARS.length],
-                roleId: deck[i + 1],
-                isAlive: true,
-                isBot: true,
-                elderLives: deck[i + 1] === 'elder' ? 2 : undefined,
-              })),
+              ...Array.from({ length: count - 1 }).map((_, i) => {
+                const botLook = getBotCosmetics(i);
+                return {
+                  id: `bot_${i + 1}`,
+                  name: BOT_NAMES[i % BOT_NAMES.length],
+                  avatar: BOT_AVATARS[i % BOT_AVATARS.length],
+                  roleId: deck[i + 1],
+                  isAlive: true,
+                  isBot: true,
+                  hat: botLook.hat,
+                  cloakColor: botLook.cloakColor,
+                  elderLives: deck[i + 1] === 'elder' ? 2 : undefined,
+                };
+              }),
             ];
 
+      const electedMayor = electMayorForVillage(rawPlayers, currentUser.id);
+      const freshPlayers: Player[] = rawPlayers.map((p) => ({
+        ...p,
+        isMayor: p.id === electedMayor,
+      }));
+      const mayorPlayer = freshPlayers.find((p) => p.id === electedMayor);
+
+      setMayorId(electedMayor);
       setKnownWolfIds([]);
       setWolfPupFrenzy(false);
       setVotes([]);
@@ -857,6 +1001,20 @@ export default function App() {
       setSuspectTags({});
       setTagToolMode('none');
       setActiveDrawer('none');
+      setIsNotebookOpen(false);
+      setShowAvatarLocker(false);
+      setEmoteEvents([]);
+      setNotebook(
+        appendNotebookTimelineEvent(createInitialNotebook(), {
+          round: 1,
+          phaseLabel: lang === 'vi' ? 'Khai Cuộc' : 'Match Start',
+          text:
+            lang === 'vi'
+              ? `👑 ${mayorPlayer?.name || 'Thị Trưởng'} giữ Vương Miện Thị Trưởng (phiếu bầu x2).`
+              : `👑 ${mayorPlayer?.name || 'Mayor'} wears the Mayor Crown (x2 vote weight).`,
+          tone: 'mayor',
+        })
+      );
       setLobbyModalState({ isOpen: false, mode: 'online' });
       beginNewNight(freshPlayers, 1, false, []);
       setShellState('playing');
@@ -869,8 +1027,8 @@ export default function App() {
           senderName: '🤖 Quản Trò Máy',
           text:
             lang === 'vi'
-              ? `🤖 Quản Trò Máy: Ván đấu ${count} người bắt đầu! Vai trò bí mật của bạn là ${assignedDef.name.vi}. Màn đêm buông xuống, đến lượt bạn hành động!`
-              : `🤖 Auto-GM: ${count}-player match started! Your secret role is ${assignedDef.name[lang]}. Night falls, it is your turn to act!`,
+              ? `🤖 Quản Trò Máy: Ván đấu ${count} người bắt đầu! Vai trò bí mật của bạn là ${assignedDef.name.vi}. 👑 Thị Trưởng đương nhiệm: ${mayorPlayer?.name || currentUser.name} (phiếu bầu x2).`
+              : `🤖 Auto-GM: ${count}-player match started! Your secret role is ${assignedDef.name[lang]}. 👑 Current Mayor: ${mayorPlayer?.name || currentUser.name} (x2 vote).`,
           timestamp: Date.now(),
           isSystem: true,
         },
@@ -879,7 +1037,7 @@ export default function App() {
         `${t.nightPhaseTitle(1)} · ${assignedDef.name[lang]}: ${assignedDef.instructions[lang]}`
       );
     },
-    [currentUser, gameMode, villageSize, preferredRole, beginNewNight, t, lang]
+    [currentUser, avatarConfig, gameMode, villageSize, preferredRole, beginNewNight, t, lang]
   );
 
   // Finish Game & Freeze Snapshot
@@ -1175,6 +1333,15 @@ export default function App() {
       }
     }
 
+    const mayorCheck = resolveNextMayorIfNeeded(effectivePlayers, mayorId);
+    if (mayorCheck.nextMayorId !== mayorId) {
+      setMayorId(mayorCheck.nextMayorId);
+      effectivePlayers = effectivePlayers.map((p) => ({
+        ...p,
+        isMayor: p.id === mayorCheck.nextMayorId,
+      }));
+    }
+
     setPlayers(effectivePlayers);
     setWolfPupFrenzy(nextFrenzy);
 
@@ -1194,11 +1361,39 @@ export default function App() {
       lang,
     });
 
+    // Auto-record Dawn casualties & Mayor succession into the Agrou Deduction Notebook
+    setNotebook((prevNb) => {
+      let nextNb = appendNotebookTimelineEvent(prevNb, {
+        round,
+        phaseLabel: lang === 'vi' ? `Bình Minh #${round}` : `Dawn #${round}`,
+        text: dawnAnnouncement.dayBarSummary,
+        tone: dawnAnnouncement.victims.length > 0 ? 'death' : 'info',
+      });
+      if (mayorCheck.transferredToName) {
+        nextNb = appendNotebookTimelineEvent(nextNb, {
+          round,
+          phaseLabel: lang === 'vi' ? 'Thị Trưởng' : 'Mayor',
+          text:
+            lang === 'vi'
+              ? `👑 Vương miện chuyển sang ${mayorCheck.transferredToName} (x2 phiếu).`
+              : `👑 Mayor crown passed to ${mayorCheck.transferredToName} (x2 vote).`,
+          tone: 'mayor',
+        });
+      }
+      return nextNb;
+    });
+
     const gmChatMessage: ChatMessage = {
       id: `sys_dawn_${Date.now()}`,
       senderId: 'sys',
       senderName: lang === 'vi' ? '🎙️ Quản Trò AI' : '🎙️ AI Game Master',
-      text: dawnAnnouncement.chatMessageText,
+      text: mayorCheck.transferredToName
+        ? `${dawnAnnouncement.chatMessageText}\n👑 ${
+            lang === 'vi'
+              ? `Thị Trưởng mới: ${mayorCheck.transferredToName} (phiếu bầu x2).`
+              : `New Mayor: ${mayorCheck.transferredToName} (x2 vote).`
+          }`
+        : dawnAnnouncement.chatMessageText,
       timestamp: Date.now(),
       isSystem: true,
     };
@@ -1248,13 +1443,14 @@ export default function App() {
       ]);
     }
 
-    // Visual 3D prop teasing between bots (does not post to chat)
+    // Visual 3D prop teasing & expressive Agrou campfire emote between bots
     const aliveBots = effectivePlayers.filter((p) => p.isBot && p.isAlive);
     if (aliveBots.length >= 2) {
       const botPick = aliveBots[Math.floor(Math.random() * aliveBots.length)];
       const otherBot = aliveBots.find((b) => b.id !== botPick.id) || aliveBots[0];
       setTimeout(() => {
         handleThrowProp(botPick.id, otherBot.id, round % 2 === 0 ? 'egg' : 'tomato');
+        handleTriggerEmote(dawnAnnouncement.victims.length > 0 ? 'panic' : 'wave', otherBot.id);
       }, 900);
     }
   }, [
@@ -1411,17 +1607,49 @@ export default function App() {
     }
     setEventBanner(
       lang === 'vi'
-        ? '⚖️ Đã hủy lựa chọn — hãy chọn 1 người để bỏ phiếu!'
-        : '⚖️ Vote cleared — select 1 player to vote for!'
+        ? '⚖️ Đã hủy lựa chọn — hãy chọn 1 người hoặc bấm Lửa Trại để bỏ phiếu trắng!'
+        : '⚖️ Vote cleared — select 1 player or click the Campfire to abstain!'
     );
   }, [phase, me.isAlive, me.id, gameMode, roomId, lang]);
+
+  // Agrou-style Campfire Abstention Vote (Click 3D Campfire or DayActionBar button)
+  const handleVoteCampfireAbstain = useCallback(() => {
+    if (phase !== 'day_voting' || !me.isAlive) return;
+    sound.playCardFlip();
+    if (selectedTargetId === CAMPFIRE_ABSTAIN_ID) {
+      setSelectedTargetId(null);
+      setHasVoted(false);
+      setVotes((prev) => castSingleDayVote(prev, me.id, null));
+      if (gameMode === 'online') {
+        realtimeClient.sendVote(roomId, me.id, '');
+      }
+      setEventBanner(
+        lang === 'vi'
+          ? '🔥 Đã hủy phiếu trắng — bạn có thể chọn nghi phạm khác!'
+          : '🔥 Abstention cleared — you can pick another suspect!'
+      );
+      return;
+    }
+    setSelectedTargetId(CAMPFIRE_ABSTAIN_ID);
+    setHasVoted(true);
+    setVotes((prev) => castSingleDayVote(prev, me.id, CAMPFIRE_ABSTAIN_ID));
+    if (gameMode === 'online') {
+      realtimeClient.sendVote(roomId, me.id, CAMPFIRE_ABSTAIN_ID);
+    }
+    setEventBanner(
+      lang === 'vi'
+        ? '🔥 Bạn đã bỏ phiếu trắng vào Lửa Trại (không treo cổ ai)!'
+        : '🔥 You cast an Abstain vote into the Campfire!'
+    );
+  }, [phase, me.isAlive, me.id, selectedTargetId, gameMode, roomId, lang]);
 
   // Resolve Day Voting -> Show Authentic GM Dusk Verdict before entering Next Night
   const handleResolveDayVoting = useCallback(
     (overrideVotes?: VoteRecord[]) => {
       const beforeVotePlayers = players;
       const activeVotes = overrideVotes || votes;
-      const tally = tallyVotes(activeVotes);
+      const tally = tallyVotesWithMayor(activeVotes, mayorId);
+      const playerTargetVotes = activeVotes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID);
 
       if (tally.isTie || !tally.targetId) {
         const tieAnnouncement = buildDuskGMAnnouncement({
@@ -1430,11 +1658,22 @@ export default function App() {
           afterPlayers: beforeVotePlayers,
           lynchedVictim: null,
           voteCounts: tally.counts,
-          votes: activeVotes,
+          votes: playerTargetVotes,
           isTie: true,
           humanPlayerId: me.id,
           lang,
         });
+        setNotebook((prevNb) =>
+          appendNotebookTimelineEvent(prevNb, {
+            round,
+            phaseLabel: lang === 'vi' ? `Hoàng Hôn #${round}` : `Dusk #${round}`,
+            text:
+              lang === 'vi'
+                ? `⚖️ Không ai bị treo cổ (${tally.abstainCount > 0 ? `${tally.abstainCount} phiếu trắng` : 'hòa phiếu'}).`
+                : `⚖️ No execution (${tally.abstainCount > 0 ? `${tally.abstainCount} abstain` : 'tied vote'}).`,
+            tone: 'info',
+          })
+        );
         const tieMsg: ChatMessage = {
           id: `tie_${Date.now()}`,
           senderId: 'sys',
@@ -1520,6 +1759,15 @@ export default function App() {
         }
       }
 
+      const mayorCheck = resolveNextMayorIfNeeded(effectivePlayers, mayorId);
+      if (mayorCheck.nextMayorId !== mayorId) {
+        setMayorId(mayorCheck.nextMayorId);
+        effectivePlayers = effectivePlayers.map((p) => ({
+          ...p,
+          isMayor: p.id === mayorCheck.nextMayorId,
+        }));
+      }
+
       setPlayers(effectivePlayers);
       setWolfPupFrenzy(nextFrenzy);
 
@@ -1534,7 +1782,7 @@ export default function App() {
         afterPlayers: effectivePlayers,
         lynchedVictim: victim,
         voteCounts: tally.counts,
-        votes: activeVotes,
+        votes: playerTargetVotes,
         isTie: false,
         elderLynchedPenalty,
         hunterShotEvent,
@@ -1542,11 +1790,41 @@ export default function App() {
         lang,
       });
 
+      setNotebook((prevNb) => {
+        let nextNb = appendNotebookTimelineEvent(prevNb, {
+          round,
+          phaseLabel: lang === 'vi' ? `Hoàng Hôn #${round}` : `Dusk #${round}`,
+          text:
+            lang === 'vi'
+              ? `⚖️ ${victim.name} bị treo cổ (${tally.counts[victim.id] || 0} phiếu).`
+              : `⚖️ ${victim.name} was eliminated (${tally.counts[victim.id] || 0} votes).`,
+          tone: 'death',
+        });
+        if (mayorCheck.transferredToName) {
+          nextNb = appendNotebookTimelineEvent(nextNb, {
+            round,
+            phaseLabel: lang === 'vi' ? 'Thị Trưởng' : 'Mayor',
+            text:
+              lang === 'vi'
+                ? `👑 Vương miện Thị Trưởng chuyển sang ${mayorCheck.transferredToName}.`
+                : `👑 Mayor crown passed to ${mayorCheck.transferredToName}.`,
+            tone: 'mayor',
+          });
+        }
+        return nextNb;
+      });
+
       const duskMsg: ChatMessage = {
         id: `lynch_${Date.now()}`,
         senderId: 'sys',
         senderName: lang === 'vi' ? '🎙️ Quản Trò AI' : '🎙️ AI Game Master',
-        text: duskAnnouncement.chatMessageText,
+        text: mayorCheck.transferredToName
+          ? `${duskAnnouncement.chatMessageText}\n👑 ${
+              lang === 'vi'
+                ? `Thị Trưởng mới: ${mayorCheck.transferredToName} (phiếu bầu x2).`
+                : `New Mayor: ${mayorCheck.transferredToName} (x2 vote).`
+            }`
+          : duskAnnouncement.chatMessageText,
         timestamp: Date.now(),
         isSystem: true,
       };
@@ -1574,6 +1852,7 @@ export default function App() {
     },
     [
       votes,
+      mayorId,
       players,
       me,
       round,
@@ -1681,8 +1960,8 @@ export default function App() {
             beforePlayers: players,
             afterPlayers: updatedPlayers,
             lynchedVictim: activeHunter,
-            voteCounts: tallyVotes(votes).counts,
-            votes,
+            voteCounts: tallyVotesWithMayor(votes, mayorId).counts,
+            votes: votes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID),
             isTie: false,
             hunterShotEvent: {
               hunterName: activeHunter.name,
@@ -1735,21 +2014,30 @@ export default function App() {
         }
         // Strict single-vote lock: prevent clicking multiple people at once!
         if (selectedTargetId !== null) {
-          const currentChosen = players.find((p) => p.id === selectedTargetId);
+          const currentChosenLabel =
+            selectedTargetId === CAMPFIRE_ABSTAIN_ID
+              ? lang === 'vi'
+                ? 'Lửa Trại (Phiếu trắng)'
+                : 'Campfire (Abstain)'
+              : players.find((p) => p.id === selectedTargetId)?.name ||
+                (lang === 'vi' ? 'người đang chọn' : 'your selection');
           setEventBanner(
             lang === 'vi'
-              ? `⚖️ Chỉ được bầu 1 người! Bấm lại ${currentChosen?.name || 'người đang chọn'} hoặc nút "Đổi phiếu" để đổi.`
-              : `⚖️ You can only vote for 1 player! Tap ${currentChosen?.name || 'your selection'} again or click "Change" first.`
+              ? `⚖️ Chỉ được bầu 1 phiếu! Bấm lại ${currentChosenLabel} hoặc nút "Đổi phiếu" để đổi.`
+              : `⚖️ Only 1 vote allowed! Unselect ${currentChosenLabel} or click "Change" first.`
           );
           return;
         }
+        const myVoteWeight = me.id === mayorId ? 2 : 1;
         setSelectedTargetId(targetId);
         setVotes((prev) => castSingleDayVote(prev, me.id, targetId));
         setHasVoted(true);
         if (gameMode === 'online') {
           realtimeClient.sendVote(roomId, me.id, targetId);
         }
-        setEventBanner(`⚖️ ${target.name} (+1 ${t.votesUnit})`);
+        setEventBanner(
+          `⚖️ ${target.name} (+${myVoteWeight} ${t.votesUnit}${myVoteWeight === 2 ? ' 👑' : ''})`
+        );
         return;
       }
 
@@ -1797,6 +2085,18 @@ export default function App() {
           const resText = `${target.name}: ${
             isWolf ? `🐺 ${ROLES.werewolf.name[lang]}` : `🛡️ ${ROLES.villager.name[lang]}`
           }`;
+          setNotebook((prevNb) => {
+            const withEntry = updateNotebookPlayerEntry(prevNb, targetId, {
+              trust: isWolf ? 'wolf_lock' : 'trusted',
+              guessedRole: isWolf ? 'werewolf' : 'villager',
+            });
+            return appendNotebookTimelineEvent(withEntry, {
+              round,
+              phaseLabel: lang === 'vi' ? `Soi Đêm #${round}` : `Seer #${round}`,
+              text: `🔮 ${resText}`,
+              tone: 'clue',
+            });
+          });
           setSeerInspectResult(resText);
           setEventBanner(`🔮 ${resText}`);
         } else if (
@@ -1952,24 +2252,31 @@ export default function App() {
     handleStartMatch(villageSize, nextRole, gameMode);
   }, [me.roleId, villageSize, gameMode, handleStartMatch]);
 
-  // Toggle Suspect / Trusted tag on a player seat
+  // Toggle Suspect / Trusted tag on a player seat (and sync to Agrou Deduction Notebook)
   const handleTogglePlayerSuspectTag = useCallback(
     (playerId: string, forcedTag?: 'wolf_suspect' | 'trusted') => {
       sound.playCardFlip();
       setSuspectTags((prev) => {
         const current = prev[playerId];
-        if (forcedTag) {
-          return {
-            ...prev,
-            [playerId]: current === forcedTag ? undefined : forcedTag,
-          };
-        }
-        const next =
-          current === 'wolf_suspect'
-            ? 'trusted'
-            : current === 'trusted'
+        const next: 'wolf_suspect' | 'trusted' | undefined = forcedTag
+          ? current === forcedTag
             ? undefined
-            : 'wolf_suspect';
+            : forcedTag
+          : current === 'wolf_suspect'
+          ? 'trusted'
+          : current === 'trusted'
+          ? undefined
+          : 'wolf_suspect';
+        setNotebook((prevNb) =>
+          updateNotebookPlayerEntry(prevNb, playerId, {
+            trust:
+              next === 'wolf_suspect'
+                ? 'suspicious'
+                : next === 'trusted'
+                ? 'trusted'
+                : 'unknown',
+          })
+        );
         return { ...prev, [playerId]: next };
       });
     },
@@ -2084,6 +2391,10 @@ export default function App() {
         if (showOnboardingTour) {
           localStorage.setItem('werewolf_3d_tour_done', '1');
           setShowOnboardingTour(false);
+        } else if (showAvatarLocker) {
+          setShowAvatarLocker(false);
+        } else if (isNotebookOpen) {
+          setIsNotebookOpen(false);
         } else if (showProfileModal) {
           setShowProfileModal(false);
           setInitialAccountTab(null);
@@ -2100,6 +2411,10 @@ export default function App() {
         }
       } else if (e.code === 'KeyH' && shellState === 'playing') {
         setIsDockCollapsed((c) => !c);
+      } else if (e.code === 'KeyN' && shellState === 'playing') {
+        setIsNotebookOpen((o) => !o);
+      } else if (e.code === 'KeyT' && shellState === 'playing' && phase !== 'night') {
+        setActiveToolPopover((p) => (p === 'props' ? 'none' : 'props'));
       } else if (e.code === 'KeyM') {
         const m = sound.toggleMute();
         setIsMuted(m);
@@ -2121,9 +2436,12 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     shellState,
+    phase,
     activeDrawer,
     lobbyModalState,
     showOnboardingTour,
+    showAvatarLocker,
+    isNotebookOpen,
     showProfileModal,
     showMyRoleModal,
     gmAnnouncement,
@@ -2198,17 +2516,22 @@ export default function App() {
     setChatInput('');
   };
 
-  // Compute Deduplicated Vote Counts & Voter Labels for 3D Nameplates and Bottom Dock
+  // Compute Mayor-Weighted Vote Counts, Campfire Abstentions & Voter Labels for 3D Nameplates and Bottom Dock
   const voteTallyEntries = buildVoteTallyEntries(players, votes);
+  const weightedVoteTally = tallyVotesWithMayor(votes, mayorId);
   const votesMap: Record<string, number> = {};
   const votersByTargetLabels: Record<string, string[]> = {};
   for (const entry of voteTallyEntries) {
-    votesMap[entry.playerId] = entry.votes;
-    votersByTargetLabels[entry.playerId] = entry.voters.map((v) =>
-      v.id === me.id
-        ? `#${v.seatNumber} ${lang === 'vi' ? 'Bạn' : 'You'}`
-        : `#${v.seatNumber} ${v.name}`
-    );
+    votesMap[entry.playerId] = weightedVoteTally.counts[entry.playerId] ?? entry.votes;
+    votersByTargetLabels[entry.playerId] = entry.voters.map((v) => {
+      const crownTag = v.id === mayorId ? '👑' : '';
+      return v.id === me.id
+        ? `#${v.seatNumber} ${lang === 'vi' ? 'Bạn' : 'You'}${crownTag}`
+        : `#${v.seatNumber} ${v.name}${crownTag}`;
+    });
+  }
+  if (weightedVoteTally.abstainCount > 0) {
+    votesMap[CAMPFIRE_ABSTAIN_ID] = weightedVoteTally.abstainCount;
   }
 
   const aliveWolvesCount = players.filter(
@@ -2378,8 +2701,8 @@ export default function App() {
   }
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden select-none bg-[#070a14] text-slate-100">
-      {/* 1. FULL-VIEWPORT INTERACTIVE 3D VILLAGE SCENE */}
+    <div className="relative w-screen h-screen overflow-hidden select-none bg-[#15100c] text-[#f6ebd8]">
+      {/* 1. FULL-VIEWPORT INTERACTIVE AGROU LOW-POLY 3D VILLAGE SCENE */}
       <WerewolfVillage3D
         players={players}
         userPlayerId={me.id}
@@ -2399,13 +2722,18 @@ export default function App() {
         }
         votesMap={votesMap}
         votersByTarget={votersByTargetLabels}
+        votes={votes}
         activeSpeakers={activeSpeakers}
         revealAllRoles={shellState === 'gameover'}
         cameraPreset={cameraPreset}
         activePropTool={activePropTool}
         fpvLookTurnRate={fpvLookTurnRate}
+        mapBiome={avatarConfig.mapBiome}
+        mayorId={mayorId}
+        emoteEvents={emoteEvents}
         onAimedPlayerChange={setAimedPlayerId}
         onSelectPlayer={handleSelect3DPlayer}
+        onVoteCampfireAbstain={handleVoteCampfireAbstain}
       />
 
       {/* FIRST-PERSON VIEW (FPV) CENTER CROSSHAIR & INTERACTIVE VILLAGER TARGET PROMPT */}
@@ -2456,11 +2784,11 @@ export default function App() {
               'radial-gradient(circle at center, rgba(4,7,17,0.78) 0%, rgba(2,4,10,0.96) 75%)',
           }}
         >
-          <div className="max-w-md w-full bg-[#090d18]/95 border-2 border-indigo-500/40 rounded-3xl p-5 text-center shadow-2xl space-y-2.5 pointer-events-auto">
-            <div className="w-11 h-11 rounded-2xl bg-indigo-950 border border-indigo-500/50 mx-auto flex items-center justify-center text-indigo-300">
+          <div className="max-w-md w-full agrou-wood-panel !border-[#7a5d42] rounded-3xl p-5 text-center shadow-2xl space-y-2.5 pointer-events-auto">
+            <div className="w-11 h-11 rounded-2xl bg-[#1b1420] border border-[#8e6bb5]/60 mx-auto flex items-center justify-center text-[#d2b3ff]">
               <EyeOff className="w-5 h-5" />
             </div>
-            <span className="text-[10px] font-mono uppercase tracking-widest text-indigo-400 font-bold block">
+            <span className="text-[10px] font-mono uppercase tracking-widest text-[#f2be6b] font-bold block">
               🤖 {lang === 'vi' ? 'QUẢN TRÒ MÁY ĐIỀU HÀNH ĐÊM' : 'AUTO-GM NIGHT SEQUENCE'} · {t.antiCheatNightBadge}
             </span>
             <h4 className="text-base font-black text-slate-100">
@@ -2571,7 +2899,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 2. TITLE SCREEN OVERLAY (Modular, Uncluttered, Collapsible Settings, Zero backdrop-blur) */}
+      {/* 2. TITLE SCREEN OVERLAY (Agrou Wood & Campfire Styling + Biome & Avatar Locker) */}
       {shellState === 'title' && (
         <TitleScreenOverlay
           lang={lang}
@@ -2582,6 +2910,9 @@ export default function App() {
           timerConfig={timerConfig}
           showFactionHints={showFactionHints}
           isTitleMenuMinimized={isTitleMenuMinimized}
+          avatarConfig={avatarConfig}
+          onChangeBiome={handleChangeBiome}
+          onOpenAvatarLocker={() => setShowAvatarLocker(true)}
           onToggleMinimize={() => setIsTitleMenuMinimized((m) => !m)}
           onToggleMute={() => {
             const m = sound.toggleMute();
@@ -2599,15 +2930,23 @@ export default function App() {
                 roleId: previewRoles[0],
                 isAlive: true,
                 isHost: true,
+                isMayor: true,
+                hat: avatarConfig.hat,
+                cloakColor: avatarConfig.cloakColor,
               },
-              ...BOT_NAMES.slice(0, nextSize - 1).map((name, i) => ({
-                id: `bot_${i + 1}`,
-                name,
-                avatar: BOT_AVATARS[i % BOT_AVATARS.length],
-                roleId: previewRoles[i + 1],
-                isAlive: true,
-                isBot: true,
-              })),
+              ...BOT_NAMES.slice(0, nextSize - 1).map((name, i) => {
+                const botLook = getBotCosmetics(i);
+                return {
+                  id: `bot_${i + 1}`,
+                  name,
+                  avatar: BOT_AVATARS[i % BOT_AVATARS.length],
+                  roleId: previewRoles[i + 1],
+                  isAlive: true,
+                  isBot: true,
+                  hat: botLook.hat,
+                  cloakColor: botLook.cloakColor,
+                };
+              }),
             ]);
           }}
           onChangePreferredRole={setPreferredRole}
@@ -2650,6 +2989,7 @@ export default function App() {
               )
             }
             myRole={myRole}
+            mayorName={players.find((p) => p.id === mayorId && p.isAlive)?.name || null}
             cameraPreset={cameraPreset}
             freeLook360={freeLook360}
             isMicOn={isMicOn}
@@ -2715,11 +3055,13 @@ export default function App() {
                 players={players}
                 me={me}
                 votes={votes}
+                mayorId={mayorId}
                 hasVoted={hasVoted}
                 selectedTargetId={selectedTargetId}
                 timerSeconds={timerSeconds}
                 onStartDayVoting={handleStartDayVoting}
                 onResolveDayVoting={() => handleResolveDayVoting()}
+                onVoteCampfireAbstain={handleVoteCampfireAbstain}
                 onClearVote={handleClearMyVote}
                 onReopenGMAnnouncement={
                   lastDawnAnnouncement
@@ -2749,13 +3091,13 @@ export default function App() {
             )}
           </div>
 
-          {/* MOBILE & OPEN-WORLD VIRTUAL D-PAD (Solid rgba, no backdrop-blur) */}
+          {/* MOBILE & OPEN-WORLD VIRTUAL D-PAD (Warm Agrou Wood, Zero backdrop-blur) */}
           {canUseVirtualDpad && (
             <div
               data-testid="virtual-dpad"
-              className="fixed bottom-24 right-2 sm:right-auto sm:bottom-28 sm:left-3 z-30 pointer-events-auto flex flex-col items-center gap-0.5 bg-[#090d18]/90 border border-amber-600/40 p-1 sm:p-1.5 rounded-xl shadow-lg"
+              className="fixed bottom-24 right-2 sm:right-auto sm:bottom-28 sm:left-3 z-30 pointer-events-auto flex flex-col items-center gap-0.5 agrou-wood-panel p-1 sm:p-1.5 rounded-xl shadow-lg"
             >
-              <span className="text-[7px] sm:text-[8px] font-mono uppercase text-amber-300 font-bold">
+              <span className="text-[7px] sm:text-[8px] font-mono uppercase text-[#f2be6b] font-bold">
                 {cameraPreset === 'first_person' && me.isAlive
                   ? t.dpadWalkFpv
                   : me.isAlive
@@ -2770,7 +3112,7 @@ export default function App() {
                     onPointerDown={() => setFpvLookTurnRate(-1)}
                     onPointerUp={() => setFpvLookTurnRate(0)}
                     onPointerLeave={() => setFpvLookTurnRate(0)}
-                    className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-emerald-950/90 border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
+                    className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#1d3a27] border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
                     aria-label="Turn Look Left"
                   >
                     <RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
@@ -2782,7 +3124,7 @@ export default function App() {
                   onPointerDown={() => setMoveVector({ x: 0, z: -1 })}
                   onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
                   onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-slate-800/90 active:bg-amber-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
+                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#e86f24] active:text-[#1b1008] flex items-center justify-center cursor-pointer"
                   aria-label="Move Up"
                 >
                   <ArrowUp className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
@@ -2794,7 +3136,7 @@ export default function App() {
                     onPointerDown={() => setFpvLookTurnRate(1)}
                     onPointerUp={() => setFpvLookTurnRate(0)}
                     onPointerLeave={() => setFpvLookTurnRate(0)}
-                    className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-emerald-950/90 border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
+                    className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#1d3a27] border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
                     aria-label="Turn Look Right"
                   >
                     <RotateCw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
@@ -2808,7 +3150,7 @@ export default function App() {
                   onPointerDown={() => setMoveVector({ x: -1, z: 0 })}
                   onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
                   onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-slate-800/90 active:bg-amber-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
+                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#e86f24] active:text-[#1b1008] flex items-center justify-center cursor-pointer"
                   aria-label="Move Left"
                 >
                   <ArrowLeft className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
@@ -2819,7 +3161,7 @@ export default function App() {
                   onPointerDown={() => setMoveVector({ x: 0, z: 1 })}
                   onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
                   onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-slate-800/90 active:bg-amber-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
+                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#e86f24] active:text-[#1b1008] flex items-center justify-center cursor-pointer"
                   aria-label="Move Down"
                 >
                   <ArrowDown className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
@@ -2830,7 +3172,7 @@ export default function App() {
                   onPointerDown={() => setMoveVector({ x: 1, z: 0 })}
                   onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
                   onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-slate-800/90 active:bg-amber-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
+                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#e86f24] active:text-[#1b1008] flex items-center justify-center cursor-pointer"
                   aria-label="Move Right"
                 >
                   <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
@@ -2847,7 +3189,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setIsDockCollapsed(!isDockCollapsed)}
-              className="px-3 py-0.5 rounded-t-xl bg-[#090d18]/92 border-t border-x border-amber-700/50 text-[9px] sm:text-[10px] font-bold text-amber-300 flex items-center gap-1 cursor-pointer"
+              className="px-3 py-0.5 rounded-t-xl bg-[#261a12]/95 border-t border-x border-[#6a4a2f] text-[9px] sm:text-[10px] font-bold text-[#f2be6b] flex items-center gap-1 cursor-pointer"
             >
               {isDockCollapsed && !showOnboardingTour ? (
                 <>
@@ -2866,69 +3208,19 @@ export default function App() {
 
             {(!isDockCollapsed || showOnboardingTour) && (
               <div className="w-full space-y-1.5">
-                {/* Collapsible Props & Deduction Popover (On-Demand, Never Blocks 3D View!) */}
+                {/* Agrou 3D Campfire Emote Wheel, Fun Props & Quick Tag Popover */}
                 {activeToolPopover === 'props' && (
-                  <div
-                    data-tour-id="prop-bar"
-                    data-testid="props-deduction-popover"
-                    className="w-full bg-[#090d18]/96 border border-amber-500/50 rounded-xl p-2 shadow-xl flex flex-wrap items-center justify-between gap-1.5"
-                  >
-                    <div className="flex flex-wrap items-center gap-1">
-                      <span className="text-[10px] font-extrabold uppercase text-amber-400 mr-1">
-                        {t.funPropsLabel}
-                      </span>
-                      {(['tomato', 'egg', 'rose', 'water'] as PropType[]).map((pType) => {
-                        const isActive = activePropTool === pType;
-                        return (
-                          <button
-                            key={pType}
-                            type="button"
-                            onClick={() => {
-                              sound.playCardFlip();
-                              setActivePropTool(isActive ? null : pType);
-                            }}
-                            className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border cursor-pointer ${
-                              isActive
-                                ? 'bg-amber-500 text-slate-950 border-amber-300'
-                                : 'bg-slate-900 text-slate-200 border-slate-700'
-                            }`}
-                          >
-                            {t.propButtons[pType]}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        data-testid="toggle-tag-wolf-btn"
-                        onClick={() =>
-                          setTagToolMode((m) => (m === 'wolf_suspect' ? 'none' : 'wolf_suspect'))
-                        }
-                        className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border cursor-pointer ${
-                          tagToolMode === 'wolf_suspect'
-                            ? 'bg-rose-600 text-white border-rose-300'
-                            : 'bg-slate-900 text-rose-300 border-slate-700'
-                        }`}
-                      >
-                        🐺 {lang === 'vi' ? 'Nghi Sói' : 'Suspect'}
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="toggle-tag-trusted-btn"
-                        onClick={() =>
-                          setTagToolMode((m) => (m === 'trusted' ? 'none' : 'trusted'))
-                        }
-                        className={`px-2 py-0.5 rounded-lg text-[10px] font-extrabold border cursor-pointer ${
-                          tagToolMode === 'trusted'
-                            ? 'bg-emerald-600 text-white border-emerald-300'
-                            : 'bg-slate-900 text-emerald-300 border-slate-700'
-                        }`}
-                      >
-                        🛡️ {lang === 'vi' ? 'Đáng Tin' : 'Trusted'}
-                      </button>
-                    </div>
-                  </div>
+                  <AgrouEmoteWheel
+                    lang={lang}
+                    isDayPhase={phase !== 'night'}
+                    activePropTool={activePropTool}
+                    tagToolMode={tagToolMode}
+                    onTriggerEmote={(emote) => handleTriggerEmote(emote, me.id)}
+                    onSelectPropTool={setActivePropTool}
+                    onToggleTagMode={(mode) =>
+                      setTagToolMode((m) => (m === mode ? 'none' : mode))
+                    }
+                  />
                 )}
 
                 {/* Collapsible Voice Popover */}
@@ -2965,17 +3257,17 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="w-full bg-[#090d18]/95 border border-amber-700/50 rounded-xl sm:rounded-2xl p-1.5 sm:p-2.5 shadow-2xl space-y-1 sm:space-y-1.5">
+                <div className="w-full agrou-wood-panel rounded-xl sm:rounded-2xl p-1.5 sm:p-2.5 space-y-1 sm:space-y-1.5">
                 {/* Contextual Role Power & Action Strip */}
-                <div className="flex items-center justify-between gap-1 border-b border-slate-800/90 pb-1">
+                <div className="flex items-center justify-between gap-1 border-b border-[#5e422b]/80 pb-1">
                   <div className="flex flex-wrap items-center gap-1 text-xs min-w-0">
-                    <span className="px-1.5 py-0.5 rounded bg-amber-950 border border-amber-600/50 text-amber-300 font-bold text-[10px] sm:text-[11px] whitespace-nowrap">
+                    <span className="px-1.5 py-0.5 rounded-lg bg-[#3c2717] border border-[#8e6338] text-[#f5c879] font-bold text-[10px] sm:text-[11px] whitespace-nowrap">
                       {t.yourRolePrefix} {myRole.name[lang]}
                     </span>
 
                     {/* Cupid Lover Partner Badge */}
                     {me.loverId && (
-                      <span className="px-1.5 py-0.5 rounded bg-pink-950 border border-pink-500/60 text-pink-200 font-bold text-[10px] whitespace-nowrap">
+                      <span className="px-1.5 py-0.5 rounded-lg bg-pink-950 border border-pink-500/60 text-pink-200 font-bold text-[10px] whitespace-nowrap">
                         💘 {players.find((p) => p.id === me.loverId)?.name || 'Lover'}
                       </span>
                     )}
@@ -2991,7 +3283,7 @@ export default function App() {
 
                     {/* Seer Inspection Result Badge */}
                     {seerInspectResult && (
-                      <span className="px-1.5 py-0.5 rounded bg-purple-950 border border-purple-500 text-purple-200 font-bold text-[10px]">
+                      <span className="px-1.5 py-0.5 rounded-lg bg-purple-950 border border-purple-500 text-purple-200 font-bold text-[10px]">
                         🔮 {seerInspectResult}
                       </span>
                     )}
@@ -2999,6 +3291,26 @@ export default function App() {
 
                   {/* Tool Drawer & Popover Toggles */}
                   <div className="flex items-center gap-1 overflow-x-auto shrink-0">
+                    {/* Agrou Parchment Deduction Notebook Toggle [N] */}
+                    <button
+                      type="button"
+                      data-testid="toggle-notebook-btn"
+                      onClick={() => {
+                        sound.playCardFlip();
+                        setIsNotebookOpen((o) => !o);
+                      }}
+                      className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
+                        isNotebookOpen
+                          ? 'bg-[#e8c682] border-[#f6e2b4] text-[#2c1a0d]'
+                          : 'bg-[#362417] border-[#785334] text-[#f2d08f] hover:bg-[#493120]'
+                      }`}
+                    >
+                      <BookMarked className="w-3 h-3" />
+                      <span className="hidden sm:inline">
+                        {lang === 'vi' ? 'Sổ Tay' : 'Notebook'}
+                      </span>
+                    </button>
+
                     {phase !== 'night' && (
                       <button
                         type="button"
@@ -3008,13 +3320,13 @@ export default function App() {
                         }
                         className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
                           activeToolPopover === 'props' || activePropTool || tagToolMode !== 'none'
-                            ? 'bg-amber-600 border-amber-300 text-slate-950'
-                            : 'bg-slate-900 border-slate-700 text-amber-300 hover:bg-slate-800'
+                            ? 'bg-[#e86f24] border-[#ffc389] text-white'
+                            : 'bg-[#362417] border-[#69482e] text-[#f3ca82] hover:bg-[#493120]'
                         }`}
                       >
-                        <span>🍅</span>
+                        <span>🎭</span>
                         <span className="hidden sm:inline">
-                          {lang === 'vi' ? 'Đạo cụ & Ghi chú' : 'Props & Notes'}
+                          {lang === 'vi' ? 'Biểu cảm & Đạo cụ' : 'Emotes & Props'}
                         </span>
                       </button>
                     )}
@@ -3028,7 +3340,7 @@ export default function App() {
                       className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
                         activeToolPopover === 'voice' || isMicOn
                           ? 'bg-emerald-700 border-emerald-400 text-white'
-                          : 'bg-slate-900 border-slate-700 text-emerald-300 hover:bg-slate-800'
+                          : 'bg-[#302016] border-[#61422a] text-emerald-300 hover:bg-[#422c1e]'
                       }`}
                     >
                       <Mic className="w-3 h-3" />
@@ -3042,11 +3354,11 @@ export default function App() {
                       }
                       className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
                         activeDrawer === 'chat'
-                          ? 'bg-rose-800 border-rose-400 text-white'
-                          : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'
+                          ? 'bg-[#b33228] border-[#f4a296] text-white'
+                          : 'bg-[#302016] border-[#61422a] text-[#efe0c4] hover:bg-[#422c1e]'
                       }`}
                     >
-                      <MessageSquare className="w-3 h-3 text-rose-400" />
+                      <MessageSquare className="w-3 h-3 text-[#f2955e]" />
                       <span>
                         {t.chatBtn} ({messages.length})
                       </span>
@@ -3061,8 +3373,8 @@ export default function App() {
                           }
                           className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
                             activeDrawer === 'gm'
-                              ? 'bg-amber-600 border-amber-300 text-slate-950'
-                              : 'bg-slate-900 border-slate-700 text-amber-300 hover:bg-slate-800'
+                              ? 'bg-[#d9842c] border-[#f7cf86] text-[#211308]'
+                              : 'bg-[#302016] border-[#61422a] text-[#f2be6b] hover:bg-[#422c1e]'
                           }`}
                         >
                           <Shield className="w-3 h-3" />
@@ -3077,7 +3389,7 @@ export default function App() {
                           className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
                             activeDrawer === 'cards'
                               ? 'bg-purple-700 border-purple-400 text-white'
-                              : 'bg-slate-900 border-slate-700 text-purple-300 hover:bg-slate-800'
+                              : 'bg-[#302016] border-[#61422a] text-purple-300 hover:bg-[#422c1e]'
                           }`}
                         >
                           <Smartphone className="w-3 h-3" />
@@ -3093,7 +3405,7 @@ export default function App() {
                           activeDrawer === 'leaderboard' ? 'none' : 'leaderboard'
                         )
                       }
-                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-slate-900 border border-slate-700 text-[10px] font-bold text-yellow-300 hover:bg-slate-800 flex items-center gap-1 cursor-pointer shrink-0"
+                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-[#302016] border border-[#61422a] text-[10px] font-bold text-[#f4cb74] hover:bg-[#422c1e] flex items-center gap-1 cursor-pointer shrink-0"
                     >
                       <Trophy className="w-3 h-3" />
                       <span className="hidden sm:inline">{t.leaderboardShort}</span>
@@ -3106,7 +3418,7 @@ export default function App() {
                           activeDrawer === 'history' ? 'none' : 'history'
                         )
                       }
-                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-slate-900 border border-slate-700 text-[10px] font-bold text-sky-300 hover:bg-slate-800 flex items-center gap-1 cursor-pointer shrink-0"
+                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-[#302016] border border-[#61422a] text-[10px] font-bold text-[#95cbf0] hover:bg-[#422c1e] flex items-center gap-1 cursor-pointer shrink-0"
                     >
                       <History className="w-3 h-3" />
                       <span className="hidden sm:inline">{t.historyShort}</span>
@@ -3119,7 +3431,7 @@ export default function App() {
                           activeDrawer === 'encyclopedia' ? 'none' : 'encyclopedia'
                         )
                       }
-                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-slate-900 border border-slate-700 text-[10px] font-bold text-emerald-300 hover:bg-slate-800 flex items-center gap-1 cursor-pointer shrink-0"
+                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-[#302016] border border-[#61422a] text-[10px] font-bold text-[#8cd8a8] hover:bg-[#422c1e] flex items-center gap-1 cursor-pointer shrink-0"
                     >
                       <BookOpen className="w-3 h-3" />
                       <span className="hidden sm:inline">{t.rulesShort}</span>
@@ -3137,6 +3449,7 @@ export default function App() {
                     const vCount = votesMap[p.id] || 0;
                     const voterLabels = votersByTargetLabels[p.id] || [];
                     const isMyLover = me.loverId === p.id;
+                    const isMayorSeat = mayorId === p.id && p.isAlive;
                     const isMyWolfPackmate =
                       p.id !== me.id &&
                       (me.roleId === 'werewolf' || me.roleId === 'wolf_pup') &&
@@ -3156,7 +3469,7 @@ export default function App() {
                         ? `${p.name} — ${vCount} ${t.votesUnit}: ${voterLabels.join(', ')}`
                         : isVoteLockedOut && selectedTargetId !== null && p.isAlive && p.id !== me.id
                         ? lang === 'vi'
-                          ? 'Chỉ được bầu 1 người! Bấm lại người đang chọn hoặc nút Đổi phiếu để đổi.'
+                          ? 'Chỉ được bầu 1 phiếu! Bấm lại lựa chọn hiện tại hoặc nút Đổi phiếu để đổi.'
                           : 'Only 1 vote allowed! Unselect your current choice or click Change first.'
                         : p.name;
 
@@ -3185,33 +3498,41 @@ export default function App() {
                             : 'cursor-pointer'
                         } ${
                           !p.isAlive
-                            ? 'bg-slate-950/60 border-cyan-900/50 text-cyan-400/70'
+                            ? 'bg-[#1a1512]/70 border-cyan-900/50 text-cyan-300/75'
                             : isSelected
                             ? isDayVoting
-                              ? 'bg-rose-900 border-amber-400 ring-2 ring-amber-400/80 text-white shadow-lg'
-                              : 'bg-rose-950 border-rose-400 text-rose-100 shadow-md'
+                              ? 'bg-[#8f261e] border-[#f4c062] ring-2 ring-[#f4c062]/80 text-white shadow-lg'
+                              : 'bg-[#73231d] border-[#e6786b] text-rose-100 shadow-md'
                             : isDayVoting
-                            ? 'bg-[#0f172a] border-slate-700 text-slate-200 hover:border-amber-400/70'
+                            ? 'bg-[#2a1d14] border-[#5f432b] text-[#f4e7cf] hover:border-[#f2be6b]'
                             : suspectTag === 'wolf_suspect'
-                            ? 'bg-rose-950/85 border-rose-500 text-rose-100'
+                            ? 'bg-[#5a1e1a] border-[#d9534f] text-rose-100'
                             : suspectTag === 'trusted'
-                            ? 'bg-emerald-950/85 border-emerald-500 text-emerald-100'
+                            ? 'bg-[#19402b] border-[#42a870] text-emerald-100'
                             : p.id === me.id
-                            ? 'bg-sky-950/80 border-sky-500/60 text-sky-100'
+                            ? 'bg-[#3b2919] border-[#e8a346] text-[#fff1d4]'
                             : isMyLover
                             ? 'bg-pink-950/80 border-pink-500/60 text-pink-100'
                             : isMyWolfPackmate
-                            ? 'bg-rose-950/70 border-rose-500/50 text-rose-100'
-                            : 'bg-[#0f172a] border-slate-800 text-slate-200 hover:border-amber-500/50'
+                            ? 'bg-[#4f1c19] border-[#c4453d] text-rose-100'
+                            : 'bg-[#241911] border-[#4f3825] text-[#f0e3cb] hover:border-[#a87544]'
                         }`}
                       >
                         <span className="text-xs sm:text-sm">{p.isAlive ? p.avatar : '👻'}</span>
                         <div>
                           <div className="text-[9px] sm:text-[11px] font-bold whitespace-nowrap flex items-center gap-0.5 sm:gap-1">
-                            <span className="text-amber-400 font-mono">#{idx + 1}</span>
+                            <span className="text-[#f2be6b] font-mono">#{idx + 1}</span>
                             <span className="max-w-[68px] sm:max-w-none truncate">{p.name}</span>
+                            {isMayorSeat && (
+                              <span
+                                className="inline-flex items-center text-[#f7cb66]"
+                                title={lang === 'vi' ? 'Thị Trưởng (Phiếu x2)' : 'Mayor (x2 Vote)'}
+                              >
+                                <Crown className="w-2.5 h-2.5" />
+                              </span>
+                            )}
                             {isDayVoting && isSelected && (
-                              <span className="px-1 rounded bg-amber-400 text-slate-950 text-[8px] font-black uppercase">
+                              <span className="px-1 rounded bg-[#f4c062] text-[#221409] text-[8px] font-black uppercase">
                                 {lang === 'vi' ? '✓ Bạn bầu' : '✓ Voted'}
                               </span>
                             )}
@@ -3234,12 +3555,12 @@ export default function App() {
                               </span>
                             )}
                             {vCount > 0 && (
-                              <span className="sm:hidden px-1 rounded bg-rose-700 text-white text-[8px] font-mono">
+                              <span className="sm:hidden px-1 rounded bg-[#b92e25] text-white text-[8px] font-mono">
                                 {vCount}
                               </span>
                             )}
                           </div>
-                          <div className="hidden sm:block text-[9px] font-mono text-slate-300 leading-tight max-w-[165px] truncate">
+                          <div className="hidden sm:block text-[9px] font-mono text-[#d4bea1] leading-tight max-w-[165px] truncate">
                             {!p.isAlive
                               ? t.ghostStatus
                               : vCount > 0
@@ -3280,9 +3601,9 @@ export default function App() {
       {activeDrawer !== 'none' && (
         <div
           className="fixed inset-0 z-40 flex items-center justify-center p-2.5 sm:p-4 pointer-events-auto"
-          style={{ backgroundColor: 'rgba(5, 8, 17, 0.86)' }}
+          style={{ backgroundColor: 'rgba(12, 8, 5, 0.84)' }}
         >
-          <div className="relative w-full max-w-5xl max-h-[88vh] bg-[#0b101e] border-2 border-amber-600/50 rounded-2xl p-3.5 sm:p-5 overflow-y-auto shadow-2xl">
+          <div className="relative w-full max-w-5xl max-h-[88vh] agrou-wood-panel rounded-2xl p-3.5 sm:p-5 overflow-y-auto shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4 gap-2">
               <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold truncate">
                 {activeDrawer === 'chat'
@@ -3873,6 +4194,32 @@ export default function App() {
           }}
         />
       )}
+
+      {/* 11. AGROU AVATAR LOCKER & MAP BIOME CUSTOMIZER */}
+      <AgrouAvatarLockerModal
+        isOpen={showAvatarLocker}
+        lang={lang}
+        config={avatarConfig}
+        playerName={currentUser.name}
+        onChange={handleUpdateAvatarConfig}
+        onClose={() => setShowAvatarLocker(false)}
+      />
+
+      {/* 12. AGROU PARCHMENT DEDUCTION NOTEBOOK DRAWER */}
+      <AgrouNotebookDrawer
+        isOpen={isNotebookOpen}
+        lang={lang}
+        players={players}
+        meId={me.id}
+        mayorId={mayorId}
+        notebook={notebook}
+        onUpdatePlayerNote={handleUpdateNotebookPlayer}
+        onUpdateFreeText={(freeText) =>
+          setNotebook((prev) => ({ ...prev, freeText }))
+        }
+        onShareSummaryToChat={handleShareNotebookToChat}
+        onClose={() => setIsNotebookOpen(false)}
+      />
     </div>
   );
 }
