@@ -1,5 +1,11 @@
 import { initializeApp, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth } from 'firebase/auth';
+import {
+  getAuth,
+  Auth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+} from 'firebase/auth';
 import {
   getFirestore,
   Firestore,
@@ -150,3 +156,81 @@ export async function syncAuthenticatedPlayerAccountToFirestore(account: {
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
+
+export async function signInWithGoogleFirebase(): Promise<{
+  uid: string;
+  displayName: string;
+  username: string;
+  email: string;
+  avatar: string;
+  region: 'VN' | 'SEA' | 'GLOBAL';
+  elo: number;
+  matchesPlayed: number;
+  wins: number;
+}> {
+  if (!authInstance) {
+    throw new Error('Firebase Auth không khả dụng trong môi trường hiện tại.');
+  }
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  const cred = await signInWithPopup(authInstance, provider);
+  const user = cred.user;
+  const uid = user.uid;
+  const email = user.email || '';
+  const baseHandle = (email.split('@')[0] || `player_${uid.slice(0, 6)}`)
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
+    .slice(0, 28);
+  const username = baseHandle.length >= 3 ? baseHandle : `usr_${uid.slice(0, 8)}`;
+
+  let profile = {
+    uid,
+    displayName: (user.displayName || username).slice(0, 40),
+    username,
+    email,
+    avatar: '🐺',
+    region: 'VN' as 'VN' | 'SEA' | 'GLOBAL',
+    elo: 1620,
+    matchesPlayed: 0,
+    wins: 0,
+  };
+
+  if (dbInstance) {
+    try {
+      const accountRef = doc(dbInstance, 'player_accounts', uid);
+      const snap = await getDoc(accountRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        profile = {
+          ...profile,
+          username: typeof data.username === 'string' ? data.username : profile.username,
+          displayName: typeof data.displayName === 'string' ? data.displayName : profile.displayName,
+          avatar: typeof data.avatar === 'string' ? data.avatar : profile.avatar,
+          region:
+            data.region === 'SEA' || data.region === 'GLOBAL' || data.region === 'VN'
+              ? data.region
+              : 'VN',
+          elo: typeof data.elo === 'number' ? data.elo : 1620,
+          matchesPlayed: typeof data.matchesPlayed === 'number' ? data.matchesPlayed : 0,
+          wins: typeof data.wins === 'number' ? data.wins : 0,
+        };
+      } else if (user.emailVerified) {
+        await syncAuthenticatedPlayerAccountToFirestore(profile);
+      }
+    } catch {
+      // keep authenticated Google profile even if Firestore read is temporarily unavailable
+    }
+  }
+
+  return profile;
+}
+
+export async function signOutFirebase(): Promise<void> {
+  if (!authInstance) return;
+  try {
+    await signOut(authInstance);
+  } catch {
+    // ignore sign-out error
+  }
+}
+

@@ -26,11 +26,25 @@ function applyDoppelgangerInheritance(doppel: Player, inheritedRole: RoleId): vo
 }
 
 /**
+ * Unbiased Fisher-Yates (Knuth) shuffle — returns a new shuffled array without mutating input.
+ */
+export function fisherYatesShuffle<T>(items: readonly T[]): T[] {
+  const result = [...items];
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = result[i];
+    result[i] = result[j];
+    result[j] = tmp;
+  }
+  return result;
+}
+
+/**
  * Generate a balanced deck of roles based on player count (supports custom player counts 4..24)
  */
 export function generateBalancedRoster(playerCount: number, customSelection?: RoleId[]): RoleId[] {
   if (customSelection && customSelection.length === playerCount) {
-    return [...customSelection].sort(() => Math.random() - 0.5);
+    return fisherYatesShuffle(customSelection);
   }
 
   const roles: RoleId[] = [];
@@ -92,7 +106,7 @@ export function generateBalancedRoster(playerCount: number, customSelection?: Ro
     }
   }
 
-  return roles.slice(0, playerCount).sort(() => Math.random() - 0.5);
+  return fisherYatesShuffle(roles.slice(0, playerCount));
 }
 
 /**
@@ -104,7 +118,29 @@ export function assignPreferredRoleToDeck(
   roleChoice: RoleId | 'random'
 ): RoleId[] {
   const result = [...deck];
-  if (roleChoice === 'random' || result.length === 0) return result;
+  if (result.length === 0) return result;
+
+  if (roleChoice === 'random') {
+    const everyNightActiveRoles = new Set<RoleId>([
+      'werewolf',
+      'wolf_pup',
+      'seer',
+      'witch',
+      'bodyguard',
+    ]);
+    if (!everyNightActiveRoles.has(result[0])) {
+      const activeIndices = result
+        .map((r, idx) => (everyNightActiveRoles.has(r) ? idx : -1))
+        .filter((idx) => idx !== -1);
+      if (activeIndices.length > 0) {
+        const pickIdx = activeIndices[Math.floor(Math.random() * activeIndices.length)];
+        const temp = result[0];
+        result[0] = result[pickIdx];
+        result[pickIdx] = temp;
+      }
+    }
+    return result;
+  }
 
   const existingIdx = result.indexOf(roleChoice);
   if (existingIdx !== -1) {
@@ -590,18 +626,102 @@ export function applyDayLynch(
 }
 
 /**
- * Tally day votes transparently
+ * Enforce single-vote invariant for daytime voting:
+ * Each voter may hold at most ONE active vote at any time.
+ * Passing targetId = null clears the voter's vote.
+ */
+export function castSingleDayVote(
+  votes: VoteRecord[],
+  voterId: string,
+  targetId: string | null
+): VoteRecord[] {
+  const withoutVoter = votes.filter((v) => v.voterId !== voterId);
+  if (!targetId) {
+    return withoutVoter;
+  }
+  return [...withoutVoter, { voterId, targetId }];
+}
+
+export interface VoteTallyVoter {
+  id: string;
+  name: string;
+  avatar: string;
+  seatNumber: number;
+}
+
+export interface VoteTallyEntry {
+  playerId: string;
+  name: string;
+  avatar: string;
+  seatNumber: number;
+  votes: number;
+  voters: VoteTallyVoter[];
+}
+
+/**
+ * Deduplicate votes by voterId (last vote wins) and aggregate both vote count
+ * and the exact list of voters who voted for each target.
+ */
+export function buildVoteTallyEntries(
+  players: Player[],
+  votes: VoteRecord[]
+): VoteTallyEntry[] {
+  const latestVoteByVoter = new Map<string, string>();
+  for (const v of votes) {
+    if (!v.voterId || !v.targetId) continue;
+    latestVoteByVoter.set(v.voterId, v.targetId);
+  }
+
+  const votersByTarget = new Map<string, VoteTallyVoter[]>();
+  for (const [voterId, targetId] of latestVoteByVoter.entries()) {
+    const voterIdx = players.findIndex((p) => p.id === voterId);
+    const voter = voterIdx >= 0 ? players[voterIdx] : null;
+    const voterInfo: VoteTallyVoter = {
+      id: voterId,
+      name: voter?.name || voterId,
+      avatar: voter?.avatar || '👤',
+      seatNumber: voterIdx >= 0 ? voterIdx + 1 : 0,
+    };
+    const list = votersByTarget.get(targetId) || [];
+    list.push(voterInfo);
+    votersByTarget.set(targetId, list);
+  }
+
+  const entries: VoteTallyEntry[] = [];
+  for (const [targetId, voters] of votersByTarget.entries()) {
+    const targetIdx = players.findIndex((p) => p.id === targetId);
+    const target = targetIdx >= 0 ? players[targetIdx] : null;
+    voters.sort((a, b) => a.seatNumber - b.seatNumber);
+    entries.push({
+      playerId: targetId,
+      name: target?.name || targetId,
+      avatar: target?.avatar || '👤',
+      seatNumber: targetIdx >= 0 ? targetIdx + 1 : 0,
+      votes: voters.length,
+      voters,
+    });
+  }
+
+  return entries.sort((a, b) => b.votes - a.votes || a.seatNumber - b.seatNumber);
+}
+
+/**
+ * Tally day votes transparently (deduplicated per voter so no player can vote twice)
  */
 export function tallyVotes(votes: VoteRecord[]): {
   targetId: string | null;
   isTie: boolean;
   counts: Record<string, number>;
 } {
-  const counts: Record<string, number> = {};
-
+  const latestVoteByVoter = new Map<string, string>();
   for (const v of votes) {
-    if (!v.targetId) continue;
-    counts[v.targetId] = (counts[v.targetId] || 0) + 1;
+    if (!v.voterId || !v.targetId) continue;
+    latestVoteByVoter.set(v.voterId, v.targetId);
+  }
+
+  const counts: Record<string, number> = {};
+  for (const targetId of latestVoteByVoter.values()) {
+    counts[targetId] = (counts[targetId] || 0) + 1;
   }
 
   let maxVotes = 0;

@@ -5,20 +5,22 @@ import {
   UserPlus,
   LogIn,
   ShieldCheck,
-  CheckCircle2,
   LogOut,
-  Sparkles,
   KeyRound,
   Eye,
   EyeOff,
   Globe,
   AlertCircle,
-  Database,
   Trophy,
+  Sparkles,
 } from 'lucide-react';
 import { Language } from '../types/game';
 import { sound } from '../utils/sound';
-import { syncAuthenticatedPlayerAccountToFirestore } from '../firebase';
+import {
+  signInWithGoogleFirebase,
+  signOutFirebase,
+  syncAuthenticatedPlayerAccountToFirestore,
+} from '../firebase';
 
 export type AuthProviderId = 'account' | 'guest' | 'google' | 'facebook';
 
@@ -46,74 +48,30 @@ export interface PublicDatabaseAccount {
   updatedAt: number;
 }
 
-const LOCAL_DB_ACCOUNTS_KEY = 'werewolf_db_accounts_v3';
-
 export type AccountModalTab = 'login' | 'register' | 'profile';
 
 interface SocialLoginModalProps {
   currentUser: UserProfileData;
+  authToken?: string | null;
   initialTab?: AccountModalTab | null;
-  onSaveProfile: (profile: {
-    name: string;
-    avatar: string;
-    provider: AuthProviderId;
-    handle: string;
-    region?: string;
-    elo?: number;
-    matchesPlayed?: number;
-    wins?: number;
-  }) => void;
+  onSaveProfile: (
+    profile: {
+      name: string;
+      avatar: string;
+      provider: AuthProviderId;
+      handle: string;
+      region?: string;
+      elo?: number;
+      matchesPlayed?: number;
+      wins?: number;
+    },
+    token?: string | null
+  ) => void;
   lang: Language;
   onClose: () => void;
 }
 
 const AVATAR_OPTIONS = ['🐺', '🔮', '🛡️', '🧪', '🎯', '💘', '🎭', '👑', '🔥', '🧑‍🌾', '🗡️', '🌓'];
-
-const DEFAULT_FALLBACK_ACCOUNTS: PublicDatabaseAccount[] = [
-  {
-    id: 'acc_huy132001',
-    username: 'huy132001',
-    displayName: 'Huy Nguyễn',
-    avatar: '🐺',
-    region: 'VN',
-    elo: 1680,
-    matchesPlayed: 14,
-    wins: 9,
-    updatedAt: Date.now(),
-  },
-  {
-    id: 'acc_thosandem',
-    username: 'thosandem',
-    displayName: 'Thợ Săn Đêm',
-    avatar: '🎯',
-    region: 'VN',
-    elo: 1620,
-    matchesPlayed: 8,
-    wins: 5,
-    updatedAt: Date.now(),
-  },
-];
-
-function loadCachedAccounts(): PublicDatabaseAccount[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_DB_ACCOUNTS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch {
-    // ignore
-  }
-  return DEFAULT_FALLBACK_ACCOUNTS;
-}
-
-function saveCachedAccounts(list: PublicDatabaseAccount[]) {
-  try {
-    localStorage.setItem(LOCAL_DB_ACCOUNTS_KEY, JSON.stringify(list.slice(0, 30)));
-  } catch {
-    // ignore
-  }
-}
 
 const ACCOUNT_I18N: Record<
   Language,
@@ -124,7 +82,6 @@ const ACCOUNT_I18N: Record<
     tabLogin: string;
     tabRegister: string;
     tabProfile: string;
-    savedAccountsLabel: string;
     usernameLabel: string;
     usernamePlaceholder: string;
     passwordLabel: string;
@@ -137,6 +94,7 @@ const ACCOUNT_I18N: Record<
     avatarLabel: string;
     loginSubmitBtn: string;
     registerSubmitBtn: string;
+    googleSignInBtn: string;
     saveProfileBtn: string;
     signOutBtn: string;
     submittingText: string;
@@ -144,192 +102,195 @@ const ACCOUNT_I18N: Record<
     switchToRegister: string;
     alreadyHaveAccount: string;
     switchToLogin: string;
-    dbSyncNotice: string;
+    syncNotice: string;
     errInvalidUsername: string;
     errInvalidPassword: string;
     errPasswordMismatch: string;
     errInvalidDisplayName: string;
-    defaultPassHint: string;
+    errNetwork: string;
+    errSessionExpired: string;
   }
 > = {
   vi: {
-    modalTitle: 'Tài Khoản Người Chơi & Lưu Trữ Database',
+    modalTitle: 'Tài Khoản & Hồ Sơ Người Chơi',
     loggedInBadge: (u) => `Đã đăng nhập · @${u}`,
-    guestBadge: 'Tài khoản Khách (Chưa đăng ký)',
+    guestBadge: 'Đang chơi chế độ Khách',
     tabLogin: 'Đăng Nhập',
     tabRegister: 'Đăng Ký Mới',
     tabProfile: 'Hồ Sơ Cá Nhân',
-    savedAccountsLabel: 'Tài khoản trên Database (Bấm để điền nhanh):',
-    usernameLabel: 'Tên tài khoản / Username (*):',
-    usernamePlaceholder: 'VD: huy132001 (3–32 ký tự chữ hoặc số)...',
-    passwordLabel: 'Mật khẩu (*):',
-    passwordPlaceholder: 'Nhập mật khẩu (tối thiểu 4 ký tự)...',
-    confirmPasswordLabel: 'Nhập lại mật khẩu (*):',
-    confirmPasswordPlaceholder: 'Xác nhận lại mật khẩu...',
-    displayNameLabel: 'Tên hiển thị trong Làng 3D (*):',
+    usernameLabel: 'Tên tài khoản (*)',
+    usernamePlaceholder: 'VD: thosandem (3–32 ký tự chữ hoặc số)',
+    passwordLabel: 'Mật khẩu (*)',
+    passwordPlaceholder: 'Nhập mật khẩu (tối thiểu 6 ký tự)',
+    confirmPasswordLabel: 'Nhập lại mật khẩu (*)',
+    confirmPasswordPlaceholder: 'Xác nhận lại mật khẩu',
+    displayNameLabel: 'Tên hiển thị trong Làng 3D (*)',
     displayNamePlaceholder: 'VD: Huy Nguyễn, Thợ Săn Đêm...',
-    regionLabel: 'Máy chủ khu vực:',
-    avatarLabel: 'Biểu tượng nhân vật đại diện:',
-    loginSubmitBtn: 'Đăng Nhập Tài Khoản',
-    registerSubmitBtn: 'Tạo Tài Khoản & Lưu Vào Database',
-    saveProfileBtn: 'Cập Nhật Hồ Sơ Lên Database',
+    regionLabel: 'Máy chủ khu vực',
+    avatarLabel: 'Biểu tượng đại diện',
+    loginSubmitBtn: 'Đăng Nhập',
+    registerSubmitBtn: 'Tạo Tài Khoản',
+    googleSignInBtn: 'Đăng nhập nhanh bằng Google',
+    saveProfileBtn: 'Lưu Hồ Sơ',
     signOutBtn: 'Đăng Xuất',
-    submittingText: 'Đang đồng bộ với Database...',
-    noAccountYet: 'Bạn chưa có tài khoản?',
-    switchToRegister: 'Đăng ký tài khoản mới ngay →',
-    alreadyHaveAccount: 'Đã có tài khoản trên Database?',
+    submittingText: 'Đang xác thực...',
+    noAccountYet: 'Chưa có tài khoản?',
+    switchToRegister: 'Đăng ký ngay →',
+    alreadyHaveAccount: 'Đã có tài khoản?',
     switchToLogin: '← Quay về Đăng nhập',
-    dbSyncNotice:
-      'Tài khoản, điểm ELO, số trận thắng và hồ sơ 3D được lưu trữ trực tiếp trên Database.',
-    errInvalidUsername:
-      'Tên tài khoản phải từ 3–32 ký tự (chỉ gồm chữ cái, số, _, ., - hoặc @)!',
-    errInvalidPassword: 'Mật khẩu phải có tối thiểu 4 ký tự!',
-    errPasswordMismatch: 'Mật khẩu xác nhận không khớp!',
-    errInvalidDisplayName: 'Tên hiển thị phải từ 2–40 ký tự!',
-    defaultPassHint: 'Gợi ý: Mật khẩu mặc định của tài khoản mẫu là werewolf2026',
+    syncNotice: 'Điểm ELO, lịch sử chiến thắng và biểu tượng 3D được lưu an toàn theo tài khoản của bạn.',
+    errInvalidUsername: 'Tên tài khoản phải từ 3–32 ký tự (chữ cái, số, _, ., - hoặc @).',
+    errInvalidPassword: 'Mật khẩu phải có tối thiểu 6 ký tự.',
+    errPasswordMismatch: 'Mật khẩu xác nhận không khớp.',
+    errInvalidDisplayName: 'Tên hiển thị phải từ 2–40 ký tự.',
+    errNetwork: 'Không thể kết nối máy chủ. Vui lòng thử lại sau.',
+    errSessionExpired: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại để lưu thay đổi.',
   },
   en: {
-    modalTitle: 'Player Account & Database Storage',
+    modalTitle: 'Player Account & Profile',
     loggedInBadge: (u) => `Signed in · @${u}`,
-    guestBadge: 'Guest Account (Unregistered)',
+    guestBadge: 'Playing as Guest',
     tabLogin: 'Sign In',
     tabRegister: 'Create Account',
     tabProfile: 'My Profile',
-    savedAccountsLabel: 'Accounts in Database (Click to quick-fill):',
-    usernameLabel: 'Account Username (*):',
-    usernamePlaceholder: 'e.g. huy132001 (3–32 alphanumeric chars)...',
-    passwordLabel: 'Password (*):',
-    passwordPlaceholder: 'Enter password (min 4 characters)...',
-    confirmPasswordLabel: 'Confirm Password (*):',
-    confirmPasswordPlaceholder: 'Re-enter your password...',
-    displayNameLabel: 'Display Name in 3D Village (*):',
-    displayNamePlaceholder: 'e.g. Night Hunter...',
-    regionLabel: 'Server Region:',
-    avatarLabel: 'Character Avatar Emblem:',
-    loginSubmitBtn: 'Sign In to Account',
-    registerSubmitBtn: 'Create Account & Save to Database',
-    saveProfileBtn: 'Update Profile in Database',
+    usernameLabel: 'Username (*)',
+    usernamePlaceholder: 'e.g. nighthunter (3–32 chars)',
+    passwordLabel: 'Password (*)',
+    passwordPlaceholder: 'Enter password (min 6 chars)',
+    confirmPasswordLabel: 'Confirm Password (*)',
+    confirmPasswordPlaceholder: 'Re-enter your password',
+    displayNameLabel: 'Display Name in 3D Village (*)',
+    displayNamePlaceholder: 'e.g. Night Hunter',
+    regionLabel: 'Server Region',
+    avatarLabel: 'Avatar Emblem',
+    loginSubmitBtn: 'Sign In',
+    registerSubmitBtn: 'Create Account',
+    googleSignInBtn: 'Continue with Google',
+    saveProfileBtn: 'Save Profile',
     signOutBtn: 'Sign Out',
-    submittingText: 'Syncing with Database...',
-    noAccountYet: "Don't have an account yet?",
-    switchToRegister: 'Create a new account →',
+    submittingText: 'Verifying...',
+    noAccountYet: "Don't have an account?",
+    switchToRegister: 'Create one →',
     alreadyHaveAccount: 'Already have an account?',
     switchToLogin: '← Back to Sign In',
-    dbSyncNotice:
-      'Your account, ELO rating, wins, and 3D avatar are persisted directly in the Database.',
-    errInvalidUsername:
-      'Username must be 3–32 characters (letters, numbers, _, ., - or @)!',
-    errInvalidPassword: 'Password must be at least 4 characters!',
-    errPasswordMismatch: 'Confirmation password does not match!',
-    errInvalidDisplayName: 'Display name must be 2–40 characters!',
-    defaultPassHint: 'Tip: Default password for demo accounts is werewolf2026',
+    syncNotice: 'Your ELO rating, match wins, and 3D emblem stay safely linked to your account.',
+    errInvalidUsername: 'Username must be 3–32 characters (letters, numbers, _, ., - or @).',
+    errInvalidPassword: 'Password must be at least 6 characters.',
+    errPasswordMismatch: 'Confirmation password does not match.',
+    errInvalidDisplayName: 'Display name must be 2–40 characters.',
+    errNetwork: 'Unable to reach server. Please try again.',
+    errSessionExpired: 'Your session expired. Please sign in again to save changes.',
   },
   fr: {
-    modalTitle: 'Compte Joueur & Base de Données',
+    modalTitle: 'Compte & Profil Joueur',
     loggedInBadge: (u) => `Connecté · @${u}`,
-    guestBadge: 'Compte Invité',
+    guestBadge: 'Mode Invité',
     tabLogin: 'Connexion',
-    tabRegister: 'Créer un Compte',
+    tabRegister: 'Inscription',
     tabProfile: 'Mon Profil',
-    savedAccountsLabel: 'Comptes enregistrés en base :',
-    usernameLabel: 'Nom d’utilisateur (*):',
-    usernamePlaceholder: 'ex: huy132001 (3–32 caractères)...',
-    passwordLabel: 'Mot de passe (*):',
-    passwordPlaceholder: 'Mot de passe (min 4 caractères)...',
-    confirmPasswordLabel: 'Confirmer le mot de passe (*):',
-    confirmPasswordPlaceholder: 'Confirmez le mot de passe...',
-    displayNameLabel: 'Pseudo dans le Village 3D (*):',
-    displayNamePlaceholder: 'Entrez votre pseudo...',
-    regionLabel: 'Région du serveur :',
-    avatarLabel: 'Emblème d’Avatar :',
+    usernameLabel: 'Identifiant (*)',
+    usernamePlaceholder: 'ex: chasseur (3–32 caractères)',
+    passwordLabel: 'Mot de passe (*)',
+    passwordPlaceholder: 'Mot de passe (min 6 caractères)',
+    confirmPasswordLabel: 'Confirmer (*)',
+    confirmPasswordPlaceholder: 'Confirmez le mot de passe',
+    displayNameLabel: 'Pseudo dans le Village 3D (*)',
+    displayNamePlaceholder: 'Votre pseudo',
+    regionLabel: 'Région',
+    avatarLabel: 'Emblème',
     loginSubmitBtn: 'Se Connecter',
-    registerSubmitBtn: 'Créer le Compte & Sauvegarder',
-    saveProfileBtn: 'Mettre à jour le profil',
+    registerSubmitBtn: 'Créer le Compte',
+    googleSignInBtn: 'Continuer avec Google',
+    saveProfileBtn: 'Enregistrer',
     signOutBtn: 'Déconnexion',
-    submittingText: 'Synchronisation...',
+    submittingText: 'Vérification...',
     noAccountYet: 'Pas encore de compte ?',
     switchToRegister: 'Créer un compte →',
     alreadyHaveAccount: 'Déjà inscrit ?',
-    switchToLogin: '← Retour à la connexion',
-    dbSyncNotice: 'Votre compte, ELO et statistiques sont sauvegardés dans la base de données.',
-    errInvalidUsername: 'Nom d’utilisateur invalide (3–32 caractères) !',
-    errInvalidPassword: 'Mot de passe trop court (min 4 caractères) !',
-    errPasswordMismatch: 'Les mots de passe ne correspondent pas !',
-    errInvalidDisplayName: 'Le pseudo doit contenir entre 2 et 40 caractères !',
-    defaultPassHint: 'Astuce : Mot de passe démo = werewolf2026',
+    switchToLogin: '← Connexion',
+    syncNotice: 'Votre ELO, victoires et avatar sont liés en sécurité à votre compte.',
+    errInvalidUsername: 'Identifiant invalide (3–32 caractères).',
+    errInvalidPassword: 'Le mot de passe doit contenir au moins 6 caractères.',
+    errPasswordMismatch: 'Les mots de passe ne correspondent pas.',
+    errInvalidDisplayName: 'Le pseudo doit contenir entre 2 et 40 caractères.',
+    errNetwork: 'Serveur indisponible. Réessayez.',
+    errSessionExpired: 'Session expirée. Reconnectez-vous pour enregistrer.',
   },
   es: {
-    modalTitle: 'Cuenta de Jugador y Base de Datos',
+    modalTitle: 'Cuenta y Perfil de Jugador',
     loggedInBadge: (u) => `Conectado · @${u}`,
-    guestBadge: 'Cuenta de Invitado',
+    guestBadge: 'Modo Invitado',
     tabLogin: 'Iniciar Sesión',
     tabRegister: 'Crear Cuenta',
     tabProfile: 'Mi Perfil',
-    savedAccountsLabel: 'Cuentas en la Base de Datos:',
-    usernameLabel: 'Nombre de usuario (*):',
-    usernamePlaceholder: 'ej: huy132001 (3–32 caracteres)...',
-    passwordLabel: 'Contraseña (*):',
-    passwordPlaceholder: 'Contraseña (mín. 4 caracteres)...',
-    confirmPasswordLabel: 'Confirmar contraseña (*):',
-    confirmPasswordPlaceholder: 'Repite la contraseña...',
-    displayNameLabel: 'Nombre en la Aldea 3D (*):',
-    displayNamePlaceholder: 'Ingresa tu nombre...',
-    regionLabel: 'Región del Servidor:',
-    avatarLabel: 'Emblema de Personaje:',
+    usernameLabel: 'Usuario (*)',
+    usernamePlaceholder: 'ej: cazador (3–32 caracteres)',
+    passwordLabel: 'Contraseña (*)',
+    passwordPlaceholder: 'Contraseña (mín. 6 caracteres)',
+    confirmPasswordLabel: 'Confirmar (*)',
+    confirmPasswordPlaceholder: 'Repite la contraseña',
+    displayNameLabel: 'Nombre en la Aldea 3D (*)',
+    displayNamePlaceholder: 'Tu nombre',
+    regionLabel: 'Región',
+    avatarLabel: 'Emblema',
     loginSubmitBtn: 'Iniciar Sesión',
-    registerSubmitBtn: 'Crear Cuenta y Guardar en BD',
-    saveProfileBtn: 'Actualizar Perfil en BD',
+    registerSubmitBtn: 'Crear Cuenta',
+    googleSignInBtn: 'Continuar con Google',
+    saveProfileBtn: 'Guardar Perfil',
     signOutBtn: 'Cerrar Sesión',
-    submittingText: 'Sincronizando con BD...',
+    submittingText: 'Verificando...',
     noAccountYet: '¿Aún no tienes cuenta?',
-    switchToRegister: 'Crear una cuenta nueva →',
+    switchToRegister: 'Crear una →',
     alreadyHaveAccount: '¿Ya tienes cuenta?',
-    switchToLogin: '← Volver a Iniciar Sesión',
-    dbSyncNotice: 'Tu cuenta, ELO y victorias se guardan directamente en la base de datos.',
-    errInvalidUsername: '¡Usuario inválido (3–32 caracteres)!',
-    errInvalidPassword: '¡La contraseña debe tener al menos 4 caracteres!',
-    errPasswordMismatch: '¡Las contraseñas no coinciden!',
-    errInvalidDisplayName: '¡El nombre debe tener entre 2 y 40 caracteres!',
-    defaultPassHint: 'Consejo: Contraseña demo = werewolf2026',
+    switchToLogin: '← Iniciar Sesión',
+    syncNotice: 'Tu ELO, victorias y emblema 3D se guardan de forma segura en tu cuenta.',
+    errInvalidUsername: 'Usuario inválido (3–32 caracteres).',
+    errInvalidPassword: 'La contraseña debe tener al menos 6 caracteres.',
+    errPasswordMismatch: 'Las contraseñas no coinciden.',
+    errInvalidDisplayName: 'El nombre debe tener entre 2 y 40 caracteres.',
+    errNetwork: 'No se pudo conectar al servidor.',
+    errSessionExpired: 'Sesión expirada. Inicia sesión nuevamente.',
   },
   ja: {
-    modalTitle: 'プレイヤーアカウント＆データベース保存',
+    modalTitle: 'プレイヤーアカウント＆プロフィール',
     loggedInBadge: (u) => `ログイン中 · @${u}`,
-    guestBadge: 'ゲストアカウント（未登録）',
+    guestBadge: 'ゲストモード',
     tabLogin: 'ログイン',
-    tabRegister: '新規アカウント作成',
-    tabProfile: 'プロフィール設定',
-    savedAccountsLabel: 'データベース保存済みアカウント（クリックで自動入力）:',
-    usernameLabel: 'ユーザーID / アカウント名 (*):',
-    usernamePlaceholder: '例: huy132001 (3〜32文字の英数字)...',
-    passwordLabel: 'パスワード (*):',
-    passwordPlaceholder: 'パスワード（4文字以上）...',
-    confirmPasswordLabel: 'パスワード確認 (*):',
-    confirmPasswordPlaceholder: 'もう一度パスワードを入力...',
-    displayNameLabel: '3D村での表示名 (*):',
-    displayNamePlaceholder: 'ニックネームを入力...',
-    regionLabel: 'サーバー地域:',
-    avatarLabel: 'キャラクターアバター:',
-    loginSubmitBtn: 'アカウントにログイン',
-    registerSubmitBtn: 'アカウントを作成してDBに保存',
-    saveProfileBtn: 'プロフィールをDBに更新',
+    tabRegister: '新規作成',
+    tabProfile: 'プロフィール',
+    usernameLabel: 'ユーザーID (*)',
+    usernamePlaceholder: '例: hunter01 (3〜32文字)',
+    passwordLabel: 'パスワード (*)',
+    passwordPlaceholder: '6文字以上',
+    confirmPasswordLabel: 'パスワード確認 (*)',
+    confirmPasswordPlaceholder: '再入力',
+    displayNameLabel: '3D村での表示名 (*)',
+    displayNamePlaceholder: 'ニックネーム',
+    regionLabel: '地域',
+    avatarLabel: 'アバター',
+    loginSubmitBtn: 'ログイン',
+    registerSubmitBtn: 'アカウント作成',
+    googleSignInBtn: 'Googleでログイン',
+    saveProfileBtn: '保存',
     signOutBtn: 'ログアウト',
-    submittingText: 'データベース同期中...',
+    submittingText: '認証中...',
     noAccountYet: 'アカウントをお持ちでないですか？',
-    switchToRegister: '新規アカウント作成へ →',
+    switchToRegister: '新規作成へ →',
     alreadyHaveAccount: '既にアカウントをお持ちですか？',
-    switchToLogin: '← ログイン画面に戻る',
-    dbSyncNotice: 'アカウント、ELOレート、戦績はデータベースに直接保存されます。',
-    errInvalidUsername: 'ユーザーIDは3〜32文字の半角英数字で入力してください！',
-    errInvalidPassword: 'パスワードは4文字以上で入力してください！',
-    errPasswordMismatch: '確認用パスワードが一致しません！',
-    errInvalidDisplayName: '表示名は2〜40文字で入力してください！',
-    defaultPassHint: 'ヒント: サンプルアカウントのパスワードは werewolf2026 です',
+    switchToLogin: '← ログインへ',
+    syncNotice: 'ELOレート・戦績・アバターはアカウントに安全に保存されます。',
+    errInvalidUsername: 'ユーザーIDは3〜32文字の半角英数字で入力してください。',
+    errInvalidPassword: 'パスワードは6文字以上で入力してください。',
+    errPasswordMismatch: 'パスワードが一致しません。',
+    errInvalidDisplayName: '表示名は2〜40文字で入力してください。',
+    errNetwork: 'サーバーに接続できませんでした。',
+    errSessionExpired: 'セッションが期限切れです。再ログインしてください。',
   },
 };
 
 export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
   currentUser,
+  authToken = null,
   initialTab = null,
   onSaveProfile,
   lang,
@@ -345,17 +306,10 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
     return isLoggedInAccount ? 'profile' : 'login';
   });
 
-  const [dbAccounts, setDbAccounts] = useState<PublicDatabaseAccount[]>(() =>
-    loadCachedAccounts()
+  const [username, setUsername] = useState<string>(() =>
+    currentUser.handle && currentUser.handle !== 'guest' ? currentUser.handle : ''
   );
-
-  const [username, setUsername] = useState<string>(() => {
-    if (currentUser.handle && currentUser.handle !== 'guest') return currentUser.handle;
-    return initialTab === 'register' ? '' : 'huy132001';
-  });
-  const [password, setPassword] = useState<string>(() =>
-    initialTab === 'register' ? '' : 'werewolf2026'
-  );
+  const [password, setPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [displayName, setDisplayName] = useState<string>(currentUser.name || 'Thợ Săn Đêm');
@@ -364,26 +318,47 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
     (currentUser.region as 'VN' | 'SEA' | 'GLOBAL') || 'VN'
   );
   const [validationError, setValidationError] = useState<string>('');
-  const [successBanner, setSuccessBanner] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   useEffect(() => {
     setValidationError('');
-    setSuccessBanner('');
   }, [activeTab, username, password, confirmPassword, displayName]);
 
-  // Fetch registered accounts from Server Database on mount
-  useEffect(() => {
-    fetch('/api/accounts/list')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data?.ok && Array.isArray(data.accounts) && data.accounts.length > 0) {
-          setDbAccounts(data.accounts);
-          saveCachedAccounts(data.accounts);
-        }
-      })
-      .catch(() => {});
-  }, []);
+  const handleGoogleSignIn = async () => {
+    sound.playCardFlip();
+    setIsSubmitting(true);
+    setValidationError('');
+    try {
+      const profile = await signInWithGoogleFirebase();
+      sound.playDayGong();
+      onSaveProfile(
+        {
+          name: profile.displayName,
+          avatar: profile.avatar,
+          provider: 'google',
+          handle: profile.username,
+          region: profile.region,
+          elo: profile.elo,
+          matchesPlayed: profile.matchesPlayed,
+          wins: profile.wins,
+        },
+        null
+      );
+      setIsSubmitting(false);
+      onClose();
+    } catch (err) {
+      const msg =
+        err instanceof Error && err.message.includes('popup-closed-by-user')
+          ? lang === 'vi'
+            ? 'Bạn đã đóng cửa sổ đăng nhập Google.'
+            : 'Google sign-in popup was closed.'
+          : lang === 'vi'
+          ? 'Không thể đăng nhập Google trong khung xem trước này. Bạn có thể dùng Tài khoản & Mật khẩu bên dưới.'
+          : 'Google sign-in unavailable in this preview frame. Please use Username & Password below.';
+      setValidationError(msg);
+      setIsSubmitting(false);
+    }
+  };
 
   const handleLoginSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -392,7 +367,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
       setValidationError(st.errInvalidUsername);
       return;
     }
-    if (!password || password.length < 4) {
+    if (!password || password.length < 6) {
       setValidationError(st.errInvalidPassword);
       return;
     }
@@ -408,65 +383,32 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
         body: JSON.stringify({ username: cleanUser, password }),
       });
       const data = await res.json();
-      if (!res.ok || !data?.ok) {
+      if (!res.ok || !data?.ok || !data?.token) {
         setValidationError(data?.error || st.errInvalidPassword);
         setIsSubmitting(false);
         return;
       }
 
       const acc: PublicDatabaseAccount = data.account;
-      if (Array.isArray(data.accounts)) {
-        setDbAccounts(data.accounts);
-        saveCachedAccounts(data.accounts);
-      }
-
-      // Sync with Firestore if authenticated
-      syncAuthenticatedPlayerAccountToFirestore({
-        username: acc.username,
-        displayName: acc.displayName,
-        avatar: acc.avatar,
-        region: acc.region,
-        elo: acc.elo,
-        matchesPlayed: acc.matchesPlayed || 0,
-        wins: acc.wins || 0,
-      }).catch(() => {});
-
       sound.playDayGong();
-      onSaveProfile({
-        name: acc.displayName,
-        avatar: acc.avatar,
-        provider: 'account',
-        handle: acc.username,
-        region: acc.region,
-        elo: acc.elo,
-        matchesPlayed: acc.matchesPlayed,
-        wins: acc.wins,
-      });
+      onSaveProfile(
+        {
+          name: acc.displayName,
+          avatar: acc.avatar,
+          provider: 'account',
+          handle: acc.username,
+          region: acc.region,
+          elo: acc.elo,
+          matchesPlayed: acc.matchesPlayed,
+          wins: acc.wins,
+        },
+        String(data.token)
+      );
       setIsSubmitting(false);
       onClose();
     } catch {
-      // Fallback to local cached database if offline
-      const localMatch = dbAccounts.find(
-        (a) => a.username.toLowerCase() === cleanUser
-      );
-      if (!localMatch) {
-        setValidationError('Tài khoản chưa tồn tại trong Database!');
-        setIsSubmitting(false);
-        return;
-      }
-      sound.playDayGong();
-      onSaveProfile({
-        name: localMatch.displayName,
-        avatar: localMatch.avatar,
-        provider: 'account',
-        handle: localMatch.username,
-        region: localMatch.region,
-        elo: localMatch.elo,
-        matchesPlayed: localMatch.matchesPlayed,
-        wins: localMatch.wins,
-      });
+      setValidationError(st.errNetwork);
       setIsSubmitting(false);
-      onClose();
     }
   };
 
@@ -483,7 +425,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
       setValidationError(st.errInvalidUsername);
       return;
     }
-    if (!password || password.length < 4) {
+    if (!password || password.length < 6) {
       setValidationError(st.errInvalidPassword);
       return;
     }
@@ -510,78 +452,40 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
           displayName: cleanName,
           avatar: selectedAvatar,
           region,
-          elo: currentUser.elo || 1620,
         }),
       });
       const data = await res.json();
-      if (!res.ok || !data?.ok) {
+      if (!res.ok || !data?.ok || !data?.token) {
         setValidationError(data?.error || st.errInvalidUsername);
         setIsSubmitting(false);
         return;
       }
 
       const acc: PublicDatabaseAccount = data.account;
-      if (Array.isArray(data.accounts)) {
-        setDbAccounts(data.accounts);
-        saveCachedAccounts(data.accounts);
-      }
-
-      // Sync with Firestore if authenticated
-      syncAuthenticatedPlayerAccountToFirestore({
-        username: acc.username,
-        displayName: acc.displayName,
-        avatar: acc.avatar,
-        region: acc.region,
-        elo: acc.elo,
-        matchesPlayed: acc.matchesPlayed || 0,
-        wins: acc.wins || 0,
-      }).catch(() => {});
-
       sound.playDayGong();
-      onSaveProfile({
-        name: acc.displayName,
-        avatar: acc.avatar,
-        provider: 'account',
-        handle: acc.username,
-        region: acc.region,
-        elo: acc.elo,
-        matchesPlayed: acc.matchesPlayed,
-        wins: acc.wins,
-      });
+      onSaveProfile(
+        {
+          name: acc.displayName,
+          avatar: acc.avatar,
+          provider: 'account',
+          handle: acc.username,
+          region: acc.region,
+          elo: acc.elo,
+          matchesPlayed: acc.matchesPlayed,
+          wins: acc.wins,
+        },
+        String(data.token)
+      );
       setIsSubmitting(false);
       onClose();
     } catch {
-      const fallbackAcc: PublicDatabaseAccount = {
-        id: `acc_${cleanUser}_${Date.now()}`,
-        username: cleanUser,
-        displayName: cleanName,
-        avatar: selectedAvatar,
-        region,
-        elo: currentUser.elo || 1620,
-        matchesPlayed: 0,
-        wins: 0,
-        updatedAt: Date.now(),
-      };
-      const updated = [fallbackAcc, ...dbAccounts];
-      setDbAccounts(updated);
-      saveCachedAccounts(updated);
-      sound.playDayGong();
-      onSaveProfile({
-        name: fallbackAcc.displayName,
-        avatar: fallbackAcc.avatar,
-        provider: 'account',
-        handle: fallbackAcc.username,
-        region: fallbackAcc.region,
-        elo: fallbackAcc.elo,
-        matchesPlayed: 0,
-        wins: 0,
-      });
+      setValidationError(st.errNetwork);
       setIsSubmitting(false);
-      onClose();
     }
   };
 
-  const handleUpdateProfileSubmit = async () => {
+  const handleUpdateProfileSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     const cleanName = displayName.trim();
     if (cleanName.length < 2 || cleanName.length > 40) {
       setValidationError(st.errInvalidDisplayName);
@@ -590,321 +494,254 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
 
     sound.playCardFlip();
     setIsSubmitting(true);
+    setValidationError('');
 
-    if (isLoggedInAccount && currentUser.handle) {
+    if (currentUser.provider === 'account' && currentUser.handle) {
+      if (!authToken) {
+        setValidationError(st.errSessionExpired);
+        setIsSubmitting(false);
+        return;
+      }
       try {
         const res = await fetch('/api/accounts/update', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${authToken}`,
+          },
           body: JSON.stringify({
             username: currentUser.handle,
             displayName: cleanName,
             avatar: selectedAvatar,
             region,
-            elo: currentUser.elo,
           }),
         });
         const data = await res.json();
-        if (data?.ok && Array.isArray(data.accounts)) {
-          setDbAccounts(data.accounts);
-          saveCachedAccounts(data.accounts);
+        if (!res.ok || !data?.ok) {
+          setValidationError(data?.error || st.errSessionExpired);
+          setIsSubmitting(false);
+          return;
         }
       } catch {
-        // ignore offline error
+        setValidationError(st.errNetwork);
+        setIsSubmitting(false);
+        return;
       }
-
-      syncAuthenticatedPlayerAccountToFirestore({
+    } else if (currentUser.provider === 'google' && currentUser.handle) {
+      await syncAuthenticatedPlayerAccountToFirestore({
         username: currentUser.handle,
         displayName: cleanName,
         avatar: selectedAvatar,
         region,
-        elo: currentUser.elo || 1620,
+        elo: currentUser.elo,
         matchesPlayed: currentUser.matchesPlayed || 0,
         wins: currentUser.wins || 0,
       }).catch(() => {});
     }
 
     sound.playDayGong();
-    onSaveProfile({
-      name: cleanName,
-      avatar: selectedAvatar,
-      provider: isLoggedInAccount ? 'account' : 'guest',
-      handle: currentUser.handle || '',
-      region,
-      elo: currentUser.elo,
-      matchesPlayed: currentUser.matchesPlayed,
-      wins: currentUser.wins,
-    });
+    onSaveProfile(
+      {
+        name: cleanName,
+        avatar: selectedAvatar,
+        provider: currentUser.provider || 'guest',
+        handle: currentUser.handle || 'guest',
+        region,
+        elo: currentUser.elo,
+        matchesPlayed: currentUser.matchesPlayed,
+        wins: currentUser.wins,
+      },
+      authToken
+    );
     setIsSubmitting(false);
     onClose();
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     sound.playCardFlip();
-    setDisplayName('Thợ Săn Đêm');
-    setSelectedAvatar('🐺');
-    setUsername('huy132001');
-    setPassword('werewolf2026');
-    onSaveProfile({
-      name: 'Thợ Săn Đêm',
-      avatar: '🐺',
-      provider: 'guest',
-      handle: '',
-      region: 'VN',
-      elo: 1620,
-      matchesPlayed: 0,
-      wins: 0,
-    });
-    setActiveTab('login');
+    if (currentUser.provider === 'google') {
+      await signOutFirebase();
+    }
+    onSaveProfile(
+      {
+        name: 'Thợ Săn Đêm',
+        avatar: '🐺',
+        provider: 'guest',
+        handle: '',
+        region: 'VN',
+        elo: 1620,
+        matchesPlayed: 0,
+        wins: 0,
+      },
+      null
+    );
+    onClose();
   };
 
   return (
     <div
-      data-testid="social-login-modal"
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-2.5 sm:p-4 pointer-events-auto"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 pointer-events-auto"
+      style={{ backgroundColor: 'rgba(4, 7, 15, 0.9)' }}
+      data-testid="account-auth-modal"
     >
-      <div className="w-full max-w-md bg-[#0b101e] border-2 border-amber-500/60 rounded-3xl p-4 sm:p-5 shadow-2xl space-y-3 max-h-[92vh] overflow-y-auto">
-        {/* Top Modal Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="p-2 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/40 shrink-0">
-              <Database className="w-4 h-4" />
-            </span>
+      <div className="w-full max-w-md bg-[#0b1120] border-2 border-amber-500/60 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-xl shrink-0">
+              {selectedAvatar}
+            </div>
             <div className="min-w-0">
-              <h3 className="font-black text-sm sm:text-base text-slate-100 truncate">
+              <h3 className="text-sm sm:text-base font-black text-amber-100 truncate">
                 {st.modalTitle}
               </h3>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                {isLoggedInAccount && currentUser.handle ? (
-                  <span
-                    data-testid="connected-provider-badge"
-                    className="text-[10px] font-bold px-2 py-0.5 rounded-md border text-emerald-200 bg-emerald-950/90 border-emerald-500/50 inline-flex items-center gap-1"
-                  >
-                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                    <span>{st.loggedInBadge(currentUser.handle)}</span>
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-mono text-slate-400">
-                    {st.guestBadge}
-                  </span>
-                )}
-              </div>
+              <span className="text-[11px] font-semibold text-emerald-300 flex items-center gap-1 truncate">
+                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                {isLoggedInAccount && currentUser.handle
+                  ? st.loggedInBadge(currentUser.handle)
+                  : st.guestBadge}
+              </span>
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close account modal"
-            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer shrink-0"
+            aria-label="Close"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* 3 Mode Switcher Tabs: Đăng Nhập | Đăng Ký Mới | Hồ Sơ */}
+        {/* Navigation Tabs */}
         <div className="grid grid-cols-3 gap-1.5 bg-[#070a14] p-1 rounded-2xl border border-slate-800">
           <button
             type="button"
-            data-testid="tab-account-login"
-            onClick={() => {
-              sound.playCardFlip();
-              setActiveTab('login');
-            }}
-            className={`py-2 px-2 rounded-xl text-[11px] font-extrabold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+            data-testid="account-tab-login"
+            onClick={() => setActiveTab('login')}
+            className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'login'
-                ? 'bg-amber-500 text-slate-950 shadow'
-                : 'text-slate-300 hover:text-white'
+                ? 'bg-amber-500 text-slate-950'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <LogIn className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{st.tabLogin}</span>
+            <LogIn className="w-3.5 h-3.5" />
+            <span>{st.tabLogin}</span>
           </button>
-
           <button
             type="button"
-            data-testid="tab-account-register"
-            onClick={() => {
-              sound.playCardFlip();
-              setActiveTab('register');
-              if (username === 'huy132001') setUsername('');
-              if (password === 'werewolf2026') {
-                setPassword('');
-                setConfirmPassword('');
-              }
-            }}
-            className={`py-2 px-2 rounded-xl text-[11px] font-extrabold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+            data-testid="account-tab-register"
+            onClick={() => setActiveTab('register')}
+            className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'register'
-                ? 'bg-emerald-500 text-slate-950 shadow'
-                : 'text-slate-300 hover:text-white'
+                ? 'bg-emerald-500 text-slate-950'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <UserPlus className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{st.tabRegister}</span>
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>{st.tabRegister}</span>
           </button>
-
           <button
             type="button"
-            data-testid="tab-account-profile"
-            onClick={() => {
-              sound.playCardFlip();
-              setActiveTab('profile');
-            }}
-            className={`py-2 px-2 rounded-xl text-[11px] font-extrabold flex items-center justify-center gap-1 transition-all cursor-pointer ${
+            data-testid="account-tab-profile"
+            onClick={() => setActiveTab('profile')}
+            className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
               activeTab === 'profile'
-                ? 'bg-sky-500 text-slate-950 shadow'
-                : 'text-slate-300 hover:text-white'
+                ? 'bg-sky-500 text-slate-950'
+                : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <User className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">{st.tabProfile}</span>
+            <User className="w-3.5 h-3.5" />
+            <span>{st.tabProfile}</span>
           </button>
         </div>
 
-        {/* Database Notice Banner */}
-        <div className="flex items-center gap-2 text-[10px] text-emerald-300/95 bg-emerald-950/35 border border-emerald-500/30 rounded-xl px-2.5 py-1.5">
-          <Database className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          <span>{st.dbSyncNotice}</span>
-        </div>
-
-        {/* TAB 1: ĐĂNG NHẬP TÀI KHOẢN (SIGN IN) */}
-        {activeTab === 'login' && (
-          <form
-            data-testid="account-login-form"
-            onSubmit={handleLoginSubmit}
-            className="space-y-3"
+        {validationError && (
+          <div
+            data-testid="account-error-banner"
+            className="px-3 py-2.5 rounded-xl bg-rose-950/90 border border-rose-500/60 text-xs text-rose-200 font-semibold flex items-start gap-2"
           >
-            {/* Quick-Fill Saved Accounts in Database */}
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-amber-400">
-                  {st.savedAccountsLabel}
-                </span>
-                <span className="text-[9px] text-slate-400 font-mono">
-                  {dbAccounts.length} accounts
-                </span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-32 overflow-y-auto pr-0.5">
-                {dbAccounts.slice(0, 6).map((acc) => {
-                  const isSelected = username.toLowerCase() === acc.username.toLowerCase();
-                  return (
-                    <button
-                      key={acc.username}
-                      type="button"
-                      data-testid={`quick-db-account-${acc.username}`}
-                      onClick={() => {
-                        sound.playCardFlip();
-                        setUsername(acc.username);
-                        setPassword('werewolf2026');
-                        setDisplayName(acc.displayName);
-                        setSelectedAvatar(acc.avatar);
-                        setRegion(acc.region || 'VN');
-                      }}
-                      className={`p-2 rounded-xl border text-left flex items-center justify-between transition-all cursor-pointer ${
-                        isSelected
-                          ? 'bg-amber-500/15 border-amber-400 text-amber-100'
-                          : 'bg-[#070a14] border-slate-800 text-slate-300 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-base">{acc.avatar}</span>
-                        <div className="min-w-0">
-                          <div className="text-[11px] font-extrabold truncate">
-                            {acc.displayName}
-                          </div>
-                          <div className="text-[9px] font-mono text-slate-400 truncate">
-                            @{acc.username} · {acc.elo} ELO
-                          </div>
-                        </div>
-                      </div>
-                      {isSelected && (
-                        <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-[10px] text-slate-400 italic">{st.defaultPassHint}</p>
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            <span>{validationError}</span>
+          </div>
+        )}
+
+        {/* TAB 1: LOGIN */}
+        {activeTab === 'login' && (
+          <form onSubmit={handleLoginSubmit} className="space-y-3">
+            <button
+              type="button"
+              disabled={isSubmitting}
+              onClick={handleGoogleSignIn}
+              data-testid="google-signin-btn"
+              className="w-full py-2.5 px-3 rounded-xl bg-white hover:bg-slate-100 text-slate-900 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
+            >
+              <Sparkles className="w-4 h-4 text-amber-600" />
+              <span>{st.googleSignInBtn}</span>
+            </button>
+
+            <div className="flex items-center gap-2 text-[10px] text-slate-500 uppercase tracking-wider">
+              <div className="flex-1 h-px bg-slate-800" />
+              <span>{lang === 'vi' ? 'Hoặc tài khoản mật khẩu' : 'Or username & password'}</span>
+              <div className="flex-1 h-px bg-slate-800" />
             </div>
 
-            <div className="space-y-2.5 bg-[#070a14] border border-slate-800 rounded-2xl p-3">
-              <div>
-                <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5 mb-1">
-                  <User className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{st.usernameLabel}</span>
-                </label>
+            <div>
+              <label className="text-[11px] font-bold text-amber-300 block mb-1">
+                {st.usernameLabel}
+              </label>
+              <input
+                type="text"
+                autoComplete="username"
+                data-testid="login-username-input"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder={st.usernamePlaceholder}
+                className="w-full bg-[#070a14] border border-slate-700 focus:border-amber-400 rounded-xl px-3 py-2.5 text-xs text-slate-100 focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold text-amber-300 block mb-1">
+                {st.passwordLabel}
+              </label>
+              <div className="relative">
                 <input
-                  type="text"
-                  data-testid="account-username-input"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder={st.usernamePlaceholder}
-                  className="w-full bg-[#0b101e] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-400"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
+                  data-testid="login-password-input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={st.passwordPlaceholder}
+                  className="w-full bg-[#070a14] border border-slate-700 focus:border-amber-400 rounded-xl px-3 py-2.5 pr-10 text-xs text-slate-100 focus:outline-none"
                 />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5 mb-1">
-                  <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                  <span>{st.passwordLabel}</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    data-testid="account-password-input"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder={st.passwordPlaceholder}
-                    className="w-full bg-[#0b101e] border border-slate-700 rounded-xl pl-3 pr-9 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-400"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((s) => !s)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
-                    aria-label="Toggle password visibility"
-                  >
-                    {showPassword ? (
-                      <EyeOff className="w-3.5 h-3.5" />
-                    ) : (
-                      <Eye className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                  aria-label="Toggle password visibility"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
-
-            {validationError && (
-              <div
-                data-testid="account-validation-error"
-                className="p-2.5 rounded-xl bg-rose-950/90 border border-rose-500/60 text-xs text-rose-200 font-bold flex items-center gap-2"
-              >
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                <span>{validationError}</span>
-              </div>
-            )}
 
             <button
               type="submit"
-              data-testid="account-login-submit-btn"
               disabled={isSubmitting}
-              className="w-full py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs shadow-xl flex items-center justify-center gap-2 cursor-pointer"
+              data-testid="login-submit-btn"
+              className="w-full py-3 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs flex items-center justify-center gap-2 cursor-pointer"
             >
-              <ShieldCheck className="w-4 h-4" />
+              <KeyRound className="w-4 h-4" />
               <span>{isSubmitting ? st.submittingText : st.loginSubmitBtn}</span>
             </button>
 
-            <div className="text-center pt-1">
-              <span className="text-[11px] text-slate-400 mr-1.5">{st.noAccountYet}</span>
+            <div className="text-center text-xs text-slate-400 pt-1">
+              {st.noAccountYet}{' '}
               <button
                 type="button"
-                data-testid="switch-to-register-btn"
-                onClick={() => {
-                  sound.playCardFlip();
-                  setActiveTab('register');
-                  setUsername('');
-                  setPassword('');
-                  setConfirmPassword('');
-                }}
-                className="text-[11px] font-extrabold text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
+                onClick={() => setActiveTab('register')}
+                className="text-emerald-400 font-bold hover:underline cursor-pointer"
               >
                 {st.switchToRegister}
               </button>
@@ -912,154 +749,108 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
           </form>
         )}
 
-        {/* TAB 2: ĐĂNG KÝ TÀI KHOẢN MỚI (CREATE ACCOUNT) */}
+        {/* TAB 2: REGISTER */}
         {activeTab === 'register' && (
-          <form
-            data-testid="account-register-form"
-            onSubmit={handleRegisterSubmit}
-            className="space-y-2.5"
-          >
-            <div className="space-y-2.5 bg-[#070a14] border border-slate-800 rounded-2xl p-3">
-              {/* 1. Username */}
+          <form onSubmit={handleRegisterSubmit} className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
-                <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1.5 mb-1">
-                  <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>{st.usernameLabel}</span>
+                <label className="text-[11px] font-bold text-emerald-300 block mb-1">
+                  {st.usernameLabel}
                 </label>
                 <input
                   type="text"
+                  autoComplete="username"
                   data-testid="register-username-input"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder={st.usernamePlaceholder}
-                  className="w-full bg-[#0b101e] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
+                  className="w-full bg-[#070a14] border border-slate-700 focus:border-emerald-400 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none"
                 />
               </div>
-
-              {/* 2. Password & Confirm Password */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1 mb-1">
-                    <KeyRound className="w-3 h-3 text-emerald-400" />
-                    <span>{st.passwordLabel}</span>
-                  </label>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    data-testid="register-password-input"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder={st.passwordPlaceholder}
-                    className="w-full bg-[#0b101e] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1 mb-1">
-                    <KeyRound className="w-3 h-3 text-emerald-400" />
-                    <span>{st.confirmPasswordLabel}</span>
-                  </label>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    data-testid="register-confirm-password-input"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder={st.confirmPasswordPlaceholder}
-                    className="w-full bg-[#0b101e] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
-                  />
-                </div>
-              </div>
-
-              {/* 3. Display Name & 4. Region */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <div className="sm:col-span-2">
-                  <label className="text-[11px] font-bold text-slate-200 block mb-1">
-                    {st.displayNameLabel}
-                  </label>
-                  <input
-                    type="text"
-                    data-testid="register-displayname-input"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder={st.displayNamePlaceholder}
-                    className="w-full bg-[#0b101e] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-200 flex items-center gap-1 mb-1">
-                    <Globe className="w-3 h-3 text-sky-400" />
-                    <span>{st.regionLabel}</span>
-                  </label>
-                  <select
-                    value={region}
-                    onChange={(e) =>
-                      setRegion(e.target.value as 'VN' | 'SEA' | 'GLOBAL')
-                    }
-                    data-testid="register-region-select"
-                    className="w-full bg-[#0b101e] border border-slate-700 rounded-xl px-2 py-2 text-xs font-bold text-amber-200 focus:outline-none"
-                  >
-                    <option value="VN">🇻🇳 VN</option>
-                    <option value="SEA">🌏 SEA</option>
-                    <option value="GLOBAL">🌐 Global</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* 5. Character Avatar Emblem */}
               <div>
-                <label className="text-[11px] font-bold text-slate-300 block mb-1">
-                  {st.avatarLabel}
+                <label className="text-[11px] font-bold text-emerald-300 block mb-1">
+                  {st.displayNameLabel}
                 </label>
-                <div className="grid grid-cols-6 gap-1">
-                  {AVATAR_OPTIONS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setSelectedAvatar(emoji)}
-                      className={`py-1.5 rounded-lg text-base border transition-all cursor-pointer ${
-                        selectedAvatar === emoji
-                          ? 'bg-emerald-500/20 border-emerald-400 scale-105'
-                          : 'bg-[#0b101e] border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
+                <input
+                  type="text"
+                  data-testid="register-displayname-input"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder={st.displayNamePlaceholder}
+                  className="w-full bg-[#070a14] border border-slate-700 focus:border-emerald-400 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none"
+                />
               </div>
             </div>
 
-            {validationError && (
-              <div
-                data-testid="account-validation-error"
-                className="p-2.5 rounded-xl bg-rose-950/90 border border-rose-500/60 text-xs text-rose-200 font-bold flex items-center gap-2"
-              >
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                <span>{validationError}</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label className="text-[11px] font-bold text-emerald-300 block mb-1">
+                  {st.passwordLabel}
+                </label>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  data-testid="register-password-input"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={st.passwordPlaceholder}
+                  className="w-full bg-[#070a14] border border-slate-700 focus:border-emerald-400 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none"
+                />
               </div>
-            )}
+              <div>
+                <label className="text-[11px] font-bold text-emerald-300 block mb-1">
+                  {st.confirmPasswordLabel}
+                </label>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  data-testid="register-confirm-input"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder={st.confirmPasswordPlaceholder}
+                  className="w-full bg-[#070a14] border border-slate-700 focus:border-emerald-400 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                {st.avatarLabel}
+              </label>
+              <div className="grid grid-cols-6 gap-1.5">
+                {AVATAR_OPTIONS.map((av) => (
+                  <button
+                    key={av}
+                    type="button"
+                    onClick={() => setSelectedAvatar(av)}
+                    className={`py-1.5 rounded-lg border text-base cursor-pointer ${
+                      selectedAvatar === av
+                        ? 'bg-emerald-900/70 border-emerald-400'
+                        : 'bg-[#070a14] border-slate-800 hover:border-slate-600'
+                    }`}
+                  >
+                    {av}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <button
               type="submit"
-              data-testid="register-submit-btn"
               disabled={isSubmitting}
-              className="w-full py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs shadow-xl flex items-center justify-center gap-2 cursor-pointer"
+              data-testid="register-submit-btn"
+              className="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs flex items-center justify-center gap-2 cursor-pointer"
             >
               <UserPlus className="w-4 h-4" />
               <span>{isSubmitting ? st.submittingText : st.registerSubmitBtn}</span>
             </button>
 
-            <div className="text-center pt-0.5">
-              <span className="text-[11px] text-slate-400 mr-1.5">
-                {st.alreadyHaveAccount}
-              </span>
+            <div className="text-center text-xs text-slate-400">
+              {st.alreadyHaveAccount}{' '}
               <button
                 type="button"
-                onClick={() => {
-                  sound.playCardFlip();
-                  setActiveTab('login');
-                }}
-                className="text-[11px] font-extrabold text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                onClick={() => setActiveTab('login')}
+                className="text-amber-300 font-bold hover:underline cursor-pointer"
               >
                 {st.switchToLogin}
               </button>
@@ -1067,115 +858,117 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
           </form>
         )}
 
-        {/* TAB 3: HỒ SƠ CÁ NHÂN (MY PROFILE & DATABASE STATS) */}
+        {/* TAB 3: PROFILE */}
         {activeTab === 'profile' && (
-          <div data-testid="account-profile-view" className="space-y-3">
-            {/* Account Stats Card */}
-            <div className="p-3 rounded-2xl bg-[#070a14] border border-slate-800 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center text-2xl shrink-0">
-                  {selectedAvatar}
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs sm:text-sm font-black text-slate-100 truncate">
-                    {displayName}
-                  </div>
-                  <div className="text-[10px] font-mono text-emerald-400 truncate">
-                    {isLoggedInAccount && currentUser.handle
-                      ? `@${currentUser.handle} · Database Synced`
-                      : st.guestBadge}
-                  </div>
-                </div>
-              </div>
-              <div className="text-right shrink-0">
-                <div className="text-xs font-black text-amber-400 flex items-center justify-end gap-1">
+          <form onSubmit={handleUpdateProfileSubmit} className="space-y-3">
+            <div className="grid grid-cols-3 gap-2 bg-[#070a14] border border-slate-800 rounded-2xl p-3 text-center">
+              <div>
+                <div className="text-[10px] uppercase text-slate-400 font-bold">ELO</div>
+                <div className="text-base font-black text-amber-300 font-mono flex items-center justify-center gap-1">
                   <Trophy className="w-3.5 h-3.5" />
-                  <span>{currentUser.elo} ELO</span>
+                  {currentUser.elo}
                 </div>
-                <div className="text-[10px] font-mono text-slate-400">
-                  {currentUser.wins || 0}W / {currentUser.matchesPlayed || 0}M
+              </div>
+              <div>
+                <div className="text-[10px] uppercase text-slate-400 font-bold">
+                  {lang === 'vi' ? 'Số trận' : 'Matches'}
+                </div>
+                <div className="text-base font-black text-sky-300 font-mono">
+                  {currentUser.matchesPlayed || 0}
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase text-slate-400 font-bold">
+                  {lang === 'vi' ? 'Thắng' : 'Wins'}
+                </div>
+                <div className="text-base font-black text-emerald-300 font-mono">
+                  {currentUser.wins || 0}
                 </div>
               </div>
             </div>
 
-            <div className="space-y-3 bg-[#070a14] border border-slate-800 rounded-2xl p-3">
-              <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1">
-                  {st.displayNameLabel}
-                </label>
-                <input
-                  type="text"
-                  data-testid="profile-name-input"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder={st.displayNamePlaceholder}
-                  className="w-full bg-[#0b101e] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-400"
-                />
-              </div>
+            <div>
+              <label className="text-[11px] font-bold text-sky-300 block mb-1">
+                {st.displayNameLabel}
+              </label>
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="w-full bg-[#070a14] border border-slate-700 focus:border-sky-400 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none"
+              />
+            </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-300 block mb-1.5">
-                  {st.avatarLabel}
-                </label>
-                <div className="grid grid-cols-6 gap-1.5">
-                  {AVATAR_OPTIONS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setSelectedAvatar(emoji)}
-                      className={`p-2 rounded-xl text-lg border transition-all cursor-pointer ${
-                        selectedAvatar === emoji
-                          ? 'bg-amber-500/20 border-amber-400 scale-105 shadow-md'
-                          : 'bg-[#0b101e] border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
-                </div>
+            <div>
+              <label className="text-[11px] font-bold text-sky-300 block mb-1 flex items-center gap-1">
+                <Globe className="w-3.5 h-3.5" />
+                {st.regionLabel}
+              </label>
+              <div className="grid grid-cols-3 gap-1.5">
+                {(['VN', 'SEA', 'GLOBAL'] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setRegion(r)}
+                    className={`py-1.5 rounded-lg text-xs font-bold border cursor-pointer ${
+                      region === r
+                        ? 'bg-sky-600 border-sky-300 text-white'
+                        : 'bg-[#070a14] border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {r}
+                  </button>
+                ))}
               </div>
             </div>
 
-            {validationError && (
-              <div className="p-2 rounded-xl bg-rose-950/90 border border-rose-500/60 text-xs text-rose-200 font-bold flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                <span>{validationError}</span>
+            <div>
+              <label className="text-[11px] font-bold text-slate-300 block mb-1">
+                {st.avatarLabel}
+              </label>
+              <div className="grid grid-cols-6 gap-1.5">
+                {AVATAR_OPTIONS.map((av) => (
+                  <button
+                    key={av}
+                    type="button"
+                    onClick={() => setSelectedAvatar(av)}
+                    className={`py-1.5 rounded-lg border text-base cursor-pointer ${
+                      selectedAvatar === av
+                        ? 'bg-sky-900/70 border-sky-400'
+                        : 'bg-[#070a14] border-slate-800 hover:border-slate-600'
+                    }`}
+                  >
+                    {av}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
 
-            {successBanner && (
-              <div className="p-2 rounded-xl bg-emerald-950/90 border border-emerald-500/60 text-xs text-emerald-200 font-bold flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>{successBanner}</span>
-              </div>
-            )}
-
-            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+            <div className="flex items-center gap-2 pt-1">
               <button
-                type="button"
-                data-testid="save-profile-btn"
+                type="submit"
                 disabled={isSubmitting}
-                onClick={handleUpdateProfileSubmit}
-                className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-lg flex items-center justify-center gap-1.5 cursor-pointer"
+                className="flex-1 py-2.5 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-black text-xs cursor-pointer"
               >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>{isSubmitting ? st.submittingText : st.saveProfileBtn}</span>
+                {isSubmitting ? st.submittingText : st.saveProfileBtn}
               </button>
-
               {isLoggedInAccount && (
                 <button
                   type="button"
-                  data-testid="social-logout-btn"
                   onClick={handleSignOut}
-                  className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-500/30 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                  className="px-3.5 py-2.5 rounded-xl bg-rose-950/90 hover:bg-rose-800 border border-rose-500/50 text-rose-200 font-bold text-xs flex items-center gap-1 cursor-pointer"
                 >
                   <LogOut className="w-3.5 h-3.5" />
                   <span>{st.signOutBtn}</span>
                 </button>
               )}
             </div>
-          </div>
+          </form>
         )}
+
+        <p className="text-[10px] text-slate-400 text-center leading-relaxed border-t border-slate-800/80 pt-2.5">
+          {st.syncNotice}
+        </p>
       </div>
     </div>
   );

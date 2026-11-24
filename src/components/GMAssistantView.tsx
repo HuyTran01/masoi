@@ -22,6 +22,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   Info,
+  Copy,
+  Check,
+  Link2,
 } from 'lucide-react';
 import { Player, RoleId, Language, NightActions, NightResult } from '../types/game';
 import { ROLES } from '../game/roles';
@@ -35,12 +38,16 @@ import {
 import { sound, ROLE_CALLOUT_LINES } from '../utils/sound';
 import { TRANSLATIONS } from '../utils/i18n';
 import { addMatchHistory } from '../utils/storage';
+import { realtimeClient } from '../utils/realtimeClient';
+import type { GMDeckMode, GMPlayerSeat, GMRoleSource } from '../server/gmRooms';
 import confetti from 'canvas-confetti';
 
 interface GMAssistantViewProps {
   lang: Language;
+  hostId?: string;
   initialRoomId?: string;
   initialPlayerCount?: number;
+  initialDeckMode?: GMDeckMode;
   onOpenVirtualCards: (roomId: string) => void;
 }
 
@@ -67,27 +74,50 @@ const DEFAULT_PLAYERS: string[] = [
   'Bích Ngọc',
 ];
 
+const SEAT_AVATARS = ['🐺', '🔮', '🛡️', '🧪', '🎯', '💘', '🎭', '👑', '🔥', '🧑‍🌾'];
+
+function buildInitialSeats(count: number, mode: GMDeckMode): GMPlayerSeat[] {
+  const clamped = Math.max(4, Math.min(20, count));
+  const roles = mode === 'virtual_deck' ? generateBalancedRoster(clamped) : [];
+  return Array.from({ length: clamped }).map((_, i) => {
+    const roleId: RoleId | null = mode === 'virtual_deck' ? roles[i] || 'villager' : null;
+    return {
+      id: `p_${i + 1}`,
+      seatNumber: i + 1,
+      name: DEFAULT_PLAYERS[i] || `Người Chơi #${i + 1}`,
+      avatar: SEAT_AVATARS[i % SEAT_AVATARS.length],
+      roleId,
+      roleSource: roleId ? 'auto_dealt' : 'unassigned',
+      isAlive: true,
+      claimedByUserId: null,
+      elderLives: roleId === 'elder' ? 2 : undefined,
+    };
+  });
+}
+
 export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   lang,
+  hostId = 'gm_host',
   initialRoomId,
   initialPlayerCount = 8,
+  initialDeckMode = 'virtual_deck',
   onOpenVirtualCards,
 }) => {
   const t = TRANSLATIONS[lang];
 
   const [roomId, setRoomId] = useState<string>(
-    () => initialRoomId || 'GM-' + Math.floor(1000 + Math.random() * 9000)
+    () => (initialRoomId || 'GM-' + Math.floor(1000 + Math.random() * 9000)).trim().toUpperCase()
   );
-  const [playerNames, setPlayerNames] = useState<string[]>(() =>
-    DEFAULT_PLAYERS.slice(0, Math.max(4, Math.min(20, initialPlayerCount)))
+  const [deckMode, setDeckMode] = useState<GMDeckMode>(initialDeckMode);
+  const [seats, setSeats] = useState<GMPlayerSeat[]>(() =>
+    buildInitialSeats(initialPlayerCount, initialDeckMode)
   );
   const [customCountInput, setCustomCountInput] = useState<string>(() =>
     String(Math.max(4, Math.min(20, initialPlayerCount)))
   );
   const [newNameInput, setNewNameInput] = useState<string>('');
-  const [assignedRoles, setAssignedRoles] = useState<RoleId[]>(() =>
-    generateBalancedRoster(Math.max(4, Math.min(20, initialPlayerCount)))
-  );
+  const [setupWarning, setSetupWarning] = useState<string>('');
+  const [copiedType, setCopiedType] = useState<'none' | 'code' | 'link'>('none');
 
   const [isGameStarted, setIsGameStarted] = useState<boolean>(false);
   const [roundNumber, setRoundNumber] = useState<number>(1);
@@ -99,35 +129,75 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     'Bấm các nút Âm Hiệu bên dưới để phát tiếng Sói Hú, Phù Thủy Ma Mị hoặc Thợ Săn "Tao có súng đó nha!"'
   );
 
+  const skipNextSyncRef = React.useRef<boolean>(false);
+
   useEffect(() => {
-    if (initialRoomId) setRoomId(initialRoomId);
+    if (initialRoomId) setRoomId(initialRoomId.trim().toUpperCase());
   }, [initialRoomId]);
 
-  // Auto-sync room roster to localStorage so VirtualCardPlayerView always loads the exact GM roster
+  // Subscribe to real-time updates from players joining / self-entering physical cards
   useEffect(() => {
-    const activeRoster: Player[] = isGameStarted
-      ? players
-      : playerNames.map((name, i) => ({
-          id: `p_${i + 1}`,
-          name,
-          avatar: ['🐺', '🔮', '🛡️', '🧪', '🎯', '💘', '🎭', '👑', '🔥', '🧑‍🌾'][i % 10],
-          roleId: assignedRoles[i] || 'villager',
-          isAlive: true,
-          elderLives: assignedRoles[i] === 'elder' ? 2 : undefined,
-        }));
-    try {
-      localStorage.setItem(
-        `werewolf_room_${roomId.trim().toUpperCase()}`,
-        JSON.stringify({
-          roomId: roomId.trim().toUpperCase(),
-          players: activeRoster,
-          status: isGameStarted ? currentPhase : 'setup',
-        })
-      );
-    } catch {
-      // ignore storage errors
+    const cleanCode = roomId.trim().toUpperCase();
+    if (cleanCode.length < 3) return;
+
+    const unsub = realtimeClient.subscribe((evt) => {
+      if (evt.type === 'gm:host_state' && evt.room.code === cleanCode) {
+        if (!isGameStarted) {
+          skipNextSyncRef.current = true;
+          setSeats(evt.room.seats);
+          setCustomCountInput(String(evt.room.seats.length));
+        }
+      }
+    });
+
+    realtimeClient.subscribeGMHost(cleanCode);
+
+    return () => {
+      unsub();
+      realtimeClient.unsubscribeGM();
+    };
+  }, [roomId, isGameStarted]);
+
+  // Sync GM room state to server (cross-device live sync + strict per-player privacy)
+  useEffect(() => {
+    if (skipNextSyncRef.current) {
+      skipNextSyncRef.current = false;
+      return;
     }
-  }, [roomId, playerNames, assignedRoles, players, isGameStarted, currentPhase]);
+    const cleanCode = roomId.trim().toUpperCase();
+    if (cleanCode.length < 3) return;
+
+    const syncSeats = isGameStarted
+      ? players.map((p, idx) => {
+          const prevSeat = seats.find((s) => s.id === p.id);
+          return {
+            id: p.id,
+            seatNumber: idx + 1,
+            name: p.name,
+            avatar: p.avatar,
+            roleId: p.roleId,
+            roleSource: (prevSeat?.roleSource || 'gm_assigned') as GMRoleSource,
+            isAlive: p.isAlive,
+            claimedByUserId: prevSeat?.claimedByUserId ?? null,
+          };
+        })
+      : seats;
+
+    fetch(`/api/gm-rooms/${encodeURIComponent(cleanCode)}/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hostId,
+        deckMode,
+        status: isGameStarted ? 'in_match' : 'setup',
+        round: roundNumber,
+        phase: isGameStarted ? currentPhase : 'setup',
+        seats: syncSeats,
+      }),
+    }).catch(() => {
+      // ignore transient network errors
+    });
+  }, [roomId, hostId, deckMode, seats, players, isGameStarted, currentPhase, roundNumber]);
 
   const [nightActions, setNightActions] = useState<NightActions>({
     wolfTargetId: null,
@@ -141,6 +211,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   });
 
   const [timerSeconds, setTimerSeconds] = useState<number>(60);
+  const [customDiscussDefaultSec, setCustomDiscussDefaultSec] = useState<number>(90);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
   const [selectedLynchTargetId, setSelectedLynchTargetId] = useState<string>('');
   const [hunterVictimId, setHunterVictimId] = useState<string>('');
@@ -149,6 +220,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
   const [lastNightSummary, setLastNightSummary] = useState<string[]>([]);
   const [lastNightResult, setLastNightResult] = useState<NightResult | null>(null);
+  const [showSecretGMLog, setShowSecretGMLog] = useState<boolean>(false);
   const [gameResult, setGameResult] = useState<{
     isOver: boolean;
     winner: string | null;
@@ -160,72 +232,204 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setActiveCalloutBanner(`${info.sfxLabel}: "${info.quote}"`);
   };
 
+  const handleCopyRoomCode = () => {
+    sound.playCardFlip();
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(roomId).catch(() => {});
+    }
+    setCopiedType('code');
+    setTimeout(() => setCopiedType('none'), 2000);
+  };
+
+  const handleCopyJoinLink = () => {
+    sound.playCardFlip();
+    const url = `${window.location.origin}${window.location.pathname}?gmroom=${encodeURIComponent(roomId)}`;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).catch(() => {});
+    }
+    setCopiedType('link');
+    setTimeout(() => setCopiedType('none'), 2000);
+  };
+
+  const handleSwitchDeckMode = (nextMode: GMDeckMode) => {
+    if (nextMode === deckMode) return;
+    sound.playCardFlip();
+    setDeckMode(nextMode);
+    setSetupWarning('');
+    if (nextMode === 'virtual_deck') {
+      const roles = generateBalancedRoster(seats.length);
+      setSeats((prev) =>
+        prev.map((s, idx) => ({
+          ...s,
+          roleId: roles[idx] || 'villager',
+          roleSource: 'auto_dealt',
+          elderLives: roles[idx] === 'elder' ? 2 : undefined,
+        }))
+      );
+    } else {
+      // Physical deck mode: clear auto-dealt placeholders so players can enter their physical cards (keep manually assigned or self-input)
+      setSeats((prev) =>
+        prev.map((s) =>
+          s.roleSource === 'auto_dealt'
+            ? { ...s, roleId: null, roleSource: 'unassigned', elderLives: undefined }
+            : s
+        )
+      );
+    }
+  };
+
   const handleSetCustomPlayerCount = (rawCount: number) => {
     const clamped = Math.max(4, Math.min(20, Math.round(rawCount) || 8));
     sound.playCardFlip();
     setCustomCountInput(String(clamped));
-    setPlayerNames((prev) => {
-      if (prev.length === clamped) return prev;
-      if (prev.length > clamped) return prev.slice(0, clamped);
-      const next = [...prev];
+    setSetupWarning('');
+    setSeats((prev) => {
+      const next = prev.slice(0, clamped);
       while (next.length < clamped) {
-        const candidate =
-          DEFAULT_PLAYERS[next.length] || `Người Chơi #${next.length + 1}`;
-        next.push(candidate);
+        const idx = next.length;
+        next.push({
+          id: `p_${Date.now().toString(36)}_${idx + 1}`,
+          seatNumber: idx + 1,
+          name: DEFAULT_PLAYERS[idx] || `Người Chơi #${idx + 1}`,
+          avatar: SEAT_AVATARS[idx % SEAT_AVATARS.length],
+          roleId: null,
+          roleSource: 'unassigned',
+          isAlive: true,
+          claimedByUserId: null,
+        });
       }
-      return next;
+      if (deckMode === 'virtual_deck') {
+        const roles = generateBalancedRoster(clamped);
+        return next.map((s, i) => ({
+          ...s,
+          seatNumber: i + 1,
+          roleId: roles[i] || 'villager',
+          roleSource: 'auto_dealt',
+          elderLives: roles[i] === 'elder' ? 2 : undefined,
+        }));
+      }
+      return next.map((s, i) => ({ ...s, seatNumber: i + 1 }));
     });
-    setAssignedRoles(generateBalancedRoster(clamped));
   };
 
   const handleRegenerateRoles = () => {
     sound.playCardFlip();
-    const newRoles = generateBalancedRoster(playerNames.length);
-    setAssignedRoles(newRoles);
+    setSetupWarning('');
+    const newRoles = generateBalancedRoster(seats.length);
+    setSeats((prev) =>
+      prev.map((s, idx) => ({
+        ...s,
+        roleId: newRoles[idx] || 'villager',
+        roleSource: 'auto_dealt',
+        elderLives: newRoles[idx] === 'elder' ? 2 : undefined,
+      }))
+    );
+  };
+
+  const handleFillEmptyAsVillager = () => {
+    sound.playCardFlip();
+    setSetupWarning('');
+    setSeats((prev) =>
+      prev.map((s) =>
+        s.roleId === null
+          ? { ...s, roleId: 'villager', roleSource: 'gm_assigned' }
+          : s
+      )
+    );
   };
 
   const handleAddPlayer = () => {
-    if (!newNameInput.trim() || playerNames.length >= 20) return;
-    const updated = [...playerNames, newNameInput.trim()];
-    setPlayerNames(updated);
+    if (!newNameInput.trim() || seats.length >= 20) return;
+    sound.playCardFlip();
+    setSetupWarning('');
+    const nextSeat: GMPlayerSeat = {
+      id: `p_${Date.now().toString(36)}_${seats.length + 1}`,
+      seatNumber: seats.length + 1,
+      name: newNameInput.trim(),
+      avatar: SEAT_AVATARS[seats.length % SEAT_AVATARS.length],
+      roleId: deckMode === 'virtual_deck' ? 'villager' : null,
+      roleSource: deckMode === 'virtual_deck' ? 'auto_dealt' : 'unassigned',
+      isAlive: true,
+      claimedByUserId: null,
+    };
+    const updated = [...seats, nextSeat];
+    if (deckMode === 'virtual_deck') {
+      const roles = generateBalancedRoster(updated.length);
+      setSeats(
+        updated.map((s, idx) => ({
+          ...s,
+          seatNumber: idx + 1,
+          roleId: roles[idx] || 'villager',
+          roleSource: 'auto_dealt',
+          elderLives: roles[idx] === 'elder' ? 2 : undefined,
+        }))
+      );
+    } else {
+      setSeats(updated);
+    }
     setCustomCountInput(String(updated.length));
-    setAssignedRoles(generateBalancedRoster(updated.length));
     setNewNameInput('');
   };
 
   const handleRemovePlayer = (index: number) => {
-    if (playerNames.length <= 4) return;
-    const updated = playerNames.filter((_, i) => i !== index);
-    setPlayerNames(updated);
+    if (seats.length <= 4) return;
+    const updated = seats
+      .filter((_, i) => i !== index)
+      .map((s, idx) => ({ ...s, seatNumber: idx + 1 }));
+    setSeats(updated);
     setCustomCountInput(String(updated.length));
-    setAssignedRoles(generateBalancedRoster(updated.length));
   };
 
-  const handleUpdateRole = (index: number, newRole: RoleId) => {
-    const updated = [...assignedRoles];
-    updated[index] = newRole;
-    setAssignedRoles(updated);
+  const handleUpdatePlayerName = (index: number, nextName: string) => {
+    setSeats((prev) =>
+      prev.map((s, idx) => (idx === index ? { ...s, name: nextName } : s))
+    );
+  };
+
+  const handleUpdateRole = (index: number, newRole: RoleId | '') => {
+    setSetupWarning('');
+    setSeats((prev) =>
+      prev.map((s, idx) =>
+        idx === index
+          ? {
+              ...s,
+              roleId: newRole === '' ? null : newRole,
+              roleSource: newRole === '' ? 'unassigned' : 'gm_assigned',
+              elderLives: newRole === 'elder' ? 2 : undefined,
+            }
+          : s
+      )
+    );
   };
 
   const handleStartGame = () => {
-    sound.playNightBell();
-    const initialPlayers: Player[] = playerNames.map((name, i) => ({
-      id: `p_${i + 1}`,
-      name,
-      avatar: ['🐺', '🔮', '🛡️', '🧪', '🎯', '💘', '🎭', '👑', '🔥', '🧑‍🌾'][i % 10],
-      roleId: assignedRoles[i] || 'villager',
-      isAlive: true,
-      elderLives: assignedRoles[i] === 'elder' ? 2 : undefined,
-    }));
+    const missingSeats = seats.filter((s) => !s.roleId);
+    if (missingSeats.length > 0) {
+      setSetupWarning(
+        `Còn ${missingSeats.length} người chơi chưa có vai trò (${missingSeats
+          .map((s) => s.name)
+          .slice(0, 3)
+          .join(', ')}${missingSeats.length > 3 ? '...' : ''}). Hãy chờ họ tự nhập bài trên máy hoặc Quản Trò chọn hộ trước khi bắt đầu Đêm 1!`
+      );
+      return;
+    }
 
-    localStorage.setItem(
-      `werewolf_room_${roomId}`,
-      JSON.stringify({
-        roomId,
-        players: initialPlayers,
-        status: 'playing',
-      })
-    );
+    const hasWolf = seats.some((s) => s.roleId === 'werewolf' || s.roleId === 'wolf_pup');
+    if (!hasWolf) {
+      setSetupWarning('Ván đấu cần có ít nhất 1 Ma Sói (hoặc Sói Con) để bắt đầu Đêm 1!');
+      return;
+    }
+
+    setSetupWarning('');
+    sound.playNightBell();
+    const initialPlayers: Player[] = seats.map((s) => ({
+      id: s.id,
+      name: s.name.trim() || `Người Chơi #${s.seatNumber}`,
+      avatar: s.avatar,
+      roleId: s.roleId || 'villager',
+      isAlive: true,
+      elderLives: s.roleId === 'elder' ? 2 : undefined,
+    }));
 
     setPlayers(initialPlayers);
     setIsGameStarted(true);
@@ -347,19 +551,11 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setPlayers(updatedPlayers);
     setLastNightSummary(result.summary);
     setLastNightResult(result);
+    setShowSecretGMLog(false);
     setWolfPupFrenzy(Boolean(result.wolfPupTriggeredNextNight));
     setCurrentPhase('day');
-    setTimerSeconds(90);
+    setTimerSeconds(customDiscussDefaultSec);
     setIsTimerRunning(false);
-
-    localStorage.setItem(
-      `werewolf_room_${roomId}`,
-      JSON.stringify({
-        roomId,
-        players: updatedPlayers,
-        status: 'day',
-      })
-    );
 
     if (result.triggeredHunterId) {
       triggerRoleVoice('hunter');
@@ -505,20 +701,45 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
           </p>
         </div>
 
-        <div className="bg-[#090d18] border border-amber-600/40 rounded-xl px-4 py-2 text-center">
+        <div className="bg-[#090d18] border border-amber-600/40 rounded-xl px-4 py-2.5 text-center space-y-1.5">
           <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
-            Mã Phòng Điện Thoại
+            Mã Phòng Cho Người Chơi
           </span>
-          <span className="text-base font-mono font-extrabold text-amber-300 tracking-widest">
-            {roomId}
-          </span>
-          <button
-            onClick={() => onOpenVirtualCards(roomId)}
-            className="mt-0.5 text-[11px] text-amber-400 hover:text-amber-300 underline flex items-center justify-center gap-1 font-semibold cursor-pointer"
-          >
-            <Smartphone className="w-3 h-3" />
-            Mở Thẻ Bài Người Chơi
-          </button>
+          <div className="flex items-center justify-center gap-2">
+            <span
+              data-testid="gm-host-room-code"
+              className="text-base font-mono font-extrabold text-amber-300 tracking-widest"
+            >
+              {roomId}
+            </span>
+            <button
+              type="button"
+              onClick={handleCopyRoomCode}
+              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-amber-200 flex items-center gap-1 cursor-pointer"
+            >
+              {copiedType === 'code' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+              <span>{copiedType === 'code' ? 'Đã chép' : 'Chép mã'}</span>
+            </button>
+          </div>
+          <div className="flex items-center justify-center gap-2 pt-0.5">
+            <button
+              type="button"
+              onClick={handleCopyJoinLink}
+              className="text-[11px] text-sky-300 hover:text-sky-200 flex items-center gap-1 font-semibold cursor-pointer"
+            >
+              {copiedType === 'link' ? <Check className="w-3 h-3 text-emerald-400" /> : <Link2 className="w-3 h-3" />}
+              <span>{copiedType === 'link' ? 'Đã chép link!' : 'Chép link vào phòng'}</span>
+            </button>
+            <span className="text-slate-700">·</span>
+            <button
+              type="button"
+              onClick={() => onOpenVirtualCards(roomId)}
+              className="text-[11px] text-amber-400 hover:text-amber-300 underline flex items-center gap-1 font-semibold cursor-pointer"
+            >
+              <Smartphone className="w-3 h-3" />
+              <span>Xem Giao Diện Người Chơi</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -560,12 +781,59 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       </div>
 
       {!isGameStarted ? (
-        <div className="bg-[#0f172a] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-5">
+        <div
+          data-testid="gm-setup-panel"
+          className="bg-[#0f172a] border border-slate-800 rounded-2xl p-5 shadow-xl space-y-5"
+        >
+          {/* Real-Life Deck Mode Switcher */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 bg-[#090d18] border border-slate-800 rounded-2xl p-2">
+            <button
+              type="button"
+              data-testid="gm-mode-virtual-deck-btn"
+              onClick={() => handleSwitchDeckMode('virtual_deck')}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                deckMode === 'virtual_deck'
+                  ? 'bg-amber-500/15 border-amber-400 text-amber-100 shadow'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <div className="text-xs font-black flex items-center gap-1.5">
+                <span>🃏</span>
+                <span>Không Có Bộ Bài Ngoài Đời (App Chia Vai)</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                App chia ngẫu nhiên vai cân bằng. Người chơi nhập mã <strong className="text-amber-300 font-mono">{roomId}</strong> và chỉ thấy duy nhất vai trò của mình.
+              </p>
+            </button>
+
+            <button
+              type="button"
+              data-testid="gm-mode-physical-cards-btn"
+              onClick={() => handleSwitchDeckMode('physical_cards')}
+              className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                deckMode === 'physical_cards'
+                  ? 'bg-emerald-500/15 border-emerald-400 text-emerald-100 shadow'
+                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <div className="text-xs font-black flex items-center gap-1.5">
+                <span>🎴</span>
+                <span>Đã Có Bài Giấy (Người Chơi Tự Nhập / GM Nhập Hộ)</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                Phát bài giấy ngoài đời, người chơi vào mã <strong className="text-emerald-300 font-mono">{roomId}</strong> tự nhập lá bài trước trận, hoặc Quản Trò chọn hộ ngay bên dưới.
+              </p>
+            </button>
+          </div>
+
           <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
             <div>
               <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 <Users className="w-5 h-5 text-amber-400" />
-                Danh Sách Người Chơi ({playerNames.length} người)
+                <span>Danh Sách Người Chơi ({seats.length} người)</span>
+                <span className="text-[11px] font-mono text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-lg">
+                  📱 {seats.filter((s) => Boolean(s.claimedByUserId)).length}/{seats.length} đã vào phòng
+                </span>
               </h3>
             </div>
 
@@ -578,7 +846,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     type="button"
                     onClick={() => handleSetCustomPlayerCount(cnt)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-extrabold cursor-pointer transition-all ${
-                      playerNames.length === cnt
+                      seats.length === cnt
                         ? 'bg-amber-500 text-slate-950 shadow'
                         : 'text-slate-300 hover:text-amber-300'
                     }`}
@@ -596,8 +864,8 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 <button
                   type="button"
                   data-testid="gm-custom-count-dec"
-                  onClick={() => handleSetCustomPlayerCount(playerNames.length - 1)}
-                  disabled={playerNames.length <= 4}
+                  onClick={() => handleSetCustomPlayerCount(seats.length - 1)}
+                  disabled={seats.length <= 4}
                   className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
                   aria-label="Giảm số người chơi"
                 >
@@ -621,8 +889,8 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 <button
                   type="button"
                   data-testid="gm-custom-count-inc"
-                  onClick={() => handleSetCustomPlayerCount(playerNames.length + 1)}
-                  disabled={playerNames.length >= 20}
+                  onClick={() => handleSetCustomPlayerCount(seats.length + 1)}
+                  disabled={seats.length >= 20}
                   className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
                   aria-label="Tăng số người chơi"
                 >
@@ -630,14 +898,25 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 </button>
               </div>
 
-              <button
-                type="button"
-                onClick={handleRegenerateRoles}
-                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-amber-300 border border-slate-700 flex items-center gap-1.5 cursor-pointer"
-              >
-                <Shuffle className="w-3.5 h-3.5" />
-                Phân Lại Vai Ngẫu Nhiên
-              </button>
+              {deckMode === 'virtual_deck' ? (
+                <button
+                  type="button"
+                  onClick={handleRegenerateRoles}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-amber-300 border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Shuffle className="w-3.5 h-3.5" />
+                  <span>Phân Lại Vai Ngẫu Nhiên</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleFillEmptyAsVillager}
+                  className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-emerald-300 border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>Điền Dân Làng Cho Ghế Trống</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -656,38 +935,75 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              Thêm
+              <span>Thêm</span>
             </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-            {playerNames.map((name, idx) => {
-              const currentRole = assignedRoles[idx] || 'villager';
-              const roleDef = ROLES[currentRole];
+            {seats.map((seat, idx) => {
+              const roleDef = seat.roleId ? ROLES[seat.roleId] : null;
+              const isJoined = Boolean(seat.claimedByUserId);
 
               return (
                 <div
-                  key={idx}
-                  className="bg-[#090d18] border border-slate-800 rounded-xl p-3 flex flex-col justify-between"
+                  key={seat.id}
+                  data-testid={`gm-seat-card-${idx + 1}`}
+                  className={`bg-[#090d18] border rounded-xl p-3 flex flex-col justify-between gap-2 ${
+                    seat.roleId === null
+                      ? 'border-amber-500/40'
+                      : isJoined
+                      ? 'border-emerald-500/45'
+                      : 'border-slate-800'
+                  }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold font-mono text-amber-400">#{idx + 1}</span>
+                  <div className="flex items-center justify-between gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-bold font-mono text-amber-400">#{idx + 1}</span>
+                      {isJoined && (
+                        <span
+                          className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-600/50 font-bold"
+                          title="Người chơi đã mở thẻ trên điện thoại"
+                        >
+                          📱 Đã vào
+                        </span>
+                      )}
+                      {seat.roleSource === 'self_input' && (
+                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-600/50 font-bold">
+                          ✍️ Tự nhập
+                        </span>
+                      )}
+                    </div>
                     <button
+                      type="button"
                       onClick={() => handleRemovePlayer(idx)}
-                      className="text-slate-500 hover:text-rose-400 p-1 rounded cursor-pointer"
+                      disabled={seats.length <= 4}
+                      className="text-slate-500 hover:text-rose-400 disabled:opacity-30 p-1 rounded cursor-pointer"
                       title="Xóa người này"
+                      aria-label={`Xóa ${seat.name}`}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
 
-                  <div className="my-1.5">
-                    <div className="font-semibold text-sm text-slate-200 truncate">{name}</div>
+                  <div className="space-y-1.5">
+                    <input
+                      type="text"
+                      value={seat.name}
+                      onChange={(e) => handleUpdatePlayerName(idx, e.target.value)}
+                      aria-label={`Tên người chơi #${idx + 1}`}
+                      className="w-full bg-slate-950/90 border border-slate-800 focus:border-amber-500 rounded-lg px-2 py-1 font-semibold text-xs text-slate-100 focus:outline-none"
+                    />
                     <select
-                      value={currentRole}
-                      onChange={(e) => handleUpdateRole(idx, e.target.value as RoleId)}
-                      className="mt-1 w-full bg-slate-900 border border-slate-700 text-xs font-bold text-amber-300 rounded-lg px-2 py-1 focus:outline-none"
+                      value={seat.roleId || ''}
+                      onChange={(e) => handleUpdateRole(idx, e.target.value as RoleId | '')}
+                      aria-label={`Vai trò của ${seat.name}`}
+                      className={`w-full bg-slate-900 border text-xs font-bold rounded-lg px-2 py-1.5 focus:outline-none ${
+                        seat.roleId
+                          ? 'border-slate-700 text-amber-300'
+                          : 'border-amber-500/60 text-slate-400'
+                      }`}
                     >
+                      <option value="">-- Chờ nhập vai / Chọn hộ --</option>
                       {Object.values(ROLES).map((r) => (
                         <option key={r.id} value={r.id}>
                           {r.name.vi}
@@ -696,23 +1012,40 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     </select>
                   </div>
 
-                  <span className="text-[10px] text-slate-400 font-mono">{roleDef.badge}</span>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {roleDef ? roleDef.badge : 'Chưa gán bài'}
+                  </span>
                 </div>
               );
             })}
           </div>
 
+          {setupWarning && (
+            <div
+              role="alert"
+              className="p-3 rounded-xl bg-amber-950/60 border border-amber-500/60 text-xs text-amber-200 font-semibold flex items-center gap-2"
+            >
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>{setupWarning}</span>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center justify-between pt-3 border-t border-slate-800 gap-3">
             <div className="text-xs text-slate-400">
-              Mã phòng phát bài điện thoại: <strong className="text-amber-300 font-mono">{roomId}</strong>
+              {deckMode === 'physical_cards'
+                ? 'Chế độ bài giấy: Người chơi tự nhập lá bài bằng mã '
+                : 'Chế độ chia bài ảo: Người chơi xem vai bí mật bằng mã '}
+              <strong className="text-amber-300 font-mono">{roomId}</strong>
             </div>
 
             <button
+              type="button"
+              data-testid="gm-start-match-btn"
               onClick={handleStartGame}
               className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shadow-lg flex items-center gap-2 cursor-pointer"
             >
               <Play className="w-4 h-4 fill-slate-950" />
-              Bắt Đầu Ván Đấu Thực Tế (Vòng 1)
+              <span>Bắt Đầu Ván Đấu Thực Tế (Vòng 1)</span>
             </button>
           </div>
         </div>
@@ -1146,43 +1479,49 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                         </span>{' '}
                         đã thiệt mạng là:{' '}
                         <span className="text-white">
-                          {lastNightResult.killedDetails.map((d) => d.name).join(', ')}
+                          {[...lastNightResult.killedDetails]
+                            .sort(
+                              (a, b) =>
+                                players.findIndex((p) => p.id === a.playerId) -
+                                players.findIndex((p) => p.id === b.playerId)
+                            )
+                            .map((d) => d.name)
+                            .join(', ')}
                         </span>
                         !"
                       </h4>
 
-                      {/* Victim Cards */}
+                      {/* Public Victim Cards — STRICT ZERO-LEAK: NO death causes (Cupid/Witch/Wolf) & NO secret roles */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {lastNightResult.killedDetails.map((victim) => {
-                          const roleDef = ROLES[victim.roleId];
-                          return (
-                            <div
-                              key={victim.playerId}
-                              className="p-3 rounded-xl bg-[#070a14] border border-rose-500/50 flex flex-col justify-between gap-1.5"
-                            >
-                              <div className="flex items-center justify-between gap-2">
+                        {[...lastNightResult.killedDetails]
+                          .sort(
+                            (a, b) =>
+                              players.findIndex((p) => p.id === a.playerId) -
+                              players.findIndex((p) => p.id === b.playerId)
+                          )
+                          .map((victim) => {
+                            const seatIdx = players.findIndex((p) => p.id === victim.playerId) + 1;
+                            return (
+                              <div
+                                key={victim.playerId}
+                                className="p-3 rounded-xl bg-[#070a14] border border-rose-500/50 flex items-center justify-between gap-2"
+                              >
                                 <span className="text-sm font-black text-rose-200 flex items-center gap-1.5">
                                   <Skull className="w-4 h-4 text-rose-400 shrink-0" />
-                                  <span>{victim.name} (ĐÃ CHẾT)</span>
+                                  <span className="text-amber-400 font-mono">#{seatIdx}</span>
+                                  <span>{victim.name}</span>
                                 </span>
-                                <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-bold text-amber-300">
-                                  Vai: {roleDef.name[lang] || roleDef.name.vi} ({roleDef.badge})
+                                <span className="px-2 py-0.5 rounded-md bg-rose-950/90 border border-rose-700/60 text-[10px] font-extrabold text-rose-200">
+                                  💀 Tử trận đêm qua
                                 </span>
                               </div>
-                              <div className="flex flex-wrap gap-1">
-                                {victim.causes.map((c, idx) => (
-                                  <span
-                                    key={idx}
-                                    className="px-2 py-0.5 rounded-md bg-rose-950/90 border border-rose-700/60 text-[10px] font-extrabold text-rose-200"
-                                  >
-                                    {c}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
                       </div>
+
+                      <p className="text-[11px] text-amber-200/90 font-semibold">
+                        🔒 Đúng luật Ma Sói: Quản Trò chỉ công bố tên người chết, KHÔNG công bố nguyên nhân chết (Sói cắn, Bình Độc, Cupid...) hay vai trò!
+                      </p>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2.5 text-emerald-300">
@@ -1194,7 +1533,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   )}
                 </div>
 
-                {/* TIER 2: DETAILED CAUSAL LOGIC EXPLANATION FOR THE GAME MASTER */}
+                {/* TIER 2: DETAILED CAUSAL LOGIC EXPLANATION FOR THE GAME MASTER (SPOILER-GUARDED) */}
                 <div
                   data-testid="gm-night-logic-explanation"
                   className="p-3.5 sm:p-4 rounded-xl bg-[#070a14] border border-slate-800 space-y-3"
@@ -1203,69 +1542,117 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     <span className="text-xs font-extrabold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                       <Info className="w-4 h-4 text-amber-400" />
                       <span>
-                        🧠 Phần 2: Giải Thích Logic Đêm Qua Cho Quản Trò Hiểu (Chỉ Quản Trò Xem)
+                        🧠 Phần 2: Sổ Tay Bí Mật Quản Trò (Nguyên Nhân & Logic — Ẩn Với Người Chơi)
                       </span>
                     </span>
-                    <span className="text-[10px] font-mono text-slate-400">
-                      Tự động đối chiếu Bảo Vệ · Phù Thủy · Già Làng · Bán Sói · Tình Nhân
-                    </span>
+                    <button
+                      type="button"
+                      data-testid="gm-toggle-secret-log-btn"
+                      onClick={() => setShowSecretGMLog((v) => !v)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-[11px] font-bold text-amber-200 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-amber-400" />
+                      <span>
+                        {showSecretGMLog ? 'Ẩn Chi Tiết Bí Mật' : 'Mở Chi Tiết Bí Mật (Chỉ Quản Trò)'}
+                      </span>
+                    </button>
                   </div>
 
-                  {/* Step-by-step causal logic cards */}
-                  {lastNightResult?.logicExplanations &&
-                  lastNightResult.logicExplanations.length > 0 ? (
-                    <div className="space-y-2">
-                      {lastNightResult.logicExplanations.map((step, idx) => {
-                        const styleMap = {
-                          death:
-                            'bg-rose-950/35 border-rose-500/40 text-rose-100 badge-bg:bg-rose-900',
-                          saved:
-                            'bg-emerald-950/35 border-emerald-500/40 text-emerald-100',
-                          special:
-                            'bg-amber-950/35 border-amber-500/40 text-amber-100',
-                          info: 'bg-slate-900/90 border-slate-700 text-slate-200',
-                        }[step.category];
-
-                        return (
-                          <div
-                            key={idx}
-                            className={`p-2.5 sm:p-3 rounded-xl border text-xs space-y-1 ${styleMap}`}
-                          >
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="px-2 py-0.5 rounded bg-black/50 border border-white/15 text-[10px] font-mono font-extrabold text-amber-300">
-                                Bước logic #{idx + 1} · {step.badge}
-                              </span>
-                              <span className="font-extrabold text-white">{step.title}</span>
-                            </div>
-                            <p className="text-slate-300 leading-relaxed pl-1">{step.detail}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : lastNightSummary.length > 0 ? (
-                    <ul className="space-y-1 text-xs text-slate-200">
-                      {lastNightSummary.map((msg, i) => (
-                        <li key={i}>• {msg}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-xs text-slate-400">
-                      Không có hành động đặc biệt nào được ghi nhận trong đêm qua.
+                  {!showSecretGMLog ? (
+                    <p className="text-xs text-slate-400 italic">
+                      🔒 Nguyên nhân chết (Sói cắn, Phù Thủy, Cupid...) và vai trò thật đang được che để tránh lộ thông tin cho người chơi. Bấm nút trên nếu Quản Trò cần đối chiếu riêng.
                     </p>
-                  )}
+                  ) : (
+                    <>
+                      {/* Secret victim roles & causes for GM reference only */}
+                      {lastNightResult?.killedDetails && lastNightResult.killedDetails.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {lastNightResult.killedDetails.map((victim) => {
+                            const roleDef = ROLES[victim.roleId];
+                            return (
+                              <div
+                                key={victim.playerId}
+                                className="p-2.5 rounded-xl bg-slate-900/90 border border-slate-700 space-y-1"
+                              >
+                                <div className="flex items-center justify-between gap-2 text-xs font-bold">
+                                  <span className="text-rose-200">{victim.name}</span>
+                                  <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-[10px] text-amber-300">
+                                    Vai: {roleDef.name[lang] || roleDef.name.vi}
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {victim.causes.map((c, idx) => (
+                                    <span
+                                      key={idx}
+                                      className="px-1.5 py-0.5 rounded bg-rose-950/90 border border-rose-700/60 text-[10px] font-bold text-rose-200"
+                                    >
+                                      {c}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
 
-                  {/* Extra Cascade Messages from Day / Hunter Shot if any */}
-                  {lastNightSummary.length > 0 && (
-                    <div className="pt-2 border-t border-slate-800/80">
-                      <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
-                        Tóm tắt nhật ký hệ thống:
-                      </span>
-                      <ul className="space-y-0.5 text-[11px] text-slate-300">
-                        {lastNightSummary.map((msg, i) => (
-                          <li key={i}>• {msg}</li>
-                        ))}
-                      </ul>
-                    </div>
+                      {/* Step-by-step causal logic cards */}
+                      {lastNightResult?.logicExplanations &&
+                      lastNightResult.logicExplanations.length > 0 ? (
+                        <div className="space-y-2">
+                          {lastNightResult.logicExplanations.map((step, idx) => {
+                            const styleMap = {
+                              death:
+                                'bg-rose-950/35 border-rose-500/40 text-rose-100',
+                              saved:
+                                'bg-emerald-950/35 border-emerald-500/40 text-emerald-100',
+                              special:
+                                'bg-amber-950/35 border-amber-500/40 text-amber-100',
+                              info: 'bg-slate-900/90 border-slate-700 text-slate-200',
+                            }[step.category];
+
+                            return (
+                              <div
+                                key={idx}
+                                className={`p-2.5 sm:p-3 rounded-xl border text-xs space-y-1 ${styleMap}`}
+                              >
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="px-2 py-0.5 rounded bg-black/50 border border-white/15 text-[10px] font-mono font-extrabold text-amber-300">
+                                    Bước logic #{idx + 1} · {step.badge}
+                                  </span>
+                                  <span className="font-extrabold text-white">{step.title}</span>
+                                </div>
+                                <p className="text-slate-300 leading-relaxed pl-1">{step.detail}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : lastNightSummary.length > 0 ? (
+                        <ul className="space-y-1 text-xs text-slate-200">
+                          {lastNightSummary.map((msg, i) => (
+                            <li key={i}>• {msg}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className="text-xs text-slate-400">
+                          Không có hành động đặc biệt nào được ghi nhận trong đêm qua.
+                        </p>
+                      )}
+
+                      {/* Extra Cascade Messages from Day / Hunter Shot if any */}
+                      {lastNightSummary.length > 0 && (
+                        <div className="pt-2 border-t border-slate-800/80">
+                          <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
+                            Tóm tắt nhật ký hệ thống:
+                          </span>
+                          <ul className="space-y-0.5 text-[11px] text-slate-300">
+                            {lastNightSummary.map((msg, i) => (
+                              <li key={i}>• {msg}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -1274,29 +1661,72 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 <div className="flex items-center gap-3">
                   <Timer className="w-5 h-5 text-amber-400" />
                   <div>
-                    <span className="text-xs font-bold text-slate-300 block">Đồng Hồ Thảo Luận</span>
+                    <span className="text-xs font-bold text-slate-300 block">
+                      Đồng Hồ Thảo Luận (Custom Thời Gian Đợi)
+                    </span>
                     <span className="text-xl font-mono font-extrabold text-amber-300">
-                      {Math.floor(timerSeconds / 60)}:{(timerSeconds % 60).toString().padStart(2, '0')}
+                      {Math.floor(timerSeconds / 60)}:{(timerSeconds % 60).toString().padStart(2, '0')}{' '}
+                      <span className="text-xs text-slate-400">({timerSeconds}s)</span>
                     </span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   <button
+                    type="button"
                     onClick={() => setIsTimerRunning(!isTimerRunning)}
                     className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold cursor-pointer"
                   >
                     {isTimerRunning ? 'Tạm Dừng' : 'Chạy Giờ'}
                   </button>
                   <button
-                    onClick={() => {
-                      setTimerSeconds(60);
-                      setIsTimerRunning(false);
-                    }}
-                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-xs cursor-pointer"
+                    type="button"
+                    onClick={() => setTimerSeconds((s) => Math.max(5, s - 15))}
+                    className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-rose-300 font-mono text-xs font-bold cursor-pointer"
                   >
-                    60s
+                    -15s
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setTimerSeconds((s) => Math.min(600, s + 15))}
+                    className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 font-mono text-xs font-bold cursor-pointer"
+                  >
+                    +15s
+                  </button>
+                  {[30, 60, 90, 120, 180].map((presetSec) => (
+                    <button
+                      key={presetSec}
+                      type="button"
+                      onClick={() => {
+                        setCustomDiscussDefaultSec(presetSec);
+                        setTimerSeconds(presetSec);
+                        setIsTimerRunning(false);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
+                        customDiscussDefaultSec === presetSec
+                          ? 'bg-amber-500 text-slate-950'
+                          : 'bg-slate-800 text-slate-300 hover:text-amber-300'
+                      }`}
+                    >
+                      {presetSec}s
+                    </button>
+                  ))}
+                  <input
+                    type="number"
+                    min={10}
+                    max={600}
+                    value={timerSeconds}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (!Number.isNaN(val)) {
+                        const clamped = Math.max(5, Math.min(600, val));
+                        setTimerSeconds(clamped);
+                        setCustomDiscussDefaultSec(clamped);
+                      }
+                    }}
+                    aria-label="Custom GM timer seconds"
+                    className="w-16 text-center bg-slate-950 border border-amber-500/40 rounded-lg py-1 text-xs font-mono font-extrabold text-amber-300"
+                  />
                 </div>
               </div>
 

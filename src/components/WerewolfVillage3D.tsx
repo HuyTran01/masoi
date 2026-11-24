@@ -5,6 +5,15 @@ import { Player, Phase, ThrownPropEvent, PropType, Language } from '../types/gam
 import { ROLES } from '../game/roles';
 import { UI_TEXT } from '../utils/i18n';
 import { sound, PROP_REACTION_META } from '../utils/sound';
+import {
+  CameraViewPreset,
+  computeDefaultFpvYawFromSeatAngle,
+  clampFpvPitch,
+  computeFpvCameraPose,
+  computeFpvMovementStep,
+  computeResponsiveCameraFraming,
+  findFpvCrosshairTarget,
+} from '../game/fpvCamera';
 
 interface WerewolfVillage3DProps {
   players: Player[];
@@ -20,9 +29,13 @@ interface WerewolfVillage3DProps {
   secondaryTargetId?: string | null;
   cupidLovers?: [string, string] | null;
   votesMap: Record<string, number>;
+  votersByTarget?: Record<string, string[]>;
   activeSpeakers: string[];
   revealAllRoles?: boolean;
-  cameraPreset: 'orbit' | 'campfire' | 'overhead' | 'dramatic';
+  cameraPreset: CameraViewPreset;
+  activePropTool?: PropType | null;
+  fpvLookTurnRate?: number;
+  onAimedPlayerChange?: (playerId: string | null) => void;
   onSelectPlayer: (playerId: string) => void;
 }
 
@@ -150,9 +163,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
   secondaryTargetId,
   cupidLovers,
   votesMap,
+  votersByTarget,
   activeSpeakers,
   revealAllRoles,
   cameraPreset,
+  activePropTool = null,
+  fpvLookTurnRate = 0,
+  onAimedPlayerChange,
   onSelectPlayer,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -177,8 +194,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     activeSpeakers,
     revealAllRoles,
     cameraPreset,
+    activePropTool,
+    fpvLookTurnRate,
+    onAimedPlayerChange,
     onSelectPlayer,
     hoveredPlayerId: null as string | null,
+    aimedPlayerId: null as string | null,
+    lastReportedAimedId: null as string | null,
     trauma: 0,
     hitstop: 0,
     // 360° Camera Orbit State
@@ -186,6 +208,11 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     polarAngle: 0.54,
     cameraDist: 16.2,
     isDraggingOrbit: false,
+    // First-Person View (FPV) State
+    fpvYaw: Math.PI,
+    fpvPitch: -0.04,
+    fpvThrowSwingTimer: 0,
+    snapCameraImmediate: false,
     // Open-World Roaming & Ghost Free-Flight Offset
     userRoamX: 0,
     userRoamZ: 5.65,
@@ -199,6 +226,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
   useEffect(() => {
     const prevSelected = stateRef.current.selectedTargetId;
     const prevPhase = stateRef.current.phase;
+    const prevPreset = stateRef.current.cameraPreset;
     stateRef.current = {
       ...stateRef.current,
       players,
@@ -216,8 +244,29 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       activeSpeakers,
       revealAllRoles,
       cameraPreset,
+      activePropTool,
+      fpvLookTurnRate,
+      onAimedPlayerChange,
       onSelectPlayer,
     };
+
+    if (cameraPreset !== prevPreset) {
+      stateRef.current.snapCameraImmediate = true;
+    }
+
+    if (cameraPreset === 'first_person' && prevPreset !== 'first_person') {
+      const meIdx = Math.max(0, players.findIndex((p) => p.id === userPlayerId));
+      const count = Math.max(1, players.length);
+      const seatAngle = Math.PI / 2 + (meIdx / count) * Math.PI * 2;
+      stateRef.current.fpvYaw = computeDefaultFpvYawFromSeatAngle(seatAngle);
+      stateRef.current.fpvPitch = -0.04;
+      const meP = players[meIdx];
+      if (meP?.isAlive) {
+        const hx = Math.cos(seatAngle) * 5.65;
+        const hz = Math.sin(seatAngle) * 5.65;
+        stateRef.current.fpvYaw = Math.atan2(-hx, -hz);
+      }
+    }
 
     if (phase !== prevPhase || isTitleScreen) {
       stateRef.current.isUserRoaming = false;
@@ -266,6 +315,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     activeSpeakers,
     revealAllRoles,
     cameraPreset,
+    activePropTool,
+    fpvLookTurnRate,
+    onAimedPlayerChange,
     onSelectPlayer,
   ]);
 
@@ -319,13 +371,105 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     const scene = new THREE.Scene();
     const bgNight = new THREE.Color(0x070b16);
     const bgBlindNight = new THREE.Color(0x020308);
-    const bgDay = new THREE.Color(0x1e293b);
+    const bgDay = new THREE.Color(0x6fb7e9);
     scene.background = bgNight.clone();
     scene.fog = new THREE.FogExp2(0x070b16, 0.017);
 
-    const camera = new THREE.PerspectiveCamera(46, width / height, 0.5, 140);
+    const camera = new THREE.PerspectiveCamera(46, width / height, 0.12, 140);
     camera.position.set(0, 8.2, 15.5);
     camera.lookAt(0, 1.0, 0);
+    scene.add(camera);
+
+    // First-Person Viewmodel Rig (Hands + Village Lantern + Claws / Held Prop)
+    const fpvRigGroup = new THREE.Group();
+    fpvRigGroup.visible = false;
+    camera.add(fpvRigGroup);
+
+    const fpvSleeveMat = new THREE.MeshLambertMaterial({ color: 0x0284c7 });
+    const fpvSkinMat = new THREE.MeshLambertMaterial({ color: 0xfde68a });
+    const fpvLanternMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+    const fpvDarkIronMat = new THREE.MeshLambertMaterial({ color: 0x1e293b });
+
+    // Left Hand + Glowing Village Lantern
+    const fpvLeftHandGroup = new THREE.Group();
+    fpvLeftHandGroup.position.set(-0.26, -0.19, -0.55);
+    const fpvSleeveGeo = new THREE.CylinderGeometry(0.052, 0.068, 0.34, 10);
+    const fpvHandSphereGeo = new THREE.SphereGeometry(0.06, 10, 10);
+    const leftSleeveMesh = new THREE.Mesh(fpvSleeveGeo, fpvSleeveMat);
+    leftSleeveMesh.rotation.x = Math.PI / 2.3;
+    leftSleeveMesh.rotation.z = -0.22;
+    leftSleeveMesh.position.set(-0.04, -0.1, 0.14);
+    const leftPalmMesh = new THREE.Mesh(fpvHandSphereGeo, fpvSkinMat);
+    const fpvLanternBody = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.058, 0.048, 0.14, 8),
+      fpvLanternMat
+    );
+    fpvLanternBody.position.set(0.02, -0.11, -0.02);
+    const fpvLanternCap = new THREE.Mesh(
+      new THREE.ConeGeometry(0.082, 0.06, 8),
+      fpvDarkIronMat
+    );
+    fpvLanternCap.position.set(0.02, -0.02, -0.02);
+    const fpvLanternBase = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.055, 0.062, 0.025, 8),
+      fpvDarkIronMat
+    );
+    fpvLanternBase.position.set(0.02, -0.19, -0.02);
+    fpvLeftHandGroup.add(
+      leftSleeveMesh,
+      leftPalmMesh,
+      fpvLanternBody,
+      fpvLanternCap,
+      fpvLanternBase
+    );
+    fpvRigGroup.add(fpvLeftHandGroup);
+
+    // Right Hand + Werewolf Claws + Equipped Prop Preview
+    const fpvRightHandGroup = new THREE.Group();
+    fpvRightHandGroup.position.set(0.26, -0.18, -0.53);
+    const rightSleeveMesh = new THREE.Mesh(fpvSleeveGeo, fpvSleeveMat);
+    rightSleeveMesh.rotation.x = Math.PI / 2.3;
+    rightSleeveMesh.rotation.z = 0.22;
+    rightSleeveMesh.position.set(0.04, -0.1, 0.14);
+    const rightPalmMesh = new THREE.Mesh(fpvHandSphereGeo, fpvSkinMat);
+    fpvRightHandGroup.add(rightSleeveMesh, rightPalmMesh);
+
+    const fpvClawsGroup = new THREE.Group();
+    const clawGeo = new THREE.ConeGeometry(0.016, 0.095, 6);
+    const clawMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+    for (let c = -1; c <= 1; c++) {
+      const claw = new THREE.Mesh(clawGeo, clawMat);
+      claw.rotation.x = -Math.PI / 2.2;
+      claw.position.set(c * 0.026, 0.01, -0.075);
+      fpvClawsGroup.add(claw);
+    }
+    fpvClawsGroup.visible = false;
+    fpvRightHandGroup.add(fpvClawsGroup);
+
+    // Held Prop Previews (Tomato, Egg, Rose, Water Bucket)
+    const fpvPropHolderGroup = new THREE.Group();
+    fpvPropHolderGroup.position.set(0, 0.06, -0.04);
+    const fpvHeldTomato = new THREE.Mesh(
+      new THREE.SphereGeometry(0.065, 10, 10),
+      new THREE.MeshLambertMaterial({ color: 0xef4444 })
+    );
+    const fpvHeldEgg = new THREE.Mesh(
+      new THREE.SphereGeometry(0.058, 10, 10),
+      new THREE.MeshLambertMaterial({ color: 0xfef9c3 })
+    );
+    fpvHeldEgg.scale.set(0.85, 1.22, 0.85);
+    const fpvHeldRose = new THREE.Mesh(
+      new THREE.ConeGeometry(0.06, 0.14, 8),
+      new THREE.MeshLambertMaterial({ color: 0xf43f5e })
+    );
+    fpvHeldRose.rotation.x = Math.PI;
+    const fpvHeldWater = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.06, 0.048, 0.11, 10),
+      new THREE.MeshLambertMaterial({ color: 0x38bdf8 })
+    );
+    fpvPropHolderGroup.add(fpvHeldTomato, fpvHeldEgg, fpvHeldRose, fpvHeldWater);
+    fpvRightHandGroup.add(fpvPropHolderGroup);
+    fpvRigGroup.add(fpvRightHandGroup);
 
     // Studio Environment Map (RoomEnvironment)
     const pmremGenerator = new THREE.PMREMGenerator(renderer);
@@ -1458,6 +1602,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
     const onPointerMove = (e: PointerEvent) => {
       const st = stateRef.current;
+      const isFpv = !st.isTitleScreen && st.cameraPreset === 'first_person';
 
       if (isPointerDown) {
         const dx = e.clientX - lastDragX;
@@ -1468,16 +1613,26 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
         if (dragDistance > 5) {
           st.isDraggingOrbit = true;
-          st.azimuthAngle -= dx * 0.0075;
-          st.polarAngle = Math.max(0.22, Math.min(1.28, st.polarAngle + dy * 0.0055));
+          if (isFpv) {
+            st.fpvYaw -= dx * 0.0065;
+            st.fpvPitch = clampFpvPitch(st.fpvPitch - dy * 0.005);
+          } else {
+            st.azimuthAngle -= dx * 0.0075;
+            st.polarAngle = Math.max(0.22, Math.min(1.28, st.polarAngle + dy * 0.0055));
+          }
         }
       } else if (st.freeLook360 && !st.isTitleScreen) {
         const rect = renderer.domElement.getBoundingClientRect();
         if (rect.width > 0 && rect.height > 0) {
           const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
           const ny = ((e.clientY - rect.top) / rect.height) * 2 - 1;
-          st.azimuthAngle = -nx * Math.PI;
-          st.polarAngle = 0.35 + (ny + 1) * 0.35;
+          if (isFpv) {
+            st.fpvYaw = Math.PI - nx * Math.PI;
+            st.fpvPitch = clampFpvPitch(-ny * 0.55);
+          } else {
+            st.azimuthAngle = -nx * Math.PI;
+            st.polarAngle = 0.35 + (ny + 1) * 0.35;
+          }
         }
       }
 
@@ -1486,11 +1641,12 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       lastHoverTime = now;
       const pid = getIntersectedPlayerId(e.clientX, e.clientY);
       st.hoveredPlayerId = pid;
-      renderer.domElement.style.cursor = pid
-        ? 'pointer'
-        : isPointerDown
-        ? 'grabbing'
-        : 'grab';
+      renderer.domElement.style.cursor =
+        pid || (isFpv && st.aimedPlayerId)
+          ? 'pointer'
+          : isPointerDown
+          ? 'grabbing'
+          : 'grab';
     };
 
     const onPointerUp = (e: PointerEvent) => {
@@ -1500,14 +1656,17 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
       if (!wasClick || stateRef.current.isTitleScreen) return;
 
-      const pid = getIntersectedPlayerId(e.clientX, e.clientY);
+      const st = stateRef.current;
+      const isFpv = st.cameraPreset === 'first_person';
+      const pid = getIntersectedPlayerId(e.clientX, e.clientY) || (isFpv ? st.aimedPlayerId : null);
       if (pid) {
-        stateRef.current.onSelectPlayer(pid);
+        st.onSelectPlayer(pid);
       } else {
-        const st = stateRef.current;
         const me = st.players.find((p) => p.id === st.userPlayerId);
         const canRoam =
-          (me && !me.isAlive) || (st.phase === 'night' && st.isPlayerAwakeAtNight && me?.isAlive);
+          (me && !me.isAlive) ||
+          (st.phase === 'night' && st.isPlayerAwakeAtNight && me?.isAlive) ||
+          (isFpv && me?.isAlive);
         if (canRoam) {
           const rect = renderer.domElement.getBoundingClientRect();
           pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -1536,9 +1695,18 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (
-        ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(
-          e.code
-        )
+        [
+          'KeyW',
+          'KeyA',
+          'KeyS',
+          'KeyD',
+          'KeyQ',
+          'KeyE',
+          'ArrowUp',
+          'ArrowDown',
+          'ArrowLeft',
+          'ArrowRight',
+        ].includes(e.code)
       ) {
         stateRef.current.keysPressed.add(e.code);
       }
@@ -1562,6 +1730,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           camera.aspect = w / h;
           camera.updateProjectionMatrix();
           renderer.setSize(w, h);
+          renderer.render(scene, camera);
         }
       }
     });
@@ -1617,42 +1786,61 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       // Day vs Night vs Blindfold Atmosphere Interpolation
       const isDay = st.phase === 'day_discussion' || st.phase === 'day_voting';
       const targetBg = isDay ? bgDay : isNightBlindfolded ? bgBlindNight : bgNight;
-      (scene.background as THREE.Color).lerp(targetBg, 1 - Math.exp(-3.5 * dt));
+      (scene.background as THREE.Color).lerp(targetBg, 1 - Math.exp(-3.8 * dt));
       if (scene.fog instanceof THREE.FogExp2) {
         scene.fog.color.copy(scene.background as THREE.Color);
         scene.fog.density = THREE.MathUtils.damp(
           scene.fog.density,
-          isNightBlindfolded ? 0.075 : 0.017,
+          isNightBlindfolded ? 0.075 : isDay ? 0.0085 : 0.017,
           4,
           dt
         );
       }
 
+      hemiLight.color.setHex(isDay ? 0xdbeafe : 0x4765a0);
+      hemiLight.groundColor.setHex(isDay ? 0x6b7f4e : 0x111522);
       hemiLight.intensity = THREE.MathUtils.damp(
         hemiLight.intensity,
-        isDay ? 1.85 : isNightBlindfolded ? 0.15 : 0.96,
-        3,
+        isDay ? 1.55 : isNightBlindfolded ? 0.15 : 0.96,
+        3.5,
         dt
       );
       dirLight.intensity = THREE.MathUtils.damp(
         dirLight.intensity,
-        isDay ? 2.45 : isNightBlindfolded ? 0.12 : 1.25,
-        3,
+        isDay ? 2.6 : isNightBlindfolded ? 0.12 : 1.25,
+        3.5,
         dt
       );
-      dirLight.color.setHex(isDay ? 0xfef08a : 0x93c5fd);
-      moonMat.color.setHex(isDay ? 0xfde047 : 0xfda4af);
-      moonHaloMat.color.setHex(isDay ? 0xf59e0b : 0xf43f5e);
-      starMat.opacity = isDay ? 0.1 : 0.72 + Math.sin(elapsedTotal * 3) * 0.18;
+      dirLight.color.setHex(isDay ? 0xfff5d6 : 0x93c5fd);
+      moonMat.color.setHex(isDay ? 0xfef08a : 0xfda4af);
+      moonHaloMat.color.setHex(isDay ? 0xfbbf24 : 0xf43f5e);
+      starInst.visible = !isDay;
+      starMat.opacity = isDay ? 0 : 0.72 + Math.sin(elapsedTotal * 3) * 0.18;
+      // Switch cottage windows & streetlamps from glowing night amber to reflective daylight glass
+      winMat.color.setHex(isDay ? 0x93c5fd : 0xfbbf24);
+      lampGlowMat.color.setHex(isDay ? 0xcbd5e1 : 0xfde047);
 
-      // Rotate Windmill Sails & Flicker Campfire
+      // Rotate Windmill Sails & Flicker Campfire (subtle daytime embers vs blazing night fire)
       windmillBlades.rotation.z += simDt * 0.55;
       const flicker = Math.sin(elapsedTotal * 11) * 0.12 + Math.cos(elapsedTotal * 17) * 0.08;
-      flameOuter.scale.set(1 + flicker * 0.4, 1 + flicker, 1 + flicker * 0.4);
-      flameInner.scale.set(1 - flicker * 0.3, 1 + flicker * 1.2, 1 - flicker * 0.3);
-      brazierFlame.scale.set(1 + flicker * 0.35, 1 + flicker * 0.9, 1 + flicker * 0.35);
+      const fireScale = isDay ? 0.42 : 1.0;
+      flameOuter.scale.set(
+        fireScale * (1 + flicker * 0.4),
+        fireScale * (1 + flicker),
+        fireScale * (1 + flicker * 0.4)
+      );
+      flameInner.scale.set(
+        fireScale * (1 - flicker * 0.3),
+        fireScale * (1 + flicker * 1.2),
+        fireScale * (1 - flicker * 0.3)
+      );
+      brazierFlame.scale.set(
+        fireScale * (1 + flicker * 0.35),
+        fireScale * (1 + flicker * 0.9),
+        fireScale * (1 + flicker * 0.35)
+      );
       fireLight.intensity =
-        (isDay ? 2.2 : isNightBlindfolded ? 0.9 : 5.2) + flicker * 3.5;
+        (isDay ? 0.85 : isNightBlindfolded ? 0.9 : 5.2) + flicker * (isDay ? 0.6 : 3.5);
       runeOrb.rotation.y += simDt * 1.4;
       runeOrb.position.y = 5.85 + Math.sin(elapsedTotal * 2.5) * 0.15;
 
@@ -1682,6 +1870,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           const toIdx = activePlayers.findIndex((p) => p.id === propEv.toId);
           if (fromIdx !== -1 && toIdx !== -1 && seats[fromIdx] && seats[toIdx]) {
             seats[fromIdx].throwAnimTimer = 0.45;
+            if (propEv.fromId === st.userPlayerId) {
+              st.fpvThrowSwingTimer = 0.42;
+            }
             const { group: propGroup, trailParticles } = createCompositePropGroup(propEv.propType);
             const sPos = seats[fromIdx].currentPos.clone().add(new THREE.Vector3(0, 1.45, 0));
             const ePos = seats[toIdx].currentPos.clone().add(new THREE.Vector3(0, 1.32, 0));
@@ -1784,7 +1975,33 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         splat.bodySplatMesh.scale.setScalar(fadeRatio);
       }
 
-      // Compute WASD / Mobile Virtual D-Pad Input for Open-World Night Movement or Ghost Flight
+      // Compute WASD / Mobile Virtual D-Pad Input for Open-World Night Movement, Ghost Flight, or First-Person Roaming
+      const viewportAspect =
+        container && container.clientHeight > 0
+          ? container.clientWidth / container.clientHeight
+          : window.innerWidth / Math.max(1, window.innerHeight);
+      const responsiveFraming = computeResponsiveCameraFraming({
+        aspect: viewportAspect,
+        baseFov: 46,
+      });
+      const isFirstPerson = !st.isTitleScreen && st.cameraPreset === 'first_person';
+      const targetFov = isFirstPerson ? 62 : responsiveFraming.targetFov;
+      if (Math.abs(camera.fov - targetFov) > 0.05) {
+        camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 10, dt);
+        camera.updateProjectionMatrix();
+      }
+
+      let turnInput = st.fpvLookTurnRate || 0;
+      if (st.keysPressed.has('KeyQ')) turnInput -= 1;
+      if (st.keysPressed.has('KeyE')) turnInput += 1;
+      if (Math.abs(turnInput) > 0.01) {
+        if (isFirstPerson) {
+          st.fpvYaw -= turnInput * 2.1 * dt;
+        } else {
+          st.azimuthAngle -= turnInput * 1.8 * dt;
+        }
+      }
+
       let inputX = st.moveVector.x;
       let inputZ = st.moveVector.z;
       if (st.keysPressed.has('KeyW') || st.keysPressed.has('ArrowUp')) inputZ -= 1;
@@ -1794,7 +2011,10 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
       const hasMoveInput = Math.hypot(inputX, inputZ) > 0.05;
       const canUserRoamAlive =
-        !st.isTitleScreen && st.phase === 'night' && st.isPlayerAwakeAtNight && Boolean(me?.isAlive);
+        !st.isTitleScreen &&
+        Boolean(me?.isAlive) &&
+        ((st.phase === 'night' && st.isPlayerAwakeAtNight) ||
+          (isFirstPerson && !isNightBlindfolded));
       const isUserGhost = !st.isTitleScreen && Boolean(me && !me.isAlive);
 
       // Update Player Seats & Spectral Ghosts
@@ -1829,14 +2049,31 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           if (hasMoveInput) {
             st.isUserRoaming = true;
             st.dashTargetPos = null;
-            const cosA = Math.cos(st.azimuthAngle);
-            const sinA = Math.sin(st.azimuthAngle);
-            const moveWorldX = inputX * cosA + inputZ * sinA;
-            const moveWorldZ = -inputX * sinA + inputZ * cosA;
-            const speed = 5.8 * simDt;
-            seat.currentPos.x = Math.max(-9.5, Math.min(9.5, seat.currentPos.x + moveWorldX * speed));
-            seat.currentPos.z = Math.max(-9.5, Math.min(9.5, seat.currentPos.z + moveWorldZ * speed));
-            seat.bodyGroup.rotation.y = Math.atan2(moveWorldX, moveWorldZ) - seat.group.rotation.y;
+            if (isFirstPerson) {
+              const step = computeFpvMovementStep({
+                yaw: st.fpvYaw,
+                inputX,
+                inputZ,
+                speed: 5.8,
+                dt: simDt,
+                currentX: seat.currentPos.x,
+                currentZ: seat.currentPos.z,
+                maxRadius: 9.5,
+              });
+              seat.currentPos.x = step.nextX;
+              seat.currentPos.z = step.nextZ;
+              seat.bodyGroup.rotation.y =
+                Math.atan2(step.moveWorldX, step.moveWorldZ) - seat.group.rotation.y;
+            } else {
+              const cosA = Math.cos(st.azimuthAngle);
+              const sinA = Math.sin(st.azimuthAngle);
+              const moveWorldX = inputX * cosA + inputZ * sinA;
+              const moveWorldZ = -inputX * sinA + inputZ * cosA;
+              const speed = 5.8 * simDt;
+              seat.currentPos.x = Math.max(-9.5, Math.min(9.5, seat.currentPos.x + moveWorldX * speed));
+              seat.currentPos.z = Math.max(-9.5, Math.min(9.5, seat.currentPos.z + moveWorldZ * speed));
+              seat.bodyGroup.rotation.y = Math.atan2(moveWorldX, moveWorldZ) - seat.group.rotation.y;
+            }
 
             if (nowPerf - st.lastProximitySelectTime > 900) {
               for (let j = 0; j < count; j++) {
@@ -1868,11 +2105,14 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         seat.worldPos.set(seat.currentPos.x, 1.72, seat.currentPos.z);
         seat.group.rotation.y = -angle - Math.PI / 2;
 
+        // Hide own 3rd-person body mesh in First-Person View so camera is unobstructed
+        seat.bodyGroup.visible = !(isMe && isFirstPerson);
+
         const targetKo = p.isAlive ? 0 : 1;
         seat.koProgress = THREE.MathUtils.damp(seat.koProgress, targetKo, 6, dt);
         seat.bodyGroup.rotation.x = -seat.koProgress * 1.25;
         seat.bodyGroup.position.y = 0.28 - seat.koProgress * 0.15;
-        seat.tombstoneGroup.visible = !p.isAlive;
+        seat.tombstoneGroup.visible = !p.isAlive && !(isMe && isFirstPerson);
         seat.lanternMat.emissiveIntensity = p.isAlive ? (isNightBlindfolded ? 0.15 : 1.5) : 0.05;
 
         if (seat.reactionTimer > 0 && p.isAlive) {
@@ -1946,18 +2186,34 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         }
 
         if (!p.isAlive && !st.isTitleScreen) {
-          seat.ghostGroup.visible = true;
+          seat.ghostGroup.visible = !(isMe && isFirstPerson);
           if (isMe && isUserGhost && (hasMoveInput || st.dashTargetPos)) {
             if (hasMoveInput) {
               st.dashTargetPos = null;
-              const cosA = Math.cos(st.azimuthAngle);
-              const sinA = Math.sin(st.azimuthAngle);
-              const moveWorldX = inputX * cosA + inputZ * sinA;
-              const moveWorldZ = -inputX * sinA + inputZ * cosA;
-              const ghostSpeed = 7.2 * simDt;
-              seat.ghostPos.x = Math.max(-11, Math.min(11, seat.ghostPos.x + moveWorldX * ghostSpeed));
-              seat.ghostPos.z = Math.max(-11, Math.min(11, seat.ghostPos.z + moveWorldZ * ghostSpeed));
-              seat.ghostGroup.rotation.y = Math.atan2(moveWorldX, moveWorldZ);
+              if (isFirstPerson) {
+                const gStep = computeFpvMovementStep({
+                  yaw: st.fpvYaw,
+                  inputX,
+                  inputZ,
+                  speed: 7.2,
+                  dt: simDt,
+                  currentX: seat.ghostPos.x,
+                  currentZ: seat.ghostPos.z,
+                  maxRadius: 11,
+                });
+                seat.ghostPos.x = gStep.nextX;
+                seat.ghostPos.z = gStep.nextZ;
+                seat.ghostGroup.rotation.y = Math.atan2(gStep.moveWorldX, gStep.moveWorldZ);
+              } else {
+                const cosA = Math.cos(st.azimuthAngle);
+                const sinA = Math.sin(st.azimuthAngle);
+                const moveWorldX = inputX * cosA + inputZ * sinA;
+                const moveWorldZ = -inputX * sinA + inputZ * cosA;
+                const ghostSpeed = 7.2 * simDt;
+                seat.ghostPos.x = Math.max(-11, Math.min(11, seat.ghostPos.x + moveWorldX * ghostSpeed));
+                seat.ghostPos.z = Math.max(-11, Math.min(11, seat.ghostPos.z + moveWorldZ * ghostSpeed));
+                seat.ghostGroup.rotation.y = Math.atan2(moveWorldX, moveWorldZ);
+              }
             } else if (st.dashTargetPos) {
               seat.ghostPos.x = THREE.MathUtils.damp(seat.ghostPos.x, st.dashTargetPos.x, 5, simDt);
               seat.ghostPos.z = THREE.MathUtils.damp(seat.ghostPos.z, st.dashTargetPos.z, 5, simDt);
@@ -2035,14 +2291,15 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         seat.loverHeart.rotation.y += simDt * 2.2;
 
         const isSelected = st.selectedTargetId === p.id || st.secondaryTargetId === p.id;
-        const isHovered = st.hoveredPlayerId === p.id;
+        const isHovered =
+          st.hoveredPlayerId === p.id || (isFirstPerson && st.aimedPlayerId === p.id);
 
         if (isSelected) {
           seat.haloMat.color.setHex(0xf43f5e);
           seat.haloMat.opacity = 0.92;
         } else if (isHovered) {
           seat.haloMat.color.setHex(0xfbbf24);
-          seat.haloMat.opacity = 0.85;
+          seat.haloMat.opacity = 0.88;
         } else if (isMe) {
           seat.haloMat.color.setHex(0x38bdf8);
           seat.haloMat.opacity = 0.65;
@@ -2055,13 +2312,12 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         }
       }
 
-      // 360° Spherical Camera Choreography (Auto-adapts distance on narrow/portrait screens)
-      const isNarrowViewport = container && container.clientWidth < 640;
-      const portraitDistMultiplier = isNarrowViewport
-        ? Math.min(1.38, Math.max(1.15, (640 / Math.max(320, container.clientWidth)) * 0.78))
-        : 1;
+      // Camera Choreography: 360° Third-Person Presets vs First-Person Eye-Level Rig
+      const portraitDistMultiplier = responsiveFraming.distMultiplier;
 
       if (st.isTitleScreen) {
+        fpvRigGroup.visible = false;
+        st.aimedPlayerId = null;
         const tourAngle = elapsedTotal * 0.22;
         const titleRadius = 13.5 * portraitDistMultiplier;
         _targetCamPos.set(
@@ -2070,7 +2326,72 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           Math.cos(tourAngle) * titleRadius
         );
         _targetLookAt.set(0, 1.2, 0);
+      } else if (isFirstPerson) {
+        const mySeatIdx = Math.max(
+          0,
+          activePlayers.findIndex((p) => p.id === st.userPlayerId)
+        );
+        const mySeat = seats[mySeatIdx] || seats[0];
+        const fpvPose = computeFpvCameraPose({
+          charPos: isUserGhost ? mySeat.ghostPos : mySeat.currentPos,
+          isGhost: isUserGhost,
+          yaw: st.fpvYaw,
+          pitch: st.fpvPitch,
+          elapsedSec: elapsedTotal,
+          isMoving: hasMoveInput,
+        });
+        _targetCamPos.set(fpvPose.eyePos.x, fpvPose.eyePos.y, fpvPose.eyePos.z);
+        _targetLookAt.set(fpvPose.lookTarget.x, fpvPose.lookTarget.y, fpvPose.lookTarget.z);
+
+        // Animate 3D First-Person Hands, Lantern & Equipped Prop
+        fpvRigGroup.visible = !isNightBlindfolded;
+        const handBobFreq = hasMoveInput ? 11.5 : 2.6;
+        const handBobAmp = hasMoveInput ? 0.024 : 0.007;
+        fpvLeftHandGroup.position.y = -0.19 + Math.sin(elapsedTotal * handBobFreq) * handBobAmp;
+        fpvLeftHandGroup.position.x = -0.26 + Math.cos(elapsedTotal * handBobFreq * 0.5) * handBobAmp;
+
+        if (st.fpvThrowSwingTimer > 0) {
+          st.fpvThrowSwingTimer = Math.max(0, st.fpvThrowSwingTimer - simDt);
+        }
+        const swingOffset =
+          st.fpvThrowSwingTimer > 0 ? Math.sin(st.fpvThrowSwingTimer * Math.PI * 2.3) * 0.55 : 0;
+        fpvRightHandGroup.position.y =
+          -0.18 - Math.sin(elapsedTotal * handBobFreq) * handBobAmp + swingOffset * 0.15;
+        fpvRightHandGroup.position.z = -0.53 - swingOffset * 0.25;
+        fpvRightHandGroup.rotation.x = -swingOffset * 1.1;
+
+        const isMeWolf = Boolean(me && (me.roleId === 'werewolf' || me.roleId === 'wolf_pup'));
+        fpvClawsGroup.visible = isMeWolf && !st.activePropTool;
+        fpvHeldTomato.visible = st.activePropTool === 'tomato';
+        fpvHeldEgg.visible = st.activePropTool === 'egg';
+        fpvHeldRose.visible = st.activePropTool === 'rose';
+        fpvHeldWater.visible = st.activePropTool === 'water';
+
+        // Crosshair Ray Alignment Detection against Villagers
+        const candidates = [];
+        for (let idx = 0; idx < count; idx++) {
+          const p = activePlayers[idx];
+          const s = seats[idx];
+          if (!p || !s || !s.group.visible) continue;
+          candidates.push({
+            playerId: p.id,
+            pos: {
+              x: s.currentPos.x,
+              y: p.isAlive ? 1.25 : 0.9,
+              z: s.currentPos.z,
+            },
+            visible: s.group.visible,
+          });
+        }
+        st.aimedPlayerId = findFpvCrosshairTarget({
+          eyePos: fpvPose.eyePos,
+          forward: fpvPose.forward,
+          candidates,
+          selfPlayerId: st.userPlayerId,
+        });
       } else {
+        fpvRigGroup.visible = false;
+        st.aimedPlayerId = null;
         let dist = st.cameraDist * portraitDistMultiplier;
         let polar = st.polarAngle;
         if (st.cameraPreset === 'overhead' && !st.isDraggingOrbit && !st.freeLook360) {
@@ -2089,19 +2410,32 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           Math.cos(st.azimuthAngle) * horizDist
         );
         _targetLookAt.set(0, 0.4, 0.6);
-      }
 
-      const focusId = st.hoveredPlayerId || st.selectedTargetId;
-      if (focusId && !st.isTitleScreen && !st.isDraggingOrbit) {
-        const focusSeat = seats.find((s) => s.playerId === focusId);
-        if (focusSeat && focusSeat.group.visible) {
-          _targetLookAt.lerp(focusSeat.worldPos, 0.18);
+        const focusId = st.hoveredPlayerId || st.selectedTargetId;
+        if (focusId && !st.isTitleScreen && !st.isDraggingOrbit) {
+          const focusSeat = seats.find((s) => s.playerId === focusId);
+          if (focusSeat && focusSeat.group.visible) {
+            _targetLookAt.lerp(focusSeat.worldPos, 0.18);
+          }
         }
       }
 
-      const dampFactor = 1 - Math.exp(-4.8 * dt);
-      camera.position.lerp(_targetCamPos, dampFactor);
-      _currentLookAt.lerp(_targetLookAt, dampFactor);
+      if (st.aimedPlayerId !== st.lastReportedAimedId) {
+        st.lastReportedAimedId = st.aimedPlayerId;
+        st.onAimedPlayerChange?.(st.aimedPlayerId);
+      }
+
+      if (st.snapCameraImmediate) {
+        st.snapCameraImmediate = false;
+        camera.position.copy(_targetCamPos);
+        _currentLookAt.copy(_targetLookAt);
+        camera.fov = targetFov;
+        camera.updateProjectionMatrix();
+      } else {
+        const dampFactor = 1 - Math.exp((isFirstPerson ? -18 : -4.8) * dt);
+        camera.position.lerp(_targetCamPos, dampFactor);
+        _currentLookAt.lerp(_targetLookAt, dampFactor);
+      }
 
       if (shake > 0.0001) {
         camera.position.x += (Math.random() - 0.5) * shake * 0.45;
@@ -2123,7 +2457,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           const seat = seats[i];
           if (!el) continue;
 
-          if (!seat.group.visible || st.isTitleScreen || isNightBlindfolded) {
+          const isMeLabel = seat.playerId === st.userPlayerId;
+          if (
+            !seat.group.visible ||
+            st.isTitleScreen ||
+            isNightBlindfolded ||
+            (isFirstPerson && isMeLabel)
+          ) {
             el.style.display = 'none';
             continue;
           }
@@ -2235,10 +2575,20 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
                 </div>
               )}
 
-              {/* Vote Count Pill */}
+              {/* Vote Count + Voters Pill */}
               {voteCount > 0 && (
-                <div className="px-1.5 py-0.5 rounded bg-rose-700 text-white font-mono text-[9px] sm:text-[10px] font-extrabold shadow-lg border border-rose-400 leading-none">
-                  {voteCount} {t.votesUnit}
+                <div className="px-1.5 py-0.5 rounded bg-rose-700/95 text-white text-[9px] sm:text-[10px] font-extrabold shadow-lg border border-rose-400 leading-tight text-center max-w-[170px]">
+                  <div className="font-mono leading-none">
+                    {voteCount} {t.votesUnit}
+                  </div>
+                  {votersByTarget?.[p.id] && votersByTarget[p.id].length > 0 && (
+                    <div className="text-[8px] font-sans font-semibold text-amber-100 truncate mt-0.5">
+                      ← {votersByTarget[p.id].slice(0, 3).join(', ')}
+                      {votersByTarget[p.id].length > 3
+                        ? ` +${votersByTarget[p.id].length - 3}`
+                        : ''}
+                    </div>
+                  )}
                 </div>
               )}
 

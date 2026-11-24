@@ -1437,6 +1437,42 @@ class SoundEngine {
       // silent
     }
   }
+
+  public playGMAnnouncement(
+    kind: 'dawn' | 'dusk',
+    hasDeaths: boolean,
+    spokenText: string,
+    lang: Language = 'vi'
+  ) {
+    if (this.isMuted) return;
+
+    if (kind === 'dawn') {
+      this.playDayGong();
+      if (hasDeaths) {
+        window.setTimeout(() => {
+          this.playDeath();
+        }, 320);
+      }
+    } else {
+      this.playGavel();
+      if (hasDeaths) {
+        window.setTimeout(() => {
+          this.playDeath();
+        }, 220);
+      }
+    }
+
+    if (spokenText && typeof window !== 'undefined') {
+      window.setTimeout(() => {
+        this.speakLocalized(spokenText, lang, {
+          pitch: kind === 'dawn' ? 0.96 : 0.88,
+          rate: 0.98,
+          volume: 0.9,
+        });
+      }, 380);
+    }
+  }
 }
 
 export const sound = new SoundEngine();
+

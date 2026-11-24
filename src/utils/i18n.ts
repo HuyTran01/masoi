@@ -48,6 +48,11 @@ export interface UITranslationSchema {
   villagersAlive: string;
   yourRolePrefix: string;
   freeLook360: string;
+  firstPersonBtn: string;
+  firstPersonShort: string;
+  firstPersonBanner: string;
+  fpvTargetPrompt: (name: string) => string;
+  dpadWalkFpv: string;
   switchCamera: string;
   openGuide: string;
   toggleMic: string;
@@ -237,6 +242,12 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     villagersAlive: 'DÂN SỐNG',
     yourRolePrefix: 'Vai:',
     freeLook360: '360°',
+    firstPersonBtn: 'Góc Nhìn Thứ Nhất [V]',
+    firstPersonShort: 'Góc Nhìn 1 [V]',
+    firstPersonBanner:
+      '👁️ GÓC NHÌN THỨ NHẤT [V]: Kéo chuột/màn hình để nhìn 360°, WASD/D-Pad để đi bộ, phím [E]/Click chọn mục tiêu!',
+    fpvTargetPrompt: (name) => `🎯 Đang ngắm: ${name} — Bấm [E] hoặc Click để tương tác`,
+    dpadWalkFpv: 'Đi Bộ Góc Nhìn 1',
     switchCamera: 'Đổi góc máy 3D',
     openGuide: 'Mở Hướng Dẫn',
     toggleMic: 'Bật/Tắt Mic',
@@ -467,6 +478,12 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     villagersAlive: 'VILLAGERS',
     yourRolePrefix: 'Role:',
     freeLook360: '360°',
+    firstPersonBtn: 'First-Person View [V]',
+    firstPersonShort: '1st Person [V]',
+    firstPersonBanner:
+      '👁️ FIRST-PERSON VIEW [V]: Drag to look around, WASD/D-Pad to walk, press [E]/Click to target!',
+    fpvTargetPrompt: (name) => `🎯 Aiming at: ${name} — Press [E] or Click to interact`,
+    dpadWalkFpv: '1st-Person Walk',
     switchCamera: 'Switch 3D Camera',
     openGuide: 'Open Tutorial',
     toggleMic: 'Toggle Mic',
@@ -697,6 +714,12 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     villagersAlive: 'VILLAGEOIS',
     yourRolePrefix: 'Rôle:',
     freeLook360: '360°',
+    firstPersonBtn: 'Vue 1re Personne [V]',
+    firstPersonShort: '1re Pers. [V]',
+    firstPersonBanner:
+      '👁️ VUE 1RE PERSONNE [V] : Glissez pour regarder, WASD/D-Pad pour marcher, [E]/Clic pour cibler !',
+    fpvTargetPrompt: (name) => `🎯 Cible : ${name} — Appuyez sur [E] ou Cliquez`,
+    dpadWalkFpv: 'Marche 1re Pers.',
     switchCamera: 'Caméra 3D',
     openGuide: 'Tutoriel',
     toggleMic: 'Micro',
@@ -925,6 +948,12 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     villagersAlive: 'ALDEANOS',
     yourRolePrefix: 'Rol:',
     freeLook360: '360°',
+    firstPersonBtn: 'Primera Persona [V]',
+    firstPersonShort: '1ra Pers. [V]',
+    firstPersonBanner:
+      '👁️ PRIMERA PERSONA [V]: Arrastra para mirar, WASD/D-Pad para caminar, [E]/Clic para seleccionar!',
+    fpvTargetPrompt: (name) => `🎯 Apuntando a: ${name} — Pulsa [E] o Clic`,
+    dpadWalkFpv: 'Caminar 1ra Pers.',
     switchCamera: 'Cámara 3D',
     openGuide: 'Tutorial',
     toggleMic: 'Micrófono',
@@ -1153,6 +1182,12 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     villagersAlive: '生存村人',
     yourRolePrefix: '役職:',
     freeLook360: '360°',
+    firstPersonBtn: '一人称視点 [V]',
+    firstPersonShort: '一人称 [V]',
+    firstPersonBanner:
+      '👁️ 一人称視点モード [V]: ドラッグで周囲を見渡し、WASD/十字キーで移動、[E]/クリックで対象選択！',
+    fpvTargetPrompt: (name) => `🎯 照準中: ${name} — [E]キーまたはクリックで選択`,
+    dpadWalkFpv: '一人称移動',
     switchCamera: '3Dカメラ切替',
     openGuide: 'ガイドを開く',
     toggleMic: 'マイク切替',
