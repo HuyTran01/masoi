@@ -1,4 +1,4 @@
-import { RoleDefinition, RoleId } from '../types/game';
+import type { RoleDefinition, RoleId } from '../types/game.ts';
 
 export const ROLES: Record<RoleId, RoleDefinition> = {
   villager: {

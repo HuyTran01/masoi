@@ -1,7 +1,7 @@
-import { RoleId } from '../types/game';
-import { ROLES } from '../game/roles';
-import { generateBalancedRoster } from '../game/rules';
-import { normalizeRoomCode } from './realtimeRooms';
+import type { RoleId } from '../types/game.ts';
+import { ROLES } from '../game/roles.ts';
+import { generateBalancedRoster } from '../game/rules.ts';
+import { normalizeRoomCode } from './realtimeRooms.ts';
 
 export type GMDeckMode = 'virtual_deck' | 'physical_cards';
 export type GMRoleSource = 'unassigned' | 'auto_dealt' | 'gm_assigned' | 'self_input';

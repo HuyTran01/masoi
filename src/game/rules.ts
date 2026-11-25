@@ -1,4 +1,4 @@
-import {
+import type {
   Player,
   RoleId,
   NightActions,
@@ -7,8 +7,8 @@ import {
   RoleDefinition,
   NightVictimDetail,
   NightLogicStep,
-} from '../types/game';
-import { ROLES } from './roles';
+} from '../types/game.ts';
+import { ROLES } from './roles.ts';
 
 /**
  * Helper to initialize role-specific state when Doppelganger inherits a dead target's role

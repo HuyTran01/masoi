@@ -1,12 +1,11 @@
 import express from 'express';
 import http from 'node:http';
-import { createServer as createViteServer } from 'vite';
 import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
-  DatabaseAccountRecord,
+  type DatabaseAccountRecord,
   extractBearerToken,
   hashPassword,
   needsPasswordRehash,
@@ -16,22 +15,26 @@ import {
   verifyPassword,
   verifySessionToken,
   writeAccountsDb,
-} from './src/server/auth';
+} from './src/server/auth.ts';
 import {
   normalizeRoomCode,
-  RealtimeChatMessage,
-  RealtimePropEvent,
+  type RealtimeChatMessage,
+  type RealtimePropEvent,
   RealtimeRoomManager,
-} from './src/server/realtimeRooms';
-import { GMRoomManager } from './src/server/gmRooms';
+} from './src/server/realtimeRooms.ts';
+import { GMRoomManager } from './src/server/gmRooms.ts';
 
 dotenv.config();
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const ACCOUNTS_DB_PATH = path.resolve(process.cwd(), '.accounts_db.json');
+
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true });
+});
 
 /**
  * 1. GET /api/accounts/list
@@ -465,8 +468,12 @@ app.get('/api/gm-rooms/:code/player/:userId', (req, res) => {
 async function startServer() {
   const distPath = path.resolve(process.cwd(), 'dist');
   const hasDistBuild = fs.existsSync(path.join(distPath, 'index.html'));
+  const isDevLifecycle = process.env.npm_lifecycle_event === 'dev';
+  const shouldServeStatic =
+    hasDistBuild && (!isDevLifecycle || process.env.NODE_ENV === 'production');
 
-  if (process.env.NODE_ENV !== 'production' || !hasDistBuild) {
+  if (!shouldServeStatic) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -762,4 +769,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});
