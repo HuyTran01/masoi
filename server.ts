@@ -308,6 +308,23 @@ function broadcastToRoom(code: string, payload: Record<string, unknown>) {
   }
 }
 
+function broadcastToAll(payload: Record<string, unknown>) {
+  const serialized = JSON.stringify(payload);
+  for (const sock of socketMeta.keys()) {
+    if (sock.readyState === WebSocket.OPEN) {
+      sock.send(serialized);
+    }
+  }
+}
+
+function broadcastOpenRooms() {
+  broadcastToAll({ type: 'room:list', rooms: roomManager.listOpenRooms() });
+}
+
+function broadcastOpenGMRooms() {
+  broadcastToAll({ type: 'gm:room_list', rooms: gmRoomManager.listRooms() });
+}
+
 function detachSocketFromRoom(ws: WebSocket) {
   const meta = socketMeta.get(ws);
   if (!meta || !meta.roomCode) return;
@@ -333,6 +350,7 @@ function detachSocketFromRoom(ws: WebSocket) {
       if (room) {
         broadcastToRoom(prevCode, { type: 'room:state', room });
       }
+      broadcastOpenRooms();
     }
   }
 }
@@ -403,11 +421,27 @@ app.post('/api/gm-rooms/:code/sync', (req, res) => {
     playerCount: typeof body.playerCount === 'number' ? body.playerCount : undefined,
   });
   if (!result.ok) {
-    res.status(400).json(result);
+    res.status(result.error.includes('Chỉ Quản Trò') ? 403 : 400).json(result);
     return;
   }
   broadcastGMRoomUpdates(result.room.code);
+  broadcastOpenGMRooms();
   res.json(result);
+});
+
+app.get('/api/gm-rooms/:code/exists', (req, res) => {
+  const room = gmRoomManager.getHostState(req.params.code);
+  if (!room) {
+    res.json({ ok: true, exists: false });
+    return;
+  }
+  res.json({
+    ok: true,
+    exists: true,
+    code: room.code,
+    deckMode: room.deckMode,
+    status: room.status,
+  });
 });
 
 app.get('/api/gm-rooms/:code/host', (req, res) => {
@@ -437,7 +471,21 @@ app.post('/api/gm-rooms/:code/join', (req, res) => {
     return;
   }
   broadcastGMRoomUpdates(code);
+  broadcastOpenGMRooms();
   res.json({ ok: true, view: result.view });
+});
+
+app.post('/api/gm-rooms/:code/leave', (req, res) => {
+  const code = normalizeRoomCode(req.params.code);
+  const body = req.body || {};
+  const result = gmRoomManager.leaveAsPlayer(code, String(body.userId || ''));
+  if (!result.ok) {
+    res.status(400).json(result);
+    return;
+  }
+  broadcastGMRoomUpdates(code);
+  broadcastOpenGMRooms();
+  res.json({ ok: true });
 });
 
 app.post('/api/gm-rooms/:code/self-role', (req, res) => {
@@ -566,6 +614,7 @@ async function startServer() {
         set.add(ws);
 
         broadcastToRoom(result.room.code, { type: 'room:state', room: result.room });
+        broadcastOpenRooms();
         return;
       }
 
@@ -593,7 +642,20 @@ async function startServer() {
           targetId: res.kickedId,
           reason: 'Chủ phòng đã mời bạn ra khỏi phòng.',
         });
+        // Detach kicked user's socket(s) from this room cleanly
+        const set = roomSockets.get(code);
+        if (set) {
+          for (const sock of Array.from(set)) {
+            const m = socketMeta.get(sock);
+            if (m && m.userId === res.kickedId) {
+              set.delete(sock);
+              m.roomCode = null;
+              m.userId = null;
+            }
+          }
+        }
         broadcastToRoom(code, { type: 'room:state', room: res.room });
+        broadcastOpenRooms();
         return;
       }
 
@@ -606,6 +668,7 @@ async function startServer() {
           return;
         }
         broadcastToRoom(code, { type: 'room:state', room: res.room });
+        broadcastOpenRooms();
         return;
       }
 
@@ -618,6 +681,7 @@ async function startServer() {
           return;
         }
         broadcastToRoom(code, { type: 'room:state', room: res.room });
+        broadcastOpenRooms();
         return;
       }
 
@@ -634,6 +698,7 @@ async function startServer() {
           return;
         }
         broadcastToRoom(code, { type: 'room:state', room: res.room });
+        broadcastOpenRooms();
         return;
       }
 
@@ -646,6 +711,7 @@ async function startServer() {
           return;
         }
         broadcastToRoom(code, { type: 'room:match_started', room: res.room });
+        broadcastOpenRooms();
         return;
       }
 

@@ -101,6 +101,14 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
 
   useEffect(() => {
     fetchOpenRooms();
+    const unsub = realtimeClient.subscribe((evt) => {
+      if (evt.type === 'gm:room_list') {
+        setOpenGMRooms(evt.rooms);
+      }
+    });
+    return () => {
+      unsub();
+    };
   }, [fetchOpenRooms]);
 
   const joinRoom = useCallback(
@@ -275,8 +283,20 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
     }
   };
 
-  const handleLeaveRoom = () => {
+  const handleLeaveRoom = async () => {
+    const leavingCode = playerView?.code;
     realtimeClient.unsubscribeGM();
+    if (leavingCode) {
+      try {
+        await fetch(`/api/gm-rooms/${encodeURIComponent(leavingCode)}/leave`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: playerUid }),
+        });
+      } catch {
+        // ignore network errors during leave
+      }
+    }
     setPlayerView(null);
     setIsRevealed(false);
     setIsEditingOwnRole(false);
@@ -424,7 +444,10 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() => joinRoom(room.code)}
+                      onClick={() => {
+                        setRoomIdInput(room.code);
+                        joinRoom(room.code);
+                      }}
                       className="px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500 hover:text-slate-950 border border-amber-500/40 text-amber-200 font-bold text-[11px] cursor-pointer transition-colors"
                     >
                       {isVi ? 'Vào' : 'Join'}

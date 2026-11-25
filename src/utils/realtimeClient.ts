@@ -5,7 +5,7 @@ import type {
   RealtimeRoomState,
   RealtimeTimerConfig,
 } from '../server/realtimeRooms';
-import type { GMRoomHostState, GMRoomPlayerView } from '../server/gmRooms';
+import type { GMRoomHostState, GMRoomPlayerView, GMRoomSummary } from '../server/gmRooms';
 
 export type ServerWsEvent =
   | { type: 'room:state'; room: RealtimeRoomState }
@@ -17,6 +17,7 @@ export type ServerWsEvent =
   | { type: 'room:votes'; code: string; votes: Record<string, string> }
   | { type: 'gm:host_state'; room: GMRoomHostState }
   | { type: 'gm:player_state'; view: GMRoomPlayerView }
+  | { type: 'gm:room_list'; rooms: GMRoomSummary[] }
   | { type: 'error'; message: string };
 
 type EventListener = (event: ServerWsEvent) => void;
@@ -30,6 +31,9 @@ class WerewolfRealtimeClient {
   private pendingQueue: string[] = [];
   private reconnectTimer: number | null = null;
   private reconnectAttempt = 0;
+  private hasConnectedOnce = false;
+  private activeRoomJoin: Record<string, unknown> | null = null;
+  private activeGmSub: Record<string, unknown> | null = null;
 
   getStatus() {
     return this.status;
@@ -55,8 +59,18 @@ class WerewolfRealtimeClient {
       this.ws = socket;
 
       socket.onopen = () => {
+        const isReconnect = this.hasConnectedOnce;
+        this.hasConnectedOnce = true;
         this.reconnectAttempt = 0;
         this.setStatus('connected');
+        if (isReconnect) {
+          if (this.activeRoomJoin && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify(this.activeRoomJoin));
+          }
+          if (this.activeGmSub && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify(this.activeGmSub));
+          }
+        }
         while (this.pendingQueue.length > 0 && socket.readyState === WebSocket.OPEN) {
           const raw = this.pendingQueue.shift();
           if (raw) socket.send(raw);
@@ -141,10 +155,13 @@ class WerewolfRealtimeClient {
     timerConfig?: Partial<RealtimeTimerConfig>;
     createIfMissing?: boolean;
   }) {
-    this.send({ type: 'room:join', ...params });
+    const payload = { type: 'room:join', ...params };
+    this.activeRoomJoin = payload;
+    this.send(payload);
   }
 
   leaveRoom(code: string, userId: string) {
+    this.activeRoomJoin = null;
     this.send({ type: 'room:leave', code, userId });
   }
 
@@ -185,14 +202,19 @@ class WerewolfRealtimeClient {
   }
 
   subscribeGMHost(code: string) {
-    this.send({ type: 'gm:subscribe_host', code });
+    const payload = { type: 'gm:subscribe_host', code };
+    this.activeGmSub = payload;
+    this.send(payload);
   }
 
   subscribeGMPlayer(code: string, userId: string) {
-    this.send({ type: 'gm:subscribe_player', code, userId });
+    const payload = { type: 'gm:subscribe_player', code, userId };
+    this.activeGmSub = payload;
+    this.send(payload);
   }
 
   unsubscribeGM() {
+    this.activeGmSub = null;
     this.send({ type: 'gm:unsubscribe' });
   }
 }

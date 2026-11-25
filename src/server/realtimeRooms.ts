@@ -1,3 +1,6 @@
+import type { RoleId } from '../types/game.ts';
+import { generateBalancedRoster } from '../game/rules.ts';
+
 export interface RealtimeParticipant {
   id: string;
   name: string;
@@ -42,6 +45,7 @@ export interface RealtimeRoomState {
   participants: RealtimeParticipant[];
   chatMessages: RealtimeChatMessage[];
   votes: Record<string, string>; // voterId -> targetId
+  matchRoles?: Record<string, RoleId>;
   createdAt: number;
   updatedAt: number;
 }
@@ -176,6 +180,13 @@ export class RealtimeRoomManager {
       };
       existing.updatedAt = now;
       return { ok: true, room: this.cloneRoom(existing), created: false };
+    }
+
+    if (existing.status === 'in_match') {
+      return {
+        ok: false,
+        error: `Phòng ${code} đã bắt đầu ván đấu rồi. Hãy chọn phòng đang chờ khác.`,
+      };
     }
 
     // If room is full of bots, evict one bot to make space for a real human joining!
@@ -314,7 +325,9 @@ export class RealtimeRoomManager {
       return { ok: false, error: 'Chỉ Chủ phòng mới có thể đổi cấu hình phòng.' };
     }
     if (typeof config.villageSize === 'number') {
-      room.villageSize = Math.max(4, Math.min(20, Math.round(config.villageSize)));
+      const humanCount = room.participants.filter((p) => !p.isBot).length;
+      const minAllowed = Math.max(4, humanCount);
+      room.villageSize = Math.max(minAllowed, Math.min(20, Math.round(config.villageSize)));
       // Trim excess bots if villageSize shrank
       while (room.participants.length > room.villageSize) {
         let botIdx = -1;
@@ -361,7 +374,19 @@ export class RealtimeRoomManager {
     if (room.hostId !== requesterId) {
       return { ok: false, error: 'Chỉ Chủ phòng mới có thể bắt đầu ván đấu.' };
     }
+    if (room.participants.length < 4) {
+      return {
+        ok: false,
+        error: `Cần tối thiểu 4 người chơi (hoặc thêm Bot) để bắt đầu. Hiện có ${room.participants.length} người.`,
+      };
+    }
+    const deck = generateBalancedRoster(room.participants.length);
+    const matchRoles: Record<string, RoleId> = {};
+    room.participants.forEach((p, idx) => {
+      matchRoles[p.id] = deck[idx] || 'villager';
+    });
     room.status = 'in_match';
+    room.matchRoles = matchRoles;
     room.votes = {};
     room.updatedAt = Date.now();
     return { ok: true, room: this.cloneRoom(room) };
@@ -424,6 +449,7 @@ export class RealtimeRoomManager {
       participants: room.participants.map((p) => ({ ...p })),
       chatMessages: room.chatMessages.map((m) => ({ ...m })),
       votes: { ...room.votes },
+      matchRoles: room.matchRoles ? { ...room.matchRoles } : undefined,
     };
   }
 }

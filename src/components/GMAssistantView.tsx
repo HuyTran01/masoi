@@ -130,22 +130,33 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   );
 
   const skipNextSyncRef = React.useRef<boolean>(false);
+  const isGameStartedRef = React.useRef<boolean>(isGameStarted);
+  isGameStartedRef.current = isGameStarted;
 
   useEffect(() => {
     if (initialRoomId) setRoomId(initialRoomId.trim().toUpperCase());
   }, [initialRoomId]);
 
-  // Subscribe to real-time updates from players joining / self-entering physical cards
+  // Subscribe to real-time updates from players joining / leaving / self-entering physical cards
   useEffect(() => {
     const cleanCode = roomId.trim().toUpperCase();
     if (cleanCode.length < 3) return;
 
     const unsub = realtimeClient.subscribe((evt) => {
       if (evt.type === 'gm:host_state' && evt.room.code === cleanCode) {
-        if (!isGameStarted) {
+        if (!isGameStartedRef.current) {
           skipNextSyncRef.current = true;
           setSeats(evt.room.seats);
           setCustomCountInput(String(evt.room.seats.length));
+        } else {
+          // Even during an active match, keep claimedByUserId in sync if a player reconnects or leaves
+          skipNextSyncRef.current = true;
+          setSeats((prev) =>
+            prev.map((s) => {
+              const incoming = evt.room.seats.find((inc) => inc.id === s.id);
+              return incoming ? { ...s, claimedByUserId: incoming.claimedByUserId } : s;
+            })
+          );
         }
       }
     });
@@ -156,7 +167,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       unsub();
       realtimeClient.unsubscribeGM();
     };
-  }, [roomId, isGameStarted]);
+  }, [roomId]);
 
   // Sync GM room state to server (cross-device live sync + strict per-player privacy)
   useEffect(() => {

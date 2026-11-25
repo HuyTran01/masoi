@@ -123,3 +123,55 @@ test('GM host can enter/override role on behalf of any player and sync preserves
   assert.equal(linhView?.mySeat?.roleId, 'witch');
   assert.equal(linhView?.mySeat?.roleSource, 'gm_assigned');
 });
+
+test('GM room rejects non-host sync, preserves claimed seats and self_input roles on stale sync, and supports leaveAsPlayer', () => {
+  const mgr = new GMRoomManager();
+  mgr.syncFromHost('GM-4444', 'gm_owner', {
+    deckMode: 'physical_cards',
+    status: 'setup',
+    playerCount: 4,
+  });
+
+  // Non-host attempting to overwrite GM room is strictly rejected
+  const hijack = mgr.syncFromHost('GM-4444', 'random_guest', {
+    deckMode: 'virtual_deck',
+    status: 'setup',
+    playerCount: 12,
+  });
+  assert.equal(hijack.ok, false);
+
+  // Player joins seat #1 and self-inputs Seer
+  const joined = mgr.joinAsPlayer('GM-4444', { id: 'p_guest_1', name: 'Minh Anh' });
+  assert.equal(joined.ok, true);
+  if (!joined.ok) return;
+  const seatId = joined.view.mySeat!.id;
+  const selfRes = mgr.submitSelfRole('GM-4444', 'p_guest_1', 'seer');
+  assert.equal(selfRes.ok, true);
+
+  // Host sends a stale sync where claimedByUserId is null and roleId is null -> server must preserve both!
+  const staleSync = mgr.syncFromHost('GM-4444', 'gm_owner', {
+    deckMode: 'physical_cards',
+    status: 'setup',
+    seats: [
+      { id: seatId, name: 'Minh Anh', roleId: null, roleSource: 'unassigned', claimedByUserId: null },
+      { id: 'p_2', name: 'Seat 2', roleId: null, roleSource: 'unassigned', claimedByUserId: null },
+      { id: 'p_3', name: 'Seat 3', roleId: null, roleSource: 'unassigned', claimedByUserId: null },
+      { id: 'p_4', name: 'Seat 4', roleId: null, roleSource: 'unassigned', claimedByUserId: null },
+    ],
+  });
+  assert.equal(staleSync.ok, true);
+  if (staleSync.ok) {
+    assert.equal(staleSync.room.seats[0].claimedByUserId, 'p_guest_1');
+    assert.equal(staleSync.room.seats[0].roleId, 'seer');
+    assert.equal(staleSync.room.seats[0].roleSource, 'self_input');
+  }
+
+  // Player leaves -> seat claim is released cleanly
+  const left = mgr.leaveAsPlayer('GM-4444', 'p_guest_1');
+  assert.equal(left.ok, true);
+  if (left.ok) {
+    assert.equal(left.room.seats[0].claimedByUserId, null);
+  }
+  assert.equal(mgr.getPlayerView('GM-4444', 'p_guest_1')?.mySeat, null);
+});
+

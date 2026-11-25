@@ -143,3 +143,37 @@ test('rooms maintain strict isolation for chat and votes with idempotent chat ID
   assert.deepEqual(roomB?.votes, {});
   assert.equal(mgr.listOpenRooms().length, 2);
 });
+
+test('startMatch requires >= 4 players, assigns authoritative matchRoles, and blocks late joins', () => {
+  const mgr = new RealtimeRoomManager();
+  mgr.createOrJoinRoom('ONL-7777', { id: 'host_1', name: 'Host', avatar: '🐺', elo: 1600 }, { villageSize: 6 });
+  mgr.createOrJoinRoom('ONL-7777', { id: 'guest_2', name: 'Guest', avatar: '🔮', elo: 1500 });
+
+  // Too few players -> rejected
+  const tooEarly = mgr.startMatch('ONL-7777', 'host_1');
+  assert.equal(tooEarly.ok, false);
+
+  // Fill bots to reach 6
+  const filled = mgr.fillBots('ONL-7777', 'host_1');
+  assert.equal(filled.ok, true);
+
+  // Host starts -> server assigns role for every participant
+  const started = mgr.startMatch('ONL-7777', 'host_1');
+  assert.equal(started.ok, true);
+  if (started.ok) {
+    assert.equal(started.room.status, 'in_match');
+    assert.ok(started.room.matchRoles);
+    assert.equal(Object.keys(started.room.matchRoles!).length, 6);
+    assert.ok(started.room.matchRoles!['host_1']);
+    assert.ok(started.room.matchRoles!['guest_2']);
+  }
+
+  // Late stranger cannot join an in-progress match
+  const lateJoin = mgr.createOrJoinRoom(
+    'ONL-7777',
+    { id: 'late_3', name: 'Late', avatar: '🛡️', elo: 1500 },
+    { createIfMissing: false }
+  );
+  assert.equal(lateJoin.ok, false);
+});
+

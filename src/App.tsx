@@ -75,6 +75,7 @@ import { AgrouNotebookDrawer } from './components/AgrouNotebookDrawer';
 import { AgrouEmoteWheel } from './components/AgrouEmoteWheel';
 import { NightDeathCinematicOverlay } from './components/NightDeathCinematicOverlay';
 import { realtimeClient } from './utils/realtimeClient';
+import type { RealtimeTimerConfig } from './server/realtimeRooms';
 import type { GMDeckMode } from './server/gmRooms';
 import {
   Player,
@@ -215,6 +216,29 @@ type DrawerTool =
   | 'history'
   | 'encyclopedia';
 
+function getOrCreateTabGuestIdentity(): { id: string; defaultName: string } {
+  const randomSuffix = () => Math.floor(100 + Math.random() * 900);
+  try {
+    let uid = sessionStorage.getItem('werewolf_client_uid');
+    if (!uid || uid === 'usr_me') {
+      uid = `usr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+      sessionStorage.setItem('werewolf_client_uid', uid);
+    }
+    let guestName = sessionStorage.getItem('werewolf_guest_name');
+    if (!guestName) {
+      guestName = `Thợ Săn #${randomSuffix()}`;
+      sessionStorage.setItem('werewolf_guest_name', guestName);
+    }
+    return { id: uid, defaultName: guestName };
+  } catch {
+    const suf = randomSuffix();
+    return {
+      id: `usr_${Date.now().toString(36)}_${suf}`,
+      defaultName: `Thợ Săn #${suf}`,
+    };
+  }
+}
+
 export default function App() {
   // Game Shell State ('title' | 'playing' | 'paused' | 'gameover' | 'gm_host' | 'gm_player')
   const [shellState, setShellState] = useState<
@@ -311,11 +335,12 @@ export default function App() {
     seerInspection: { playerId: string; roleId: RoleId; isWerewolf: boolean } | null;
   } | null>(null);
 
-  // User Profile (Database Account & Guest Persistence)
+  // User Profile (Database Account & Unique Per-Tab Guest Identity)
   const [currentUser, setCurrentUser] = useState<UserProfileData>(() => {
+    const tabGuest = getOrCreateTabGuestIdentity();
     const fallback: UserProfileData = {
-      id: 'usr_me',
-      name: 'Thợ Săn Đêm',
+      id: tabGuest.id,
+      name: tabGuest.defaultName,
       avatar: '🐺',
       elo: 1620,
       provider: 'guest',
@@ -329,11 +354,25 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') {
+          const isSignedInAccount =
+            parsed.provider &&
+            parsed.provider !== 'guest' &&
+            typeof parsed.handle === 'string' &&
+            parsed.handle.trim().length > 0;
+          const resolvedId = isSignedInAccount
+            ? `acc_${parsed.handle.trim().toLowerCase()}`
+            : tabGuest.id;
+          const resolvedName =
+            typeof parsed.name === 'string' &&
+            parsed.name.trim() &&
+            (isSignedInAccount || parsed.name !== 'Thợ Săn Đêm')
+              ? parsed.name
+              : fallback.name;
           return {
             ...fallback,
             ...parsed,
-            id: typeof parsed.id === 'string' && parsed.id ? parsed.id : fallback.id,
-            name: typeof parsed.name === 'string' && parsed.name ? parsed.name : fallback.name,
+            id: resolvedId,
+            name: resolvedName,
             avatar:
               typeof parsed.avatar === 'string' && parsed.avatar
                 ? parsed.avatar
@@ -403,9 +442,9 @@ export default function App() {
     const roles = assignPreferredRoleToDeck(generateBalancedRoster(initialCount), 'random');
     const basePlayers: Player[] = [
       {
-        id: 'usr_me',
-        name: 'Thợ Săn Đêm',
-        avatar: '🐺',
+        id: currentUser.id,
+        name: currentUser.name,
+        avatar: currentUser.avatar,
         roleId: roles[0],
         isAlive: autostartGhostsCount < 1,
         isHost: true,
@@ -432,7 +471,7 @@ export default function App() {
       basePlayers,
       1,
       DEFAULT_TIMER_CONFIG,
-      'usr_me'
+      currentUser.id
     );
     let readyPlayers = basePlayers;
     if (prepared.preSimulatedActions.cupidLovers) {
@@ -965,14 +1004,16 @@ export default function App() {
     setActiveDrawer('chat');
   }, [notebook, players, lang, me.id, me.name, me.roleId, me.isAlive, gameMode, roomId]);
 
-  // Start / Restart a 3D Match (Supports Online Room with exact participants, or AI Practice)
+  // Start / Restart a 3D Match (Supports Online Room with exact participants & server-assigned roles, or AI Practice)
   const handleStartMatch = useCallback(
     (
       customCount?: number,
       forcedRole?: RoleId | 'random',
       modeOverride?: GameMode,
       customRoomId?: string,
-      customParticipants?: LobbyParticipant[]
+      customParticipants?: LobbyParticipant[],
+      serverMatchRoles?: Record<string, RoleId>,
+      serverTimerConfig?: RealtimeTimerConfig
     ) => {
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
@@ -986,6 +1027,15 @@ export default function App() {
       setVillageSize(count);
       if (customRoomId) setRoomId(customRoomId);
 
+      if (serverTimerConfig) {
+        setTimerConfig((prev) => ({
+          ...prev,
+          nightActionSec: serverTimerConfig.nightActionSec,
+          dayDiscussSec: serverTimerConfig.dayDiscussSec,
+          dayVoteSec: serverTimerConfig.dayVoteSec,
+        }));
+      }
+
       const roleChoice = forcedRole ?? preferredRole;
       const deck = assignPreferredRoleToDeck(generateBalancedRoster(count), roleChoice);
 
@@ -993,17 +1043,19 @@ export default function App() {
         customParticipants && customParticipants.length >= 4
           ? customParticipants.map((part, idx) => {
               const botLook = getBotCosmetics(idx);
+              const isSelf = part.id === currentUser.id;
+              const assignedRole = serverMatchRoles?.[part.id] || deck[idx] || 'villager';
               return {
-                id: idx === 0 ? currentUser.id : part.id,
-                name: idx === 0 ? currentUser.name : part.name,
-                avatar: idx === 0 ? currentUser.avatar : part.avatar,
-                roleId: deck[idx] || 'villager',
+                id: part.id,
+                name: isSelf ? currentUser.name : part.name,
+                avatar: isSelf ? currentUser.avatar : part.avatar,
+                roleId: assignedRole,
                 isAlive: true,
-                isHost: idx === 0 || Boolean(part.isHost),
-                isBot: idx === 0 ? false : part.isBot,
-                hat: idx === 0 ? avatarConfig.hat : botLook.hat,
-                cloakColor: idx === 0 ? avatarConfig.cloakColor : botLook.cloakColor,
-                elderLives: deck[idx] === 'elder' ? 2 : undefined,
+                isHost: Boolean(part.isHost),
+                isBot: Boolean(part.isBot),
+                hat: isSelf ? avatarConfig.hat : botLook.hat,
+                cloakColor: isSelf ? avatarConfig.cloakColor : botLook.cloakColor,
+                elderLives: assignedRole === 'elder' ? 2 : undefined,
               };
             })
           : [
@@ -1064,7 +1116,9 @@ export default function App() {
       beginNewNight(freshPlayers, 1, false, []);
       setShellState('playing');
 
-      const assignedDef = ROLES[deck[0]];
+      const myAssignedPlayer =
+        freshPlayers.find((p) => p.id === currentUser.id) || freshPlayers[0];
+      const assignedDef = ROLES[myAssignedPlayer.roleId];
       setMessages([
         {
           id: `gm_start_${Date.now()}`,
@@ -2685,7 +2739,8 @@ export default function App() {
           targetId,
         }));
         setVotes((prev) => {
-          const botVotes = prev.filter((v) => !evt.votes[v.voterId]);
+          const botIdSet = new Set(playersRef.current.filter((p) => p.isBot).map((p) => p.id));
+          const botVotes = prev.filter((v) => botIdSet.has(v.voterId) && !evt.votes[v.voterId]);
           return [...botVotes, ...synced];
         });
       }
@@ -4557,8 +4612,8 @@ export default function App() {
         onChangePreferredRole={setPreferredRole}
         onChangeTimerConfig={handleUpdateTimerConfig}
         onClose={() => setLobbyModalState({ ...lobbyModalState, isOpen: false })}
-        onLaunchOnlineRoom={(code, size, peers) => {
-          handleStartMatch(size, preferredRole, 'online', code, peers);
+        onLaunchOnlineRoom={(code, size, peers, matchRoles, serverTimers) => {
+          handleStartMatch(size, preferredRole, 'online', code, peers, matchRoles, serverTimers);
         }}
         onLaunchGMHost={(code, size, deckMode) => {
           sound.stopBGM();
@@ -4649,8 +4704,17 @@ export default function App() {
             if (token !== undefined) {
               setAuthToken(token);
             }
+            const isSignedIn =
+              profile.provider &&
+              profile.provider !== 'guest' &&
+              Boolean(profile.handle && profile.handle.trim());
+            const nextId = isSignedIn
+              ? `acc_${profile.handle!.trim().toLowerCase()}`
+              : getOrCreateTabGuestIdentity().id;
+            const prevId = currentUser.id;
             const nextUser: UserProfileData = {
               ...currentUser,
+              id: nextId,
               name: profile.name,
               avatar: profile.avatar,
               provider: profile.provider,
@@ -4662,11 +4726,11 @@ export default function App() {
             };
             setCurrentUser(nextUser);
             localStorage.setItem('werewolf_user', JSON.stringify(nextUser));
-            // Immediately sync updated profile name & avatar into 3D village players
+            // Immediately sync updated profile id, name & avatar into 3D village players
             setPlayers((prev) =>
               prev.map((p) =>
-                p.id === currentUser.id
-                  ? { ...p, name: profile.name, avatar: profile.avatar }
+                p.id === prevId
+                  ? { ...p, id: nextId, name: profile.name, avatar: profile.avatar }
                   : p
               )
             );

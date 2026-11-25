@@ -164,6 +164,13 @@ export class GMRoomManager {
 
     const now = Date.now();
     const existing = this.rooms.get(code);
+    if (existing && existing.hostId !== cleanHostId) {
+      return {
+        ok: false,
+        error: 'Chỉ Quản Trò tạo phòng mới có quyền chỉnh sửa cấu hình phòng này.',
+      };
+    }
+
     const deckMode: GMDeckMode =
       payload.deckMode === 'physical_cards'
         ? 'physical_cards'
@@ -196,14 +203,28 @@ export class GMRoomManager {
       nextSeats = payload.seats.slice(0, 20).map((incoming, idx) => {
         const seatId = String(incoming.id || `p_${idx + 1}`).slice(0, 48);
         const prev = existingById.get(seatId);
-        const safeRoleId: RoleId | null =
-          incoming.roleId === null
-            ? null
-            : isValidRoleId(incoming.roleId)
-            ? incoming.roleId
-            : prev?.roleId ?? null;
 
-        let roleSource: GMRoleSource = incoming.roleSource || prev?.roleSource || 'unassigned';
+        // Preserve player self-entered physical card if host sent a stale unassigned payload
+        const isStaleUnassignedOverSelfInput =
+          Boolean(
+            prev &&
+              prev.roleSource === 'self_input' &&
+              prev.roleId &&
+              incoming.roleId === null &&
+              incoming.roleSource !== 'gm_assigned'
+          );
+
+        const safeRoleId: RoleId | null = isStaleUnassignedOverSelfInput
+          ? prev!.roleId
+          : incoming.roleId === null
+          ? null
+          : isValidRoleId(incoming.roleId)
+          ? incoming.roleId
+          : prev?.roleId ?? null;
+
+        let roleSource: GMRoleSource = isStaleUnassignedOverSelfInput
+          ? 'self_input'
+          : incoming.roleSource || prev?.roleSource || 'unassigned';
         if (safeRoleId === null) {
           roleSource = 'unassigned';
         } else if (
@@ -217,6 +238,9 @@ export class GMRoomManager {
           roleSource = deckMode === 'virtual_deck' ? 'auto_dealt' : 'gm_assigned';
         }
 
+        // Never let a stale host sync with claimedByUserId: null wipe out a player's active seat claim
+        const preservedClaim = incoming.claimedByUserId || prev?.claimedByUserId || null;
+
         return {
           id: seatId,
           seatNumber: idx + 1,
@@ -227,10 +251,7 @@ export class GMRoomManager {
           roleId: safeRoleId,
           roleSource,
           isAlive: incoming.isAlive !== undefined ? Boolean(incoming.isAlive) : prev?.isAlive ?? true,
-          claimedByUserId:
-            incoming.claimedByUserId !== undefined
-              ? incoming.claimedByUserId
-              : prev?.claimedByUserId ?? null,
+          claimedByUserId: preservedClaim,
           elderLives: safeRoleId === 'elder' ? 2 : undefined,
         };
       });
@@ -450,6 +471,30 @@ export class GMRoomManager {
       view: this.buildPlayerView(room, userId),
       room: this.cloneHostState(room),
     };
+  }
+
+  /**
+   * Releases a player's seat claim when they explicitly leave the GM room.
+   */
+  leaveAsPlayer(
+    rawCode: string,
+    userId: string
+  ): { ok: true; room: GMRoomHostState } | { ok: false; error: string } {
+    const code = normalizeRoomCode(rawCode);
+    const room = this.rooms.get(code);
+    if (!room) {
+      return { ok: false, error: 'Phòng Quản Trò không tồn tại.' };
+    }
+    const cleanUserId = String(userId || '').trim().slice(0, 64);
+    if (!cleanUserId) {
+      return { ok: false, error: 'Thiếu mã người chơi.' };
+    }
+    const seat = room.seats.find((s) => s.claimedByUserId === cleanUserId);
+    if (seat) {
+      seat.claimedByUserId = null;
+      room.updatedAt = Date.now();
+    }
+    return { ok: true, room: this.cloneHostState(room) };
   }
 
   getPlayerView(rawCode: string, userId: string): GMRoomPlayerView | null {
