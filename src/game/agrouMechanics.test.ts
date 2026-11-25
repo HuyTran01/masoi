@@ -127,3 +127,18 @@ test('Agrou biome palettes, hats, cloak colors, and emotes catalogs are complete
   assert.ok(AGROU_HATS.some((h) => h.id === botCosm.hat));
   assert.ok(AGROU_CLOAK_COLORS.some((c) => c.hex === botCosm.cloakColor));
 });
+
+test('Equal 1x voting when mayorId is null counts every player vote strictly as 1', () => {
+  const res = tallyVotesWithMayor(
+    [
+      { voterId: 'usr_me', targetId: 'p2' },
+      { voterId: 'p2', targetId: 'p3' },
+    ],
+    null
+  );
+  assert.equal(res.counts.p2, 1);
+  assert.equal(res.counts.p3, 1);
+  assert.equal(res.isTie, true);
+  assert.equal(res.targetId, null);
+});
+

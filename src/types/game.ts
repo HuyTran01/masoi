@@ -76,12 +76,40 @@ export interface NightActions {
   doppelgangerTargetId?: string | null;
 }
 
+export type NightDeathCauseType =
+  | 'werewolf'
+  | 'witch_poison'
+  | 'cupid_lover'
+  | 'hunter_shot'
+  | 'lynch'
+  | 'unknown';
+
 export interface NightVictimDetail {
   playerId: string;
   name: string;
   roleId: RoleId;
   causes: string[];
   logicExplanation: string;
+  causeType?: NightDeathCauseType;
+  killerId?: string | null;
+  killerName?: string | null;
+  killerRoleId?: RoleId | null;
+  linkedLoverId?: string | null;
+  linkedLoverName?: string | null;
+}
+
+export interface NightDeathCinematicState {
+  mode?: 'wolf_kill' | 'victim_death';
+  revealKiller?: boolean;
+  victimId: string;
+  victimName: string;
+  causeType: NightDeathCauseType;
+  killerId?: string | null;
+  killerName?: string | null;
+  killerRoleId?: RoleId | null;
+  linkedLoverId?: string | null;
+  linkedLoverName?: string | null;
+  reasonText: string;
 }
 
 export interface NightLogicStep {

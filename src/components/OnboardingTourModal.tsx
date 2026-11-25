@@ -3,11 +3,11 @@ import {
   Sparkles,
   ChevronRight,
   ChevronLeft,
-  EyeOff,
+  Clock,
   Compass,
-  Flame,
-  Ghost,
-  ShieldCheck,
+  ScrollText,
+  SlidersHorizontal,
+  LayoutGrid,
   CheckCircle2,
   Target,
 } from 'lucide-react';
@@ -22,24 +22,24 @@ interface OnboardingTourModalProps {
 }
 
 const STEP_ICONS = [
-  <EyeOff key="0" className="w-4 h-4 sm:w-5 sm:h-5 text-rose-400" />,
-  <Compass key="1" className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />,
-  <Flame key="2" className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400" />,
-  <Ghost key="3" className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />,
-  <ShieldCheck key="4" className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />,
+  <Clock key="0" className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400" />,
+  <ScrollText key="1" className="w-4 h-4 sm:w-5 sm:h-5 text-orange-400" />,
+  <Compass key="2" className="w-4 h-4 sm:w-5 sm:h-5 text-cyan-400" />,
+  <SlidersHorizontal key="3" className="w-4 h-4 sm:w-5 sm:h-5 text-sky-400" />,
+  <LayoutGrid key="4" className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400" />,
 ];
 
 export type SpotlightZone =
   | 'top-left'
+  | 'action-console'
   | 'center-3d'
-  | 'prop-bar'
   | 'top-right'
   | 'bottom-dock';
 
 export const STEP_ZONES: SpotlightZone[] = [
   'top-left',
+  'action-console',
   'center-3d',
-  'prop-bar',
   'top-right',
   'bottom-dock',
 ];
@@ -56,7 +56,8 @@ export interface SpotlightLayoutResult {
 
 /**
  * Pure, deterministic layout engine that guarantees the onboarding dialog card
- * NEVER overlaps the bright spotlight focus window on any desktop or mobile viewport.
+ * NEVER overlaps the bright spotlight focus window on any desktop or mobile viewport,
+ * while tightly hugging real DOM rects and framing the 3D campfire arena cleanly.
  */
 export function computeNonOverlappingTourLayout(
   vw: number,
@@ -66,9 +67,9 @@ export function computeNonOverlappingTourLayout(
   measuredCardHeight: number = 220
 ): SpotlightLayoutResult {
   const isMobile = vw < 640;
-  const pad = isMobile ? 4 : 6;
-  const safeMargin = isMobile ? 8 : 14;
-  const gapBetweenSpotAndCard = isMobile ? 16 : 20;
+  const pad = isMobile ? 3 : 4;
+  const safeMargin = isMobile ? 10 : 16;
+  const gapBetweenSpotAndCard = isMobile ? 22 : 28;
 
   let sTop = 10;
   let sLeft = 10;
@@ -76,10 +77,20 @@ export function computeNonOverlappingTourLayout(
   let sHeight = 56;
 
   if (zone === 'center-3d') {
-    const topHudBottom = targetRect ? targetRect.top + targetRect.height : isMobile ? 64 : 76;
-    sTop = Math.round(topHudBottom + (isMobile ? 24 : 36));
-    sWidth = Math.round(Math.min(vw - 24, isMobile ? vw - 28 : 480));
-    sHeight = Math.round(Math.max(96, Math.min(isMobile ? 125 : 175, vh * 0.2)));
+    // Frame the full 3D campfire village circle (all seated villagers + glowing firepit)
+    // below the top HUD/action console while keeping guaranteed non-overlapping space for the card.
+    const topClearance = targetRect
+      ? Math.max(targetRect.top + targetRect.height + (isMobile ? 26 : 32), isMobile ? 104 : 176)
+      : isMobile
+      ? 110
+      : 180;
+    const minCardBudget = Math.min(measuredCardHeight + safeMargin + gapBetweenSpotAndCard, vh * 0.42);
+    const maxCenterBottom = Math.max(topClearance + 96, vh - minCardBudget);
+    const availableH = Math.max(96, maxCenterBottom - topClearance);
+    sHeight = Math.round(Math.min(availableH, isMobile ? Math.min(220, vh * 0.34) : Math.min(400, vh * 0.46)));
+    // Bias slightly lower inside the available band so the central campfire stays fully inside the bright cutout
+    sTop = Math.round(topClearance + Math.max(0, (availableH - sHeight) * 0.72));
+    sWidth = Math.round(Math.min(vw - (isMobile ? 24 : 160), isMobile ? vw - 24 : 980));
     sLeft = Math.round((vw - sWidth) / 2);
   } else if (targetRect && targetRect.width > 0 && targetRect.height > 0) {
     const left = Math.max(4, Math.round(targetRect.left - pad));
@@ -91,7 +102,7 @@ export function computeNonOverlappingTourLayout(
     sWidth = Math.max(54, right - left);
     sHeight = Math.max(32, bottom - top);
   } else {
-    // Fallback geometry
+    // Fallback geometry when DOM target isn't mounted yet
     if (zone === 'top-left') {
       sTop = 8;
       sLeft = 8;
@@ -102,16 +113,16 @@ export function computeNonOverlappingTourLayout(
       sTop = 8;
       sLeft = Math.max(8, vw - sWidth - 8);
       sHeight = isMobile ? 46 : 54;
-    } else if (zone === 'prop-bar') {
-      sWidth = Math.min(vw - 16, 460);
-      sTop = isMobile ? 105 : 118;
+    } else if (zone === 'action-console') {
+      sWidth = Math.min(vw - 20, 512);
+      sTop = isMobile ? 64 : 74;
       sLeft = Math.round((vw - sWidth) / 2);
-      sHeight = isMobile ? 40 : 46;
+      sHeight = isMobile ? 76 : 86;
     } else {
       // bottom-dock
-      sWidth = Math.min(vw - 16, 920);
-      sHeight = isMobile ? 108 : 124;
-      sTop = Math.max(140, vh - sHeight - 8);
+      sWidth = Math.min(vw - 16, 1040);
+      sHeight = isMobile ? 96 : 112;
+      sTop = Math.max(180, vh - sHeight - 10);
       sLeft = Math.round((vw - sWidth) / 2);
     }
   }
@@ -121,11 +132,11 @@ export function computeNonOverlappingTourLayout(
   const spaceBelow = vh - sBottom - safeMargin - gapBetweenSpotAndCard;
 
   // Decide whether the dialog card belongs below or above the spotlight cutout
-  const preferTop = zone === 'bottom-dock' || (spaceBelow < 170 && spaceAbove > spaceBelow);
+  const preferTop = zone === 'bottom-dock' || (spaceBelow < 185 && spaceAbove > spaceBelow);
 
   if (preferTop) {
     const cardMaxHeight = Math.max(130, Math.min(340, spaceAbove));
-    const effectiveH = Math.min(Math.max(measuredCardHeight, 235), cardMaxHeight);
+    const effectiveH = Math.min(Math.max(measuredCardHeight, 210), cardMaxHeight);
     const idealTop = sTop - effectiveH - gapBetweenSpotAndCard;
     return {
       top: sTop,
@@ -138,11 +149,13 @@ export function computeNonOverlappingTourLayout(
     };
   } else {
     const cardMaxHeight = Math.max(130, Math.min(340, spaceBelow));
-    const effectiveH = Math.min(Math.max(measuredCardHeight, 235), cardMaxHeight);
-    // Anchor near bottom of screen, but strictly below sBottom + gapBetweenSpotAndCard
-    const bottomAnchoredTop = vh - effectiveH - safeMargin;
+    const effectiveH = Math.min(Math.max(measuredCardHeight, 210), cardMaxHeight);
+    const idealTop =
+      zone === 'center-3d'
+        ? sBottom + gapBetweenSpotAndCard
+        : Math.min(vh - effectiveH - safeMargin, Math.max(sBottom + gapBetweenSpotAndCard, Math.round(vh * 0.56)));
     const minAllowedTop = sBottom + gapBetweenSpotAndCard;
-    const cardTop = Math.max(minAllowedTop, bottomAnchoredTop);
+    const cardTop = Math.max(minAllowedTop, Math.min(idealTop, vh - effectiveH - safeMargin));
     return {
       top: sTop,
       left: sLeft,
@@ -168,7 +181,7 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
       typeof window !== 'undefined' ? window.innerHeight : 860,
       'top-left',
       null,
-      240
+      230
     )
   );
 
@@ -180,23 +193,31 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
     const vw = window.innerWidth;
     const vh = window.innerHeight;
     const cardH = cardRef.current
-      ? Math.max(190, cardRef.current.getBoundingClientRect().height)
-      : 240;
+      ? Math.max(185, Math.ceil(cardRef.current.getBoundingClientRect().height))
+      : 230;
 
     if (zone === 'center-3d') {
+      const topConsoleEl = document.querySelector('[data-tour-id="action-console"]');
       const topLeftEl = document.querySelector('[data-tour-id="top-left"]');
+      const consoleRect = topConsoleEl ? topConsoleEl.getBoundingClientRect() : null;
       const tlRect = topLeftEl ? topLeftEl.getBoundingClientRect() : null;
+      const referenceRect =
+        consoleRect && consoleRect.height > 0
+          ? consoleRect
+          : tlRect && tlRect.height > 0
+          ? tlRect
+          : null;
       setLayout(
         computeNonOverlappingTourLayout(
           vw,
           vh,
           'center-3d',
-          tlRect
+          referenceRect
             ? {
-                top: tlRect.top,
-                left: tlRect.left,
-                width: tlRect.width,
-                height: tlRect.height,
+                top: referenceRect.top,
+                left: referenceRect.left,
+                width: referenceRect.width,
+                height: referenceRect.height,
               }
             : null,
           cardH
@@ -233,10 +254,12 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
     if (!isOpen) return;
     measureTargetZone();
     const raf1 = requestAnimationFrame(measureTargetZone);
-    const timer = window.setTimeout(measureTargetZone, 40);
+    const timer1 = window.setTimeout(measureTargetZone, 60);
+    const timer2 = window.setTimeout(measureTargetZone, 180);
     return () => {
       cancelAnimationFrame(raf1);
-      clearTimeout(timer);
+      clearTimeout(timer1);
+      clearTimeout(timer2);
     };
   }, [isOpen, activeStepIdx, measureTargetZone]);
 
@@ -246,16 +269,18 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
     window.addEventListener('resize', handleResize);
     window.addEventListener('scroll', handleResize, true);
     let ro: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined' && cardRef.current) {
+    if (typeof ResizeObserver !== 'undefined') {
       ro = new ResizeObserver(() => measureTargetZone());
-      ro.observe(cardRef.current);
+      if (cardRef.current) ro.observe(cardRef.current);
+      const targetEl = document.querySelector(`[data-tour-id="${zone}"]`);
+      if (targetEl) ro.observe(targetEl);
     }
     return () => {
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('scroll', handleResize, true);
       if (ro) ro.disconnect();
     };
-  }, [isOpen, measureTargetZone]);
+  }, [isOpen, zone, measureTargetZone]);
 
   if (!isOpen) return null;
 
@@ -264,14 +289,22 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
   const step = steps[activeStepIdx] || steps[0];
   const isLast = activeStepIdx === steps.length - 1;
 
-  // Place the small badge on whichever side of the spotlight box is away from the dialog card
-  const isBadgeBelow = layout.placement === 'top' || layout.top < 28;
-  const isRightAligned = zone === 'top-right';
+  // Smart badge placement: never clip off-screen top or bottom edges
   const viewportH = typeof window !== 'undefined' ? window.innerHeight : 860;
+  const hasRoomAbove = layout.top >= 28;
+  const hasRoomBelow = layout.top + layout.height + 28 <= viewportH;
+  const placeBadgeBelow =
+    zone === 'bottom-dock'
+      ? false
+      : !hasRoomAbove && hasRoomBelow
+      ? true
+      : layout.placement === 'top' && hasRoomBelow;
+  const isRightAligned = zone === 'top-right';
+
   const cardPositionStyle: React.CSSProperties =
     layout.placement === 'top'
       ? {
-          bottom: `${Math.max(12, viewportH - layout.top + 16)}px`,
+          bottom: `${Math.max(12, viewportH - layout.top + 26)}px`,
           maxHeight: `${layout.cardMaxHeight}px`,
         }
       : {
@@ -296,21 +329,21 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
           height: `${layout.height}px`,
           backgroundColor: 'transparent',
           boxShadow:
-            '0 0 0 9999px rgba(3, 6, 14, 0.84), 0 0 36px 5px rgba(251, 191, 36, 0.8), inset 0 0 18px rgba(251, 191, 36, 0.32)',
+            '0 0 0 9999px rgba(4, 7, 15, 0.80), 0 0 28px 3px rgba(251, 191, 36, 0.72), inset 0 0 12px rgba(251, 191, 36, 0.24)',
         }}
-        className="fixed pointer-events-none rounded-2xl border-2 border-amber-400 z-0"
+        className="fixed box-border pointer-events-none rounded-2xl border-2 border-amber-400 transition-[top,left,width,height] duration-200 ease-out z-0"
       >
-        <div className="absolute -top-1 -left-1 w-3 h-3 border-t-4 border-l-4 border-amber-200 rounded-tl-md" />
-        <div className="absolute -top-1 -right-1 w-3 h-3 border-t-4 border-r-4 border-amber-200 rounded-tr-md" />
-        <div className="absolute -bottom-1 -left-1 w-3 h-3 border-b-4 border-l-4 border-amber-200 rounded-bl-md" />
-        <div className="absolute -bottom-1 -right-1 w-3 h-3 border-b-4 border-r-4 border-amber-200 rounded-br-md" />
+        <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 border-t-[3px] border-l-[3px] border-amber-200 rounded-tl-xl" />
+        <div className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 border-t-[3px] border-r-[3px] border-amber-200 rounded-tr-xl" />
+        <div className="absolute -bottom-0.5 -left-0.5 w-3.5 h-3.5 border-b-[3px] border-l-[3px] border-amber-200 rounded-bl-xl" />
+        <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 border-b-[3px] border-r-[3px] border-amber-200 rounded-br-xl" />
 
         <div
           className={`absolute ${
-            isBadgeBelow ? '-bottom-5' : '-top-5'
+            placeBadgeBelow ? '-bottom-6' : '-top-6'
           } ${
-            isRightAligned ? 'right-0' : 'left-1'
-          } px-2 py-0.5 rounded bg-amber-400 text-slate-950 font-extrabold text-[9px] uppercase tracking-wider shadow-lg flex items-center gap-1 whitespace-nowrap`}
+            isRightAligned ? 'right-1' : 'left-1'
+          } px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 font-extrabold text-[9px] uppercase tracking-wider shadow-lg flex items-center gap-1 whitespace-nowrap`}
         >
           <Target className="w-2.5 h-2.5 shrink-0" />
           <span>{t.spotlightActiveLabel}</span>
@@ -322,19 +355,19 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
         ref={cardRef}
         data-testid="onboarding-dialog-card"
         style={cardPositionStyle}
-        className="fixed left-1/2 -translate-x-1/2 z-10 w-[calc(100vw-20px)] max-w-md bg-[#0b1120]/98 border-2 border-amber-500/85 rounded-2xl p-3 sm:p-4 shadow-2xl space-y-2 overflow-y-auto"
+        className="fixed left-1/2 -translate-x-1/2 z-10 w-[calc(100vw-20px)] max-w-lg bg-[#0b1120]/98 border-2 border-amber-500/85 rounded-2xl p-3 sm:p-4 shadow-2xl space-y-2 overflow-y-auto"
       >
         {/* Progress Dots & Step Badge */}
-        <div className="flex items-center justify-between gap-2 border-b border-slate-800 pb-1.5">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="p-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 shrink-0">
+        <div className="flex items-start justify-between gap-2 border-b border-slate-800 pb-1.5">
+          <div className="flex items-start gap-2 min-w-0">
+            <div className="p-1.5 rounded-xl bg-amber-500/15 border border-amber-500/40 shrink-0 mt-0.5">
               {STEP_ICONS[stepIdx]}
             </div>
             <div className="min-w-0">
-              <span className="text-[9px] font-mono font-extrabold uppercase tracking-widest text-amber-400 block truncate">
+              <span className="text-[9px] font-mono font-extrabold uppercase tracking-wider text-amber-400 block leading-snug">
                 {step.badge}
               </span>
-              <h3 className="text-xs sm:text-sm font-black text-slate-100 leading-tight truncate">
+              <h3 className="text-xs sm:text-sm font-black text-slate-100 leading-snug">
                 {step.title}
               </h3>
             </div>

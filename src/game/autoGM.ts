@@ -1,4 +1,13 @@
-import { Language, NightActions, Phase, Player, RoleId, VoteRecord } from '../types/game';
+import {
+  Language,
+  NightActions,
+  NightDeathCinematicState,
+  NightResult,
+  Phase,
+  Player,
+  RoleId,
+  VoteRecord,
+} from '../types/game';
 import { ROLES } from './roles';
 import { buildVoteTallyEntries, VoteTallyVoter } from './rules';
 
@@ -1093,10 +1102,10 @@ export function buildPrivateHumanNightNotice(params: {
 /**
  * Builds an authentic, real-life Werewolf Game Master Morning/Dawn Announcement.
  * STRICT ZERO-LEAK RULE:
- * - Announces ONLY public facts: who died (names + seats), or that it was a peaceful night (0 deaths),
- *   plus any public dawn Hunter revenge shot.
- * - NEVER leaks hidden night causes or roles (Bodyguard shield, Witch heal/poison, Seer inspection,
- *   Cursed awakening, Elder 2nd life, Cupid pair, Doppelganger copy).
+ * - Announces ONLY public facts: who died (names + seats), or that it was a peaceful night (0 deaths).
+ * - NEVER leaks hidden night causes or roles (Werewolf bite, Bodyguard shield, Witch heal/poison,
+ *   Seer inspection, Hunter revenge shot at night, Cursed awakening, Elder 2nd life, Cupid pair, Doppelganger copy).
+ * - Even if a dying Hunter pulled someone down during the night, Dawn ONLY announces that those players died!
  */
 export function buildDawnGMAnnouncement(params: {
   round: number;
@@ -1104,19 +1113,30 @@ export function buildDawnGMAnnouncement(params: {
   afterPlayers: Player[];
   nightKilledIds: string[];
   hunterShotEvent?: {
+    hunterId?: string;
     hunterName: string;
     hunterSeat: number;
     targetId: string;
     targetName: string;
     targetSeat: number;
+    extraLoverId?: string;
     extraLoverName?: string;
     extraLoverSeat?: number;
   } | null;
+  humanDeathReason?: string | null;
   humanPlayerId: string;
   lang: Language;
 }): GMAnnouncementData {
-  const { round, beforePlayers, afterPlayers, nightKilledIds, hunterShotEvent, humanPlayerId, lang } =
-    params;
+  const {
+    round,
+    beforePlayers,
+    afterPlayers,
+    nightKilledIds,
+    hunterShotEvent,
+    humanDeathReason,
+    humanPlayerId,
+    lang,
+  } = params;
 
   const uniqueVictimIds = new Set<string>(nightKilledIds);
   if (hunterShotEvent) {
@@ -1132,46 +1152,33 @@ export function buildDawnGMAnnouncement(params: {
     }
   }
 
+  const neutralNightDeathTag =
+    lang === 'vi'
+      ? '💀 Tử trận đêm qua'
+      : lang === 'fr'
+      ? '💀 Mort cette nuit'
+      : lang === 'es'
+      ? '💀 Murió anoche'
+      : lang === 'ja'
+      ? '💀 昨夜死亡'
+      : '💀 Fallen last night';
+
   const victims: GMAnnouncementVictim[] = Array.from(uniqueVictimIds)
     .map((id) => {
       const p = afterPlayers.find((item) => item.id === id) || beforePlayers.find((item) => item.id === id);
       if (!p) return null;
       const seatNumber = getSeatNumber(afterPlayers, p.id);
-      let tag: string | undefined;
-      if (hunterShotEvent && p.id === hunterShotEvent.targetId) {
-        tag =
-          lang === 'vi'
-            ? '🎯 Bị Thợ Săn bắn'
-            : lang === 'fr'
-            ? '🎯 Abattu par le Chasseur'
-            : lang === 'es'
-            ? '🎯 Disparado por el Cazador'
-            : lang === 'ja'
-            ? '🎯 狩人の道連れ'
-            : '🎯 Shot by Hunter';
-      } else {
-        tag =
-          lang === 'vi'
-            ? '💀 Tử trận đêm qua'
-            : lang === 'fr'
-            ? '💀 Mort cette nuit'
-            : lang === 'es'
-            ? '💀 Murió anoche'
-            : lang === 'ja'
-            ? '💀 昨夜死亡'
-            : '💀 Fallen last night';
-      }
       return {
         id: p.id,
         name: p.name,
         avatar: p.avatar,
         seatNumber,
-        tag,
+        tag: neutralNightDeathTag,
       };
     })
     .filter(Boolean) as GMAnnouncementVictim[];
 
-  // Sort by seatNumber so listing order never leaks primary vs Cupid/Witch secondary victims
+  // Sort by seatNumber so listing order never leaks primary vs Hunter/Cupid/Witch secondary victims
   victims.sort((a, b) => a.seatNumber - b.seatNumber);
 
   const aliveCount = afterPlayers.filter((p) => p.isAlive).length;
@@ -1179,20 +1186,8 @@ export function buildDawnGMAnnouncement(params: {
   const afterMe = afterPlayers.find((p) => p.id === humanPlayerId);
   const isHumanDead = Boolean(afterMe && !afterMe.isAlive);
 
+  // STRICT ZERO-LEAK: Night Hunter shots are NEVER disclosed at Dawn — only the plain deaths are announced.
   const publicEvents: string[] = [];
-  if (hunterShotEvent) {
-    publicEvents.push(
-      lang === 'vi'
-        ? `🎯 Trước lúc ngã xuống, Thợ Săn ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) đã rút súng bắn hạ ${hunterShotEvent.targetName} (#${hunterShotEvent.targetSeat})!`
-        : lang === 'fr'
-        ? `🎯 Dans son dernier souffle, le Chasseur ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) a abattu ${hunterShotEvent.targetName} (#${hunterShotEvent.targetSeat}) !`
-        : lang === 'es'
-        ? `🎯 En su último aliento, el Cazador ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) disparó contra ${hunterShotEvent.targetName} (#${hunterShotEvent.targetSeat})!`
-        : lang === 'ja'
-        ? `🎯 倒れる間際、狩人 ${hunterShotEvent.hunterName}（#${hunterShotEvent.hunterSeat}）が ${hunterShotEvent.targetName}（#${hunterShotEvent.targetSeat}）を道連れにしました！`
-        : `🎯 With their dying breath, Hunter ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) shot down ${hunterShotEvent.targetName} (#${hunterShotEvent.targetSeat})!`
-    );
-  }
 
   const victimNameList = formatNameList(
     victims.map((v) => v.name),
@@ -1318,13 +1313,22 @@ export function buildDawnGMAnnouncement(params: {
     chatMessageText = `${chatMessageText} ${publicEvents.join(' ')}`;
   }
 
-  const privateNotice = buildPrivateHumanNightNotice({
+  const basePrivateNotice = buildPrivateHumanNightNotice({
     beforePlayers,
     afterPlayers,
     humanPlayerId,
     round,
     lang,
   });
+  const privateNotice =
+    isHumanDead && humanDeathReason
+      ? [
+          humanDeathReason,
+          lang === 'vi'
+            ? '👻 Bạn đã thành Hồn Ma — toàn bộ vai trò trong làng đã được mở khóa để bạn theo dõi (Chat & Mic bị khóa).'
+            : '👻 You are now a Ghost — all village roles are unlocked for spectating (Chat & Mic locked).',
+        ].join('\n')
+      : basePrivateNotice;
 
   return {
     id: `gm_dawn_${round}_${Date.now()}`,
@@ -1632,6 +1636,229 @@ export function shouldAutoAdvanceOnTimerZero(params: {
 
   return true;
 }
+
+/**
+ * Determines which end-of-night short-film cinematic (if any) may legally play ONLY AFTER
+ * all night actions (Werewolf, Bodyguard, Witch Heal/Poison, Elder 2-lives, Cursed, Cupid, Hunter)
+ * have been fully resolved.
+ *
+ * RULES & ANTI-LEAK GUARANTEES:
+ * 1. NEVER called during the wolf target-selection step — only after night ends.
+ * 2. If a Werewolf's chosen target was saved (Bodyguard, Witch Heal, Elder 1st life, Cursed conversion),
+ *    NO kill cinematic triggers at all — prevents leaking wolf identity or that the target was bitten & saved!
+ * 3. If the human player is a living Werewolf/Wolf Pup AND their bitten target ACTUALLY DIED from the wolf bite,
+ *    plays the dramatic 'wolf_kill' short-film cinematic targeting that confirmed dead victim.
+ * 4. If the human player themselves ACTUALLY DIED tonight, they are now a Ghost (Chat & Mic strictly locked),
+ *    so there is NO need to hide the truth from them: reveal exact cause of death, killer name & role!
+ * 5. If the human player is alive and NOT a Werewolf, returns `null` so living villagers deduce everything
+ *    strictly during Day discussion without seeing how any bot died.
+ */
+export function determineEndOfNightCinematic(params: {
+  beforeHuman: Player;
+  beforePlayers?: Player[];
+  afterPlayers: Player[];
+  nightResult: NightResult;
+  hunterShotEvent?: {
+    hunterId?: string;
+    hunterName: string;
+    hunterSeat: number;
+    targetId: string;
+    targetName: string;
+    targetSeat: number;
+    extraLoverId?: string;
+    extraLoverName?: string;
+    extraLoverSeat?: number;
+  } | null;
+  lang: Language;
+}): NightDeathCinematicState | null {
+  const { beforeHuman, beforePlayers = [], afterPlayers, nightResult, hunterShotEvent, lang } = params;
+  const afterHuman = afterPlayers.find((p) => p.id === beforeHuman.id);
+  const humanDiedTonight = Boolean(beforeHuman.isAlive && afterHuman && !afterHuman.isAlive);
+
+  // Case A: Human player themselves actually perished tonight -> Now a Ghost (Chat/Mic locked), so reveal FULL death cause & killer!
+  if (humanDiedTonight) {
+    const myDetail = (nightResult.killedDetails ?? []).find((d) => d.playerId === beforeHuman.id);
+
+    if (myDetail) {
+      const causeType = myDetail.causeType ?? 'werewolf';
+      const killerName = myDetail.killerName ?? null;
+      const linkedLoverName = myDetail.linkedLoverName ?? null;
+      let reasonText = myDetail.logicExplanation;
+
+      if (causeType === 'witch_poison') {
+        reasonText =
+          lang === 'vi'
+            ? `🧪 Phù Thủy ${killerName || 'bí ẩn'} đã ném Bình Độc hạ sát bạn trong màn đêm!`
+            : lang === 'fr'
+            ? `🧪 La Sorcière ${killerName || ''} vous a empoisonné cette nuit !`
+            : lang === 'es'
+            ? `🧪 ¡La Bruja ${killerName || ''} te envenenó esta noche!`
+            : lang === 'ja'
+            ? `🧪 魔女 ${killerName || ''} の毒薬によって今夜命を落としました！`
+            : `🧪 Witch ${killerName || 'unknown'} threw a lethal Poison potion at you during the night!`;
+      } else if (causeType === 'cupid_lover') {
+        reasonText =
+          lang === 'vi'
+            ? `💘 Tình nhân ${linkedLoverName || 'của bạn'} đã ngã xuống đêm qua — bạn qua đời theo lời nguyền Cupid!`
+            : lang === 'fr'
+            ? `💘 Votre amoureux ${linkedLoverName || ''} est mort cette nuit — vous succombez au lien de Cupidon !`
+            : lang === 'es'
+            ? `💘 Tu enamorado ${linkedLoverName || ''} murió anoche — ¡caes por el vínculo de Cupido!`
+            : lang === 'ja'
+            ? `💘 恋人の ${linkedLoverName || ''} が命を落としたため、キューピッドの呪いで後を追いました！`
+            : `💘 Your Lover ${linkedLoverName || ''} fell last night — you perished from Cupid's heartbreak!`;
+      } else if (causeType === 'hunter_shot') {
+        reasonText =
+          lang === 'vi'
+            ? `🎯 Thợ Săn ${killerName || ''} tử trận đêm qua và đã bóp cò bắn kéo bạn theo!`
+            : lang === 'fr'
+            ? `🎯 Le Chasseur ${killerName || ''} a tiré sa dernière balle sur vous en mourant !`
+            : lang === 'es'
+            ? `🎯 ¡El Cazador ${killerName || ''} disparó su último tiro contra ti al morir!`
+            : lang === 'ja'
+            ? `🎯 狩人 ${killerName || ''} の道連れショットにより命を落としました！`
+            : `🎯 Hunter ${killerName || ''} fell last night and fired a dying revenge shot at you!`;
+      } else if (causeType === 'werewolf') {
+        reasonText =
+          lang === 'vi'
+            ? `🐺 Ma Sói ${killerName || ''} cùng bầy Sói đã tấn công cắn chết bạn trong màn đêm!`
+            : lang === 'fr'
+            ? `🐺 Le Loup-Garou ${killerName || ''} et la meute vous ont dévoré cette nuit !`
+            : lang === 'es'
+            ? `🐺 ¡El Hombre Lobo ${killerName || ''} y la manada te atacaron durante la noche!`
+            : lang === 'ja'
+            ? `🐺 人狼 ${killerName || ''} の襲撃によって今夜命を落としました！`
+            : `🐺 Werewolf ${killerName || ''} and the wolf pack hunted you down during the night!`;
+      }
+
+      return {
+        mode: 'victim_death',
+        revealKiller: true,
+        victimId: beforeHuman.id,
+        victimName: beforeHuman.name,
+        causeType,
+        killerId: myDetail.killerId ?? null,
+        killerName,
+        killerRoleId: myDetail.killerRoleId ?? null,
+        linkedLoverId: myDetail.linkedLoverId ?? null,
+        linkedLoverName,
+        reasonText,
+      };
+    }
+
+    if (hunterShotEvent && hunterShotEvent.targetId === beforeHuman.id) {
+      const hunterObj =
+        beforePlayers.find((p) => p.id === hunterShotEvent.hunterId) ||
+        beforePlayers.find((p) => p.name === hunterShotEvent.hunterName);
+      return {
+        mode: 'victim_death',
+        revealKiller: true,
+        victimId: beforeHuman.id,
+        victimName: beforeHuman.name,
+        causeType: 'hunter_shot',
+        killerId: hunterObj?.id ?? hunterShotEvent.hunterId ?? null,
+        killerName: hunterShotEvent.hunterName,
+        killerRoleId: 'hunter',
+        linkedLoverId: null,
+        linkedLoverName: null,
+        reasonText:
+          lang === 'vi'
+            ? `🎯 Thợ Săn ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) tử trận đêm qua và đã bóp cò bắn kéo bạn theo!`
+            : lang === 'fr'
+            ? `🎯 Le Chasseur ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) vous a abattu dans son dernier souffle !`
+            : lang === 'es'
+            ? `🎯 ¡El Cazador ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) te disparó al caer!`
+            : lang === 'ja'
+            ? `🎯 狩人 ${hunterShotEvent.hunterName}（#${hunterShotEvent.hunterSeat}）の道連れショットに撃たれました！`
+            : `🎯 Hunter ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) died last night and shot you on the way out!`,
+      };
+    }
+
+    if (hunterShotEvent && hunterShotEvent.extraLoverId === beforeHuman.id) {
+      return {
+        mode: 'victim_death',
+        revealKiller: true,
+        victimId: beforeHuman.id,
+        victimName: beforeHuman.name,
+        causeType: 'cupid_lover',
+        killerId: null,
+        killerName: null,
+        killerRoleId: null,
+        linkedLoverId: hunterShotEvent.targetId,
+        linkedLoverName: hunterShotEvent.targetName,
+        reasonText:
+          lang === 'vi'
+            ? `💘 Tình nhân ${hunterShotEvent.targetName} của bạn bị Thợ Săn ${hunterShotEvent.hunterName} bắn hạ — bạn tử trận theo lời nguyền Cupid!`
+            : `💘 Your Lover ${hunterShotEvent.targetName} was shot by Hunter ${hunterShotEvent.hunterName} — you perished from Cupid's bond!`,
+      };
+    }
+
+    const fallbackWolf = beforePlayers.find(
+      (p) => p.isAlive && (p.roleId === 'werewolf' || p.roleId === 'wolf_pup')
+    );
+    return {
+      mode: 'victim_death',
+      revealKiller: Boolean(fallbackWolf),
+      victimId: beforeHuman.id,
+      victimName: beforeHuman.name,
+      causeType: fallbackWolf ? 'werewolf' : 'unknown',
+      killerId: fallbackWolf?.id ?? null,
+      killerName: fallbackWolf?.name ?? null,
+      killerRoleId: fallbackWolf?.roleId ?? null,
+      linkedLoverId: null,
+      linkedLoverName: null,
+      reasonText:
+        lang === 'vi'
+          ? fallbackWolf
+            ? `🐺 Ma Sói ${fallbackWolf.name} đã tấn công bạn trong màn đêm!`
+            : 'Màn đêm đã cướp đi sinh mạng của bạn trước khi bình minh ló rạng.'
+          : fallbackWolf
+          ? `🐺 Werewolf ${fallbackWolf.name} attacked you during the night!`
+          : 'The dark night claimed your life before dawn could break.',
+    };
+  }
+
+  // Case B: Living human Werewolf/Wolf Pup whose bitten target ACTUALLY DIED (NOT guarded/healed/elder/cursed!)
+  const isHumanWolf =
+    Boolean(afterHuman?.isAlive) &&
+    (beforeHuman.roleId === 'werewolf' || beforeHuman.roleId === 'wolf_pup');
+
+  if (isHumanWolf) {
+    const confirmedWolfVictim = (nightResult.killedDetails ?? []).find((d) => {
+      if (d.causeType !== 'werewolf') return false;
+      const afterVictim = afterPlayers.find((p) => p.id === d.playerId);
+      return Boolean(afterVictim && !afterVictim.isAlive);
+    });
+
+    if (confirmedWolfVictim) {
+      return {
+        mode: 'wolf_kill',
+        revealKiller: true,
+        victimId: confirmedWolfVictim.playerId,
+        victimName: confirmedWolfVictim.name,
+        causeType: 'werewolf',
+        killerId: beforeHuman.id,
+        killerName: beforeHuman.name,
+        killerRoleId: beforeHuman.roleId,
+        linkedLoverId: null,
+        linkedLoverName: null,
+        reasonText:
+          lang === 'vi'
+            ? `Đêm đã tàn — con mồi ${confirmedWolfVictim.name} không nhận được phép màu nào và đã gục ngã dưới nanh vuốt của bầy Sói!`
+            : lang === 'fr'
+            ? `La nuit s'achève — ${confirmedWolfVictim.name} n'a reçu aucune protection et succombe à l'attaque des Loups !`
+            : lang === 'es'
+            ? `Termina la noche — ${confirmedWolfVictim.name} no fue salvado y cae ante los Hombres Lobo!`
+            : lang === 'ja'
+            ? `夜が明ける直前 — 標的の${confirmedWolfVictim.name}は誰にも守られず、人狼の牙に倒れました！`
+            : `As night ends, ${confirmedWolfVictim.name} received no salvation and fell to the Werewolf hunt!`,
+      };
+    }
+  }
+
+  return null;
+}
+
 
 
 

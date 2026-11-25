@@ -40,9 +40,15 @@ import {
   RotateCw,
   BookMarked,
   Crown,
+  Lock,
 } from 'lucide-react';
 import { WerewolfVillage3D } from './components/WerewolfVillage3D';
-import { CameraViewPreset, getNextCameraPreset } from './game/fpvCamera';
+import {
+  CameraViewPreset,
+  getContextualInteractionPrompt,
+  getNextCameraPreset,
+  isDirectLookCameraPreset,
+} from './game/fpvCamera';
 import { GMAssistantView } from './components/GMAssistantView';
 import { VirtualCardPlayerView } from './components/VirtualCardPlayerView';
 import { LeaderboardView } from './components/LeaderboardView';
@@ -67,6 +73,7 @@ import { GMAnnouncementModal } from './components/GMAnnouncementModal';
 import { AgrouAvatarLockerModal } from './components/AgrouAvatarLockerModal';
 import { AgrouNotebookDrawer } from './components/AgrouNotebookDrawer';
 import { AgrouEmoteWheel } from './components/AgrouEmoteWheel';
+import { NightDeathCinematicOverlay } from './components/NightDeathCinematicOverlay';
 import { realtimeClient } from './utils/realtimeClient';
 import type { GMDeckMode } from './server/gmRooms';
 import {
@@ -80,6 +87,7 @@ import {
   GameMode,
   PropType,
   ThrownPropEvent,
+  NightDeathCinematicState,
 } from './types/game';
 import { ROLES } from './game/roles';
 import {
@@ -102,7 +110,6 @@ import {
   PlayerNotebookNote,
   appendNotebookTimelineEvent,
   createInitialNotebook,
-  electMayorForVillage,
   formatNotebookShareSummary,
   getBotCosmetics,
   loadAgrouAvatarConfig,
@@ -124,6 +131,7 @@ import {
   shouldAutoAdvanceOnTimerZero,
   buildDawnGMAnnouncement,
   buildDuskGMAnnouncement,
+  determineEndOfNightCinematic,
   GMAnnouncementData,
   CustomTimerConfig,
   DEFAULT_TIMER_CONFIG,
@@ -246,6 +254,9 @@ export default function App() {
   const [cameraPreset, setCameraPreset] = useState<CameraViewPreset>('campfire');
   const [freeLook360, setFreeLook360] = useState<boolean>(false);
   const [aimedPlayerId, setAimedPlayerId] = useState<string | null>(null);
+  const [aimedOwnSeat, setAimedOwnSeat] = useState<boolean>(false);
+  const [isUserRoaming, setIsUserRoaming] = useState<boolean>(false);
+  const [returnToSeatTrigger, setReturnToSeatTrigger] = useState<number>(0);
   const [fpvLookTurnRate, setFpvLookTurnRate] = useState<number>(0);
 
   // Room Creation / Join Lobby Modal State
@@ -281,9 +292,14 @@ export default function App() {
   // Anti-Cheat Night Blindfold Override (allows player to close eyes after acting)
   const [hasClosedEyesTonight, setHasClosedEyesTonight] = useState<boolean>(false);
 
-  // Authentic Real-Life AI Game Master Dawn/Dusk Announcements
+  // Authentic Real-Life AI Game Master Dawn/Dusk Announcements & Night Death Cinematic
   const [gmAnnouncement, setGmAnnouncement] = useState<GMAnnouncementData | null>(null);
   const [lastDawnAnnouncement, setLastDawnAnnouncement] = useState<GMAnnouncementData | null>(null);
+  const [aimedCampfire, setAimedCampfire] = useState<boolean>(false);
+  const [nightDeathCinematic, setNightDeathCinematic] =
+    useState<NightDeathCinematicState | null>(null);
+  const [pendingDawnAfterDeath, setPendingDawnAfterDeath] =
+    useState<GMAnnouncementData | null>(null);
   const [pendingNightTransition, setPendingNightTransition] = useState<{
     nextPlayers: Player[];
     nextRound: number;
@@ -361,7 +377,14 @@ export default function App() {
     }
     return DEFAULT_TIMER_CONFIG;
   });
-  const [phase, setPhase] = useState<Phase>('night');
+  const [phase, setPhase] = useState<Phase>(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('autostart') === '1') {
+      const p = params.get('phase');
+      if (p === 'day_discussion' || p === 'day_voting' || p === 'night') return p;
+    }
+    return 'night';
+  });
   const [round, setRound] = useState<number>(1);
   const [timerSeconds, setTimerSeconds] = useState<number>(20);
   const [wolfPupFrenzy, setWolfPupFrenzy] = useState<boolean>(false);
@@ -370,6 +393,11 @@ export default function App() {
 
   // Players in the 3D Village Circle (Initialized with an active night role for the human player)
   const [initialBootState] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const autostartGhostsCount =
+      params.get('autostart') === '1'
+        ? Math.max(0, Math.min(6, Number(params.get('ghosts')) || 0))
+        : 0;
     const initialCount = 8;
     const savedCosmetics = loadAgrouAvatarConfig();
     const roles = assignPreferredRoleToDeck(generateBalancedRoster(initialCount), 'random');
@@ -379,9 +407,8 @@ export default function App() {
         name: 'Thợ Săn Đêm',
         avatar: '🐺',
         roleId: roles[0],
-        isAlive: true,
+        isAlive: autostartGhostsCount < 1,
         isHost: true,
-        isMayor: true,
         hat: savedCosmetics.hat,
         cloakColor: savedCosmetics.cloakColor,
         elderLives: roles[0] === 'elder' ? 2 : undefined,
@@ -393,7 +420,7 @@ export default function App() {
           name,
           avatar: BOT_AVATARS[i % BOT_AVATARS.length],
           roleId: roles[i + 1],
-          isAlive: true,
+          isAlive: i + 1 >= autostartGhostsCount,
           isBot: true,
           hat: botLook.hat,
           cloakColor: botLook.cloakColor,
@@ -420,9 +447,7 @@ export default function App() {
   });
 
   const [players, setPlayers] = useState<Player[]>(() => initialBootState.readyPlayers);
-  const [mayorId, setMayorId] = useState<string | null>(
-    () => initialBootState.readyPlayers[0]?.id || 'usr_me'
-  );
+  const [mayorId, setMayorId] = useState<string | null>(null);
   const playersRef = useRef<Player[]>(players);
   useEffect(() => {
     playersRef.current = players;
@@ -464,11 +489,10 @@ export default function App() {
   );
   const [knownWolfIds, setKnownWolfIds] = useState<string[]>([]);
 
-  // Player Deduction Notebook Tags ('wolf_suspect' | 'trusted') for Daytime Strategy
+  // Player Deduction Notebook Tags ('wolf_suspect' | 'trusted') synced from Seer & Notebook
   const [suspectTags, setSuspectTags] = useState<
     Record<string, 'wolf_suspect' | 'trusted' | undefined>
   >({});
-  const [tagToolMode, setTagToolMode] = useState<'none' | 'wolf_suspect' | 'trusted'>('none');
 
   // Voting & Voice State
   const [votes, setVotes] = useState<VoteRecord[]>([]);
@@ -669,6 +693,8 @@ export default function App() {
       setActivePropTool(null);
       setSelectedTargetId(null);
       setSeerInspectResult(null);
+      setIsUserRoaming(false);
+      setAimedOwnSeat(false);
 
       setDoppelgangerTargetId(prepared.preSimulatedActions.doppelgangerTargetId || null);
       if (targetRound === 1) {
@@ -800,6 +826,26 @@ export default function App() {
     return () => clearInterval(interval);
   }, [shellState, players, isMicOn, me]);
 
+  // Strictly force Microphone OFF & lock voice whenever player dies (Ghost Silence Rule)
+  useEffect(() => {
+    if (shellState === 'playing' && !me.isAlive && isMicOn) {
+      setIsMicOn(false);
+    }
+  }, [shellState, me.isAlive, isMicOn]);
+
+  const handleToggleMicSafe = useCallback(() => {
+    if (!me.isAlive) {
+      setIsMicOn(false);
+      setEventBanner(
+        lang === 'vi'
+          ? '👻 Bạn đã thành Hồn Ma — Micro đã bị khóa!'
+          : '👻 You are a Ghost — Microphone is locked!'
+      );
+      return;
+    }
+    setIsMicOn((prev) => !prev);
+  }, [me.isAlive, lang]);
+
   // Throw a Tomato / Rotten Egg / Rose / Water Prop in 3D (Purely visual & audio fun teasing — NO chat message spam)
   const handleThrowProp = useCallback(
     (fromId: string, toId: string, propType: PropType, skipBroadcast = false) => {
@@ -888,6 +934,14 @@ export default function App() {
   );
 
   const handleShareNotebookToChat = useCallback(() => {
+    if (!me.isAlive) {
+      setEventBanner(
+        lang === 'vi'
+          ? '🔒 Bạn đã chết thành Hồn Ma — Không thể gửi tin nhắn vào khung chat!'
+          : '🔒 You are dead (Ghost) — Chat sending is locked!'
+      );
+      return;
+    }
     const summaryText = formatNotebookShareSummary(notebook, players, lang);
     const nextMsg: ChatMessage = {
       id: `nb_share_${Date.now()}`,
@@ -896,7 +950,7 @@ export default function App() {
       senderRole: me.roleId,
       text: summaryText,
       timestamp: Date.now(),
-      isGhost: !me.isAlive,
+      isGhost: false,
     };
     setMessages((prev) => [...prev, nextMsg]);
     if (gameMode === 'online') {
@@ -980,14 +1034,12 @@ export default function App() {
               }),
             ];
 
-      const electedMayor = electMayorForVillage(rawPlayers, currentUser.id);
       const freshPlayers: Player[] = rawPlayers.map((p) => ({
         ...p,
-        isMayor: p.id === electedMayor,
+        isMayor: false,
       }));
-      const mayorPlayer = freshPlayers.find((p) => p.id === electedMayor);
 
-      setMayorId(electedMayor);
+      setMayorId(null);
       setKnownWolfIds([]);
       setWolfPupFrenzy(false);
       setVotes([]);
@@ -996,25 +1048,18 @@ export default function App() {
       setGameResult(null);
       setGmAnnouncement(null);
       setLastDawnAnnouncement(null);
+      setNightDeathCinematic(null);
+      setPendingDawnAfterDeath(null);
       setPendingNightTransition(null);
       setPendingDawnContext(null);
       setSuspectTags({});
-      setTagToolMode('none');
       setActiveDrawer('none');
       setIsNotebookOpen(false);
       setShowAvatarLocker(false);
       setEmoteEvents([]);
-      setNotebook(
-        appendNotebookTimelineEvent(createInitialNotebook(), {
-          round: 1,
-          phaseLabel: lang === 'vi' ? 'Khai Cuộc' : 'Match Start',
-          text:
-            lang === 'vi'
-              ? `👑 ${mayorPlayer?.name || 'Thị Trưởng'} giữ Vương Miện Thị Trưởng (phiếu bầu x2).`
-              : `👑 ${mayorPlayer?.name || 'Mayor'} wears the Mayor Crown (x2 vote weight).`,
-          tone: 'mayor',
-        })
-      );
+      setIsUserRoaming(false);
+      setAimedOwnSeat(false);
+      setNotebook(createInitialNotebook());
       setLobbyModalState({ isOpen: false, mode: 'online' });
       beginNewNight(freshPlayers, 1, false, []);
       setShellState('playing');
@@ -1027,8 +1072,8 @@ export default function App() {
           senderName: '🤖 Quản Trò Máy',
           text:
             lang === 'vi'
-              ? `🤖 Quản Trò Máy: Ván đấu ${count} người bắt đầu! Vai trò bí mật của bạn là ${assignedDef.name.vi}. 👑 Thị Trưởng đương nhiệm: ${mayorPlayer?.name || currentUser.name} (phiếu bầu x2).`
-              : `🤖 Auto-GM: ${count}-player match started! Your secret role is ${assignedDef.name[lang]}. 👑 Current Mayor: ${mayorPlayer?.name || currentUser.name} (x2 vote).`,
+              ? `🤖 Quản Trò Máy: Ván đấu ${count} người bắt đầu! Vai trò bí mật của bạn là ${assignedDef.name.vi}.`
+              : `🤖 Auto-GM: ${count}-player match started! Your secret role is ${assignedDef.name[lang]}.`,
           timestamp: Date.now(),
           isSystem: true,
         },
@@ -1235,7 +1280,12 @@ export default function App() {
       roundNumber: round,
     });
 
+    // Only track bot Seer's inspections for AI voting — NEVER leak human Seer's secret inspection to AI bots!
+    const isBotSeerAlive = players.some(
+      (p) => p.roleId === 'seer' && Boolean(p.isBot) && p.isAlive
+    );
     if (
+      isBotSeerAlive &&
       result.seerInspection &&
       result.seerInspection.isWerewolf &&
       !knownWolfIds.includes(result.seerInspection.playerId)
@@ -1250,11 +1300,13 @@ export default function App() {
     let effectivePlayers = updatedPlayers;
     let nextFrenzy = Boolean(result.wolfPupTriggeredNextNight);
     let hunterShotEvent: {
+      hunterId?: string;
       hunterName: string;
       hunterSeat: number;
       targetId: string;
       targetName: string;
       targetSeat: number;
+      extraLoverId?: string;
       extraLoverName?: string;
       extraLoverSeat?: number;
     } | null = null;
@@ -1270,7 +1322,10 @@ export default function App() {
     if (result.triggeredHunterId) {
       const hunterPlayer = effectivePlayers.find((p) => p.id === result.triggeredHunterId);
       if (hunterPlayer) {
-        triggerNightRoleCallout('hunter');
+        // Strictly DO NOT play Hunter callout toast/SFX when a Bot Hunter dies at night (anti-leak!)
+        if (!hunterPlayer.isBot) {
+          triggerNightRoleCallout('hunter');
+        }
         if (hunterPlayer.isBot) {
           const aliveTargets = effectivePlayers.filter((p) => p.isAlive);
           if (aliveTargets.length > 0) {
@@ -1294,11 +1349,13 @@ export default function App() {
               ? effectivePlayers.findIndex((p) => p.id === extraLover.id) + 1
               : undefined;
             hunterShotEvent = {
+              hunterId: hunterPlayer.id,
               hunterName: hunterPlayer.name,
               hunterSeat,
               targetId: shotTarget.id,
               targetName: shotTarget.name,
               targetSeat,
+              extraLoverId: extraLover?.id,
               extraLoverName: extraLover?.name,
               extraLoverSeat,
             };
@@ -1333,12 +1390,14 @@ export default function App() {
       }
     }
 
-    const mayorCheck = resolveNextMayorIfNeeded(effectivePlayers, mayorId);
+    const mayorCheck = mayorId
+      ? resolveNextMayorIfNeeded(effectivePlayers, mayorId)
+      : { nextMayorId: null };
     if (mayorCheck.nextMayorId !== mayorId) {
       setMayorId(mayorCheck.nextMayorId);
       effectivePlayers = effectivePlayers.map((p) => ({
         ...p,
-        isMayor: p.id === mayorCheck.nextMayorId,
+        isMayor: Boolean(mayorCheck.nextMayorId && p.id === mayorCheck.nextMayorId),
       }));
     }
 
@@ -1346,17 +1405,49 @@ export default function App() {
     setWolfPupFrenzy(nextFrenzy);
 
     const updatedMe = effectivePlayers.find((p) => p.id === me.id);
-    if (me.isAlive && updatedMe && !updatedMe.isAlive) {
-      sound.playGhostWail();
+    const humanDiedTonight = Boolean(me.isAlive && updatedMe && !updatedMe.isAlive);
+    if (humanDiedTonight) {
+      setIsMicOn(false);
+      setActivePropTool(null);
+      setIsUserRoaming(false);
     }
 
-    // Build authentic, ZERO-LEAK real-life Game Master Dawn Announcement
+    // End-of-night short film activates strictly AFTER all night saves/shields/heals/elder/cursed resolve.
+    // Living players get zero leaks; dead Ghost players (Chat/Mic locked) see exact cause & killer!
+    const deathRevealState = determineEndOfNightCinematic({
+      beforeHuman: me,
+      beforePlayers: beforeNightPlayers,
+      afterPlayers: effectivePlayers,
+      nightResult: result,
+      hunterShotEvent,
+      lang,
+    });
+
+    if (deathRevealState) {
+      if (humanDiedTonight) {
+        if (deathRevealState.causeType === 'witch_poison') {
+          sound.playWitchCauldron();
+        } else if (deathRevealState.causeType === 'cupid_lover') {
+          sound.playCupidHarp();
+        } else if (deathRevealState.causeType === 'hunter_shot') {
+          sound.playShotgunCock();
+        } else {
+          sound.playDeath();
+        }
+        sound.playGhostWail();
+      } else {
+        sound.playDeath();
+      }
+    }
+
+    // Build authentic, ZERO-LEAK real-life Game Master Dawn Announcement (public text stays neutral; privateNotice tells dead Ghost why they died)
     const dawnAnnouncement = buildDawnGMAnnouncement({
       round,
       beforePlayers: beforeNightPlayers,
       afterPlayers: effectivePlayers,
       nightKilledIds: result.killedPlayerIds,
       hunterShotEvent,
+      humanDeathReason: humanDiedTonight ? deathRevealState?.reasonText ?? null : null,
       humanPlayerId: me.id,
       lang,
     });
@@ -1412,21 +1503,28 @@ export default function App() {
     setTimerSeconds(timerConfig.dayDiscussSec);
     setEventBanner(`☀️ ${t.dayDiscussTitle(round)}: ${dawnAnnouncement.dayBarSummary}`);
     setLastDawnAnnouncement(dawnAnnouncement);
-    setGmAnnouncement(dawnAnnouncement);
-    sound.playGMAnnouncement(
-      'dawn',
-      dawnAnnouncement.victims.length > 0,
-      dawnAnnouncement.spokenNarration,
-      lang
-    );
 
-    // AI Bots actively discuss clues & suspects during Day Discussion using ONLY public dawn victims
+    if (deathRevealState) {
+      // Show dramatic 3D Night Death Killer Reveal first, then Dawn announcement on continue!
+      setNightDeathCinematic(deathRevealState);
+      setPendingDawnAfterDeath(dawnAnnouncement);
+    } else {
+      setGmAnnouncement(dawnAnnouncement);
+      sound.playGMAnnouncement(
+        'dawn',
+        dawnAnnouncement.victims.length > 0,
+        dawnAnnouncement.spokenNarration,
+        lang
+      );
+    }
+
+    // AI Bots actively discuss clues & suspects during Day Discussion using ONLY public dawn victims & bot Seer's own info
     const publicKilledNames = dawnAnnouncement.victims.map((v) => v.name);
     const botDiscussionLines = buildBotDayDiscussionLines(
       effectivePlayers,
       publicKilledNames,
       lang,
-      result.seerInspection,
+      isBotSeerAlive ? result.seerInspection : null,
       round
     );
     if (botDiscussionLines.length > 0) {
@@ -1571,7 +1669,6 @@ export default function App() {
   const handleStartDayVoting = useCallback(() => {
     sound.playGavel();
     setActivePropTool(null);
-    setTagToolMode('none');
     setSecondWolfTargetId(null);
     setPhase('day_voting');
     setTimerSeconds(timerConfig.dayVoteSec);
@@ -1759,12 +1856,14 @@ export default function App() {
         }
       }
 
-      const mayorCheck = resolveNextMayorIfNeeded(effectivePlayers, mayorId);
+      const mayorCheck = mayorId
+        ? resolveNextMayorIfNeeded(effectivePlayers, mayorId)
+        : { nextMayorId: null };
       if (mayorCheck.nextMayorId !== mayorId) {
         setMayorId(mayorCheck.nextMayorId);
         effectivePlayers = effectivePlayers.map((p) => ({
           ...p,
-          isMayor: p.id === mayorCheck.nextMayorId,
+          isMayor: Boolean(mayorCheck.nextMayorId && p.id === mayorCheck.nextMayorId),
         }));
       }
 
@@ -1899,8 +1998,21 @@ export default function App() {
         if (targetId === activeHunter.id) return;
         sound.playShotgunCock();
         sound.playDeath();
-        const { updatedPlayers, victimName, extraVictimId, wolfPupTriggeredNextNight } =
+        const { updatedPlayers: shotPlayers, victimName, extraVictimId, wolfPupTriggeredNextNight } =
           resolveHunterShot(players, activeHunter.id, targetId);
+        let updatedPlayers = shotPlayers;
+        const hunterMayorCheck = mayorId
+          ? resolveNextMayorIfNeeded(updatedPlayers, mayorId)
+          : { nextMayorId: null };
+        if (hunterMayorCheck.nextMayorId !== mayorId) {
+          setMayorId(hunterMayorCheck.nextMayorId);
+          updatedPlayers = updatedPlayers.map((p) => ({
+            ...p,
+            isMayor: Boolean(
+              hunterMayorCheck.nextMayorId && p.id === hunterMayorCheck.nextMayorId
+            ),
+          }));
+        }
         setPlayers(updatedPlayers);
         if (wolfPupTriggeredNextNight) setWolfPupFrenzy(true);
         setActiveHunter(null);
@@ -1935,16 +2047,54 @@ export default function App() {
             lang,
           });
           setPendingDawnContext(null);
+          setNotebook((prevNb) => {
+            let nextNb = appendNotebookTimelineEvent(prevNb, {
+              round,
+              phaseLabel: lang === 'vi' ? `Bình Minh #${round}` : `Dawn #${round}`,
+              text: dawnAfterShot.dayBarSummary,
+              tone: dawnAfterShot.victims.length > 0 ? 'death' : 'info',
+            });
+            if (hunterMayorCheck.transferredToName) {
+              nextNb = appendNotebookTimelineEvent(nextNb, {
+                round,
+                phaseLabel: lang === 'vi' ? 'Thị Trưởng' : 'Mayor',
+                text:
+                  lang === 'vi'
+                    ? `👑 Vương miện chuyển sang ${hunterMayorCheck.transferredToName} (x2 phiếu).`
+                    : `👑 Mayor crown passed to ${hunterMayorCheck.transferredToName} (x2 vote).`,
+                tone: 'mayor',
+              });
+            }
+            return nextNb;
+          });
+          const isBotSeerInDawn = (dawnCtx?.beforePlayers || players).some(
+            (p) => p.roleId === 'seer' && Boolean(p.isBot) && p.isAlive
+          );
+          const botLines = buildBotDayDiscussionLines(
+            updatedPlayers,
+            dawnAfterShot.victims.map((v) => v.name),
+            lang,
+            isBotSeerInDawn ? dawnCtx?.seerInspection ?? null : null,
+            round
+          );
+          const nowTs = Date.now();
           setMessages((prev) => [
             ...prev,
             {
-              id: `sys_dawn_hunter_${Date.now()}`,
+              id: `sys_dawn_hunter_${nowTs}`,
               senderId: 'sys',
               senderName: lang === 'vi' ? '🎙️ Quản Trò AI' : '🎙️ AI Game Master',
               text: dawnAfterShot.chatMessageText,
-              timestamp: Date.now(),
+              timestamp: nowTs,
               isSystem: true,
             },
+            ...botLines.map((line, idx) => ({
+              id: `bot_chat_h_${nowTs}_${idx}`,
+              senderId: line.senderId,
+              senderName: line.senderName,
+              text: line.text,
+              timestamp: nowTs + idx + 1,
+            })),
           ]);
           setPhase('day_discussion');
           setTimerSeconds(timerConfig.dayDiscussSec);
@@ -2075,9 +2225,7 @@ export default function App() {
           setSelectedTargetId(targetId);
           sound.playMysticChime();
           const isWolf = target.roleId === 'werewolf' || target.roleId === 'wolf_pup';
-          if (isWolf) {
-            setKnownWolfIds((prev) => (prev.includes(targetId) ? prev : [...prev, targetId]));
-          }
+          // Human Seer's inspection stays strictly private to the human's own notebook (never telepathically shared to AI bots!)
           setSuspectTags((prev) => ({
             ...prev,
             [targetId]: isWolf ? 'wolf_suspect' : 'trusted',
@@ -2125,6 +2273,7 @@ export default function App() {
           setSelectedTargetId(targetId);
           setEventBanner(`🛡️ ${target.name}!`);
         } else if (me.roleId === 'witch' && currentNightStep?.key === 'witch') {
+          if (targetId === me.id) return;
           if (!me.hasUsedPoison) {
             sound.playWitchCauldron();
             setWitchPoisonTargetId(
@@ -2283,14 +2432,15 @@ export default function App() {
     []
   );
 
-  // Countdown Timer Effect (Paused while Onboarding Tour or GM Announcement is open)
+  // Countdown Timer Effect (Paused while Onboarding Tour, GM Announcement, or Night Death Cinematic is open)
   useEffect(() => {
     if (
       shellState !== 'playing' ||
       phase === 'game_over' ||
       phase === 'lobby' ||
       showOnboardingTour ||
-      Boolean(gmAnnouncement)
+      Boolean(gmAnnouncement) ||
+      Boolean(nightDeathCinematic)
     )
       return;
     const timer = setInterval(() => {
@@ -2302,7 +2452,7 @@ export default function App() {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [shellState, phase, showOnboardingTour, gmAnnouncement]);
+  }, [shellState, phase, showOnboardingTour, gmAnnouncement, nightDeathCinematic]);
 
   const isLastNightStep =
     phase === 'night' && nightSchedule.length > 0 && nightStepIndex >= nightSchedule.length - 1;
@@ -2318,7 +2468,7 @@ export default function App() {
     hasHumanVoted: hasVoted,
     isHumanHunterRevenge,
     isLastNightStep,
-    hasActiveGMAnnouncement: Boolean(gmAnnouncement),
+    hasActiveGMAnnouncement: Boolean(gmAnnouncement) || Boolean(nightDeathCinematic),
   });
 
   // Trigger step-by-step Auto-GM progression when timer reaches 0 (NEVER runs outside 'playing'!)
@@ -2357,6 +2507,36 @@ export default function App() {
     setCameraPreset((prev) => (prev === 'first_person' ? 'campfire' : 'first_person'));
   }, []);
 
+  // Toggle Behind-the-Back (Third-Person) View Mode [B]
+  const handleToggleThirdPerson = useCallback(() => {
+    sound.playCardFlip();
+    setCameraPreset((prev) => (prev === 'third_person' ? 'campfire' : 'third_person'));
+  }, []);
+
+  // Return to own wooden stool around the campfire (Button / Click own stool / [X])
+  const handleReturnToSeat = useCallback(() => {
+    sound.playCardFlip();
+    setReturnToSeatTrigger((n) => n + 1);
+    setIsUserRoaming(false);
+    setAimedOwnSeat(false);
+  }, []);
+
+  const handleDismissNightDeathCinematic = useCallback(() => {
+    sound.playCardFlip();
+    setNightDeathCinematic(null);
+    if (pendingDawnAfterDeath) {
+      const nextDawn = pendingDawnAfterDeath;
+      setPendingDawnAfterDeath(null);
+      setGmAnnouncement(nextDawn);
+      sound.playGMAnnouncement(
+        'dawn',
+        nextDawn.victims.length > 0,
+        nextDawn.spokenNarration,
+        lang
+      );
+    }
+  }, [pendingDawnAfterDeath, lang]);
+
   // Keyboard Shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -2380,6 +2560,12 @@ export default function App() {
         return;
       }
 
+      if (nightDeathCinematic && (e.code === 'Enter' || e.code === 'Space' || e.code === 'Escape')) {
+        e.preventDefault();
+        handleDismissNightDeathCinematic();
+        return;
+      }
+
       if (gmAnnouncement && (e.code === 'Enter' || e.code === 'Space' || e.code === 'Escape')) {
         e.preventDefault();
         handleDismissGMAnnouncement();
@@ -2388,6 +2574,13 @@ export default function App() {
 
       if (e.code === 'Escape' || e.code === 'KeyP') {
         e.preventDefault();
+        if (e.code === 'Escape' && (freeLook360 || document.pointerLockElement)) {
+          setFreeLook360(false);
+          if (document.pointerLockElement && typeof document.exitPointerLock === 'function') {
+            document.exitPointerLock();
+          }
+          return;
+        }
         if (showOnboardingTour) {
           localStorage.setItem('werewolf_3d_tour_done', '1');
           setShowOnboardingTour(false);
@@ -2422,13 +2615,23 @@ export default function App() {
         setShowMyRoleModal((s) => !s);
       } else if (e.code === 'KeyV' && shellState === 'playing') {
         handleToggleFirstPerson();
+      } else if (e.code === 'KeyB' && shellState === 'playing') {
+        handleToggleThirdPerson();
       } else if (
         e.code === 'KeyE' &&
         shellState === 'playing' &&
-        cameraPreset === 'first_person' &&
-        aimedPlayerId
+        isDirectLookCameraPreset(cameraPreset)
       ) {
-        handleSelect3DPlayer(aimedPlayerId);
+        if (aimedOwnSeat && isUserRoaming) {
+          e.preventDefault();
+          handleReturnToSeat();
+        } else if (aimedPlayerId) {
+          e.preventDefault();
+          handleSelect3DPlayer(aimedPlayerId);
+        } else if (aimedCampfire && phase === 'day_voting') {
+          e.preventDefault();
+          handleVoteCampfireAbstain();
+        }
       }
     };
 
@@ -2444,15 +2647,24 @@ export default function App() {
     isNotebookOpen,
     showProfileModal,
     showMyRoleModal,
+    freeLook360,
+    nightDeathCinematic,
+    handleDismissNightDeathCinematic,
     gmAnnouncement,
     handleDismissGMAnnouncement,
     villageSize,
     preferredRole,
     handleStartMatch,
     handleToggleFirstPerson,
+    handleToggleThirdPerson,
+    handleReturnToSeat,
     cameraPreset,
+    aimedOwnSeat,
+    isUserRoaming,
     aimedPlayerId,
+    aimedCampfire,
     handleSelect3DPlayer,
+    handleVoteCampfireAbstain,
   ]);
 
   // Subscribe to live WebSocket chat, props, and votes during Online matches
@@ -2480,28 +2692,20 @@ export default function App() {
     });
   }, [shellState, gameMode, roomId, me.id, handleThrowProp]);
 
-  // Send Chat Message (with Anti-Cheat Ghost Guard + Live WebSocket Broadcast)
+  // Send Chat Message (Strict Dead Ghost Chat Lockout + Live WebSocket Broadcast)
   const handleSendMessage = () => {
-    const text = chatInput.trim();
-    if (!text) return;
-    const msgId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    if (!me.isAlive && chatTab === 'main') {
-      setChatNotice(`🛡️ ${t.chatGhostTab}`);
-      setChatTab('ghost');
-      const ghostMsg: ChatMessage = {
-        id: msgId,
-        senderId: me.id,
-        senderName: me.name,
-        text,
-        timestamp: Date.now(),
-        isGhost: true,
-      };
-      setMessages((prev) => [...prev, ghostMsg]);
-      if (gameMode === 'online') realtimeClient.sendChat(roomId, ghostMsg);
+    if (!me.isAlive) {
+      setChatNotice(
+        lang === 'vi'
+          ? '🔒 Bạn đã thành Hồn Ma — Cấm chat & khóa Mic cho đến hết ván!'
+          : '🔒 You are a Ghost — Chat & Mic are locked until the match ends!'
+      );
       setChatInput('');
       return;
     }
-
+    const text = chatInput.trim();
+    if (!text) return;
+    const msgId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     setChatNotice('');
     const nextMsg: ChatMessage = {
       id: msgId,
@@ -2509,7 +2713,7 @@ export default function App() {
       senderName: me.name,
       text,
       timestamp: Date.now(),
-      isGhost: chatTab === 'ghost',
+      isGhost: false,
     };
     setMessages((prev) => [...prev, nextMsg]);
     if (gameMode === 'online') realtimeClient.sendChat(roomId, nextMsg);
@@ -2546,16 +2750,69 @@ export default function App() {
     phase === 'night' &&
     me.isAlive &&
     !isPlayerAwakeAtNight &&
-    !showOnboardingTour;
+    !showOnboardingTour &&
+    !nightDeathCinematic;
+
+  const isDirectLookCam = isDirectLookCameraPreset(cameraPreset);
+
+  const isUiOverlayOpen =
+    shellState !== 'playing' ||
+    showOnboardingTour ||
+    showAvatarLocker ||
+    isNotebookOpen ||
+    showProfileModal ||
+    showMyRoleModal ||
+    lobbyModalState.isOpen ||
+    activeDrawer !== 'none' ||
+    activeToolPopover !== 'none' ||
+    Boolean(gmAnnouncement);
+
+  const handleToggleFreeLook = () => {
+    if (freeLook360) {
+      setFreeLook360(false);
+      if (document.pointerLockElement && typeof document.exitPointerLock === 'function') {
+        document.exitPointerLock();
+      }
+      return;
+    }
+    if (isUiOverlayOpen || isNightBlindfolded || Boolean(nightDeathCinematic)) return;
+    setFreeLook360(true);
+    const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="village-3d-canvas"] canvas');
+    if (canvas && typeof canvas.requestPointerLock === 'function') {
+      try {
+        const p = canvas.requestPointerLock() as unknown as Promise<void> | undefined;
+        if (p && typeof p.catch === 'function') p.catch(() => {});
+      } catch {
+        // Fallback: hold-drag + viewport edge-pan remains seamlessly available
+      }
+    }
+  };
 
   const canUseVirtualDpad =
     shellState === 'playing' &&
     !isNightBlindfolded &&
-    ((phase === 'night' && isPlayerAwakeAtNight) ||
-      !me.isAlive ||
-      cameraPreset === 'first_person');
+    !nightDeathCinematic &&
+    ((phase === 'night' && isPlayerAwakeAtNight) || !me.isAlive || isDirectLookCam);
 
   const aimedPlayer = aimedPlayerId ? players.find((p) => p.id === aimedPlayerId) || null : null;
+
+  const fpvPrompt =
+    shellState === 'playing' && isDirectLookCam && !isNightBlindfolded && !nightDeathCinematic
+      ? getContextualInteractionPrompt({
+          phase,
+          me,
+          target: aimedPlayer
+            ? { id: aimedPlayer.id, name: aimedPlayer.name, isAlive: aimedPlayer.isAlive }
+            : null,
+          isCampfireTarget: aimedCampfire,
+          isOwnSeatTarget: aimedOwnSeat,
+          isUserRoaming,
+          activePropTool,
+          currentNightStep: currentNightStep?.roleId ?? null,
+          isPlayerAwakeAtNight,
+          lang,
+        })
+      : null;
 
   // =========================================================================
   // STANDALONE REAL-LIFE GM COMPANION SHELL (COMPLETELY ISOLATED FROM 3D/BOT GAME)
@@ -2709,6 +2966,7 @@ export default function App() {
         phase={phase}
         lang={lang}
         isTitleScreen={shellState === 'title'}
+        isUiOverlayOpen={isUiOverlayOpen}
         isPlayerAwakeAtNight={isPlayerAwakeAtNight || showOnboardingTour}
         freeLook360={freeLook360}
         moveVector={moveVector}
@@ -2716,7 +2974,10 @@ export default function App() {
         selectedTargetId={selectedTargetId}
         secondaryTargetId={phase === 'day_voting' ? null : secondWolfTargetId}
         cupidLovers={
-          me.roleId === 'cupid' || Boolean(me.loverId) || shellState === 'gameover'
+          me.roleId === 'cupid' ||
+          Boolean(me.loverId) ||
+          !me.isAlive ||
+          shellState === 'gameover'
             ? cupidLovers
             : null
         }
@@ -2724,113 +2985,148 @@ export default function App() {
         votersByTarget={votersByTargetLabels}
         votes={votes}
         activeSpeakers={activeSpeakers}
-        revealAllRoles={shellState === 'gameover'}
+        revealAllRoles={shellState === 'gameover' || !me.isAlive}
         cameraPreset={cameraPreset}
         activePropTool={activePropTool}
         fpvLookTurnRate={fpvLookTurnRate}
         mapBiome={avatarConfig.mapBiome}
         mayorId={mayorId}
         emoteEvents={emoteEvents}
+        deathCinematic={nightDeathCinematic}
+        returnToSeatTrigger={returnToSeatTrigger}
+        onPointerLockChange={setFreeLook360}
         onAimedPlayerChange={setAimedPlayerId}
+        onAimedCampfireChange={setAimedCampfire}
+        onAimedOwnSeatChange={setAimedOwnSeat}
+        onRoamingStateChange={setIsUserRoaming}
+        onReturnToSeat={handleReturnToSeat}
         onSelectPlayer={handleSelect3DPlayer}
         onVoteCampfireAbstain={handleVoteCampfireAbstain}
       />
 
-      {/* FIRST-PERSON VIEW (FPV) CENTER CROSSHAIR & INTERACTIVE VILLAGER TARGET PROMPT */}
-      {shellState === 'playing' && cameraPreset === 'first_person' && !isNightBlindfolded && (
-        <div
-          data-testid="fpv-crosshair-hud"
-          className="fixed inset-0 z-15 pointer-events-none flex flex-col items-center justify-center"
-        >
+      {/* DIRECT-LOOK (FIRST-PERSON & BEHIND-THE-BACK) CENTER CROSSHAIR & CONTEXTUAL INTERACTION PROMPT */}
+      {shellState === 'playing' &&
+        isDirectLookCam &&
+        !isNightBlindfolded &&
+        !nightDeathCinematic && (
           <div
-            className={`relative flex items-center justify-center transition-transform duration-150 ${
-              aimedPlayer ? 'scale-125' : 'scale-100 opacity-80'
-            }`}
+            data-testid="fpv-crosshair-hud"
+            className="fixed inset-0 z-15 pointer-events-none flex flex-col items-center justify-center"
           >
-            <Crosshair
-              className={`w-6 h-6 ${
-                aimedPlayer
-                  ? 'text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.9)]'
-                  : 'text-sky-300/75'
+            <div
+              className={`relative flex items-center justify-center transition-transform duration-150 ${
+                fpvPrompt?.canInteract ? 'scale-125' : 'scale-100 opacity-80'
               }`}
-            />
-            <span
-              className={`absolute w-1.5 h-1.5 rounded-full ${
-                aimedPlayer ? 'bg-rose-400' : 'bg-white/80'
-              }`}
-            />
-          </div>
-
-          {aimedPlayer && (
-            <button
-              type="button"
-              data-testid="fpv-interact-target-btn"
-              onClick={() => handleSelect3DPlayer(aimedPlayer.id)}
-              className="mt-3 pointer-events-auto px-3 py-1 rounded-full bg-[#090d18]/92 border border-amber-400 text-amber-200 text-[11px] font-extrabold shadow-xl flex items-center gap-1.5 hover:bg-amber-500 hover:text-slate-950 transition-colors cursor-pointer"
             >
-              <span>{aimedPlayer.avatar}</span>
-              <span>{t.fpvTargetPrompt(aimedPlayer.name)}</span>
-            </button>
-          )}
-        </div>
-      )}
+              <Crosshair
+                className={`w-6 h-6 ${
+                  fpvPrompt?.canInteract
+                    ? fpvPrompt.tone === 'vote'
+                      ? 'text-rose-400 drop-shadow-[0_0_8px_rgba(244,63,94,0.9)]'
+                      : fpvPrompt.tone === 'night'
+                      ? 'text-purple-400 drop-shadow-[0_0_8px_rgba(192,132,252,0.9)]'
+                      : fpvPrompt.tone === 'prop'
+                      ? 'text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.9)]'
+                      : 'text-amber-400 drop-shadow-[0_0_8px_rgba(251,191,36,0.9)]'
+                    : 'text-sky-200/75'
+                }`}
+              />
+              <span
+                className={`absolute w-1.5 h-1.5 rounded-full ${
+                  fpvPrompt?.canInteract ? 'bg-amber-300' : 'bg-white/80'
+                }`}
+              />
+            </div>
 
-      {/* ANTI-CHEAT NIGHT BLINDFOLD OVERLAY (WITH QUẢN TRÒ MÁY STEP PROGRESS & JUMP TO MY TURN) */}
+            {fpvPrompt && (
+              <button
+                type="button"
+                data-testid="fpv-interact-target-btn"
+                disabled={!fpvPrompt.canInteract}
+                onClick={() => {
+                  if (!fpvPrompt.canInteract) return;
+                  if (aimedOwnSeat && isUserRoaming) handleReturnToSeat();
+                  else if (aimedPlayer) handleSelect3DPlayer(aimedPlayer.id);
+                  else if (aimedCampfire && phase === 'day_voting') handleVoteCampfireAbstain();
+                }}
+                className={`mt-8 px-3.5 py-1.5 rounded-2xl border shadow-2xl flex flex-col items-center gap-0.5 transition-all max-w-[90vw] ${
+                  !fpvPrompt.canInteract
+                    ? 'pointer-events-none bg-[#090d18]/90 border-slate-600/80 text-slate-300 cursor-default'
+                    : fpvPrompt.tone === 'vote'
+                    ? 'pointer-events-auto bg-[#2a0c12]/95 border-rose-400 text-rose-100 hover:bg-rose-600 hover:text-white cursor-pointer'
+                    : fpvPrompt.tone === 'night'
+                    ? 'pointer-events-auto bg-[#1c102e]/95 border-purple-400 text-purple-100 hover:bg-purple-600 hover:text-white cursor-pointer'
+                    : fpvPrompt.tone === 'prop'
+                    ? 'pointer-events-auto bg-[#0c261b]/95 border-emerald-400 text-emerald-100 hover:bg-emerald-600 hover:text-white cursor-pointer'
+                    : 'pointer-events-auto bg-[#22150a]/95 border-amber-400 text-amber-100 hover:bg-amber-500 hover:text-slate-950 cursor-pointer'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 text-xs font-extrabold">
+                  <span>{fpvPrompt.icon}</span>
+                  <span>{fpvPrompt.actionLabel}</span>
+                </div>
+                <span className="text-[10px] font-mono opacity-90">{fpvPrompt.detail}</span>
+              </button>
+            )}
+          </div>
+        )}
+
+      {/* ANTI-CHEAT NIGHT BLINDFOLD OVERLAY — PITCH DARK EXCEPT THE GLOWING CAMPFIRE IN THE CENTER */}
       {isNightBlindfolded && (
         <div
-          className="fixed inset-0 z-10 pointer-events-none flex flex-col items-center justify-center p-4 transition-opacity duration-500"
+          data-testid="night-blindfold-overlay"
+          className="fixed inset-0 z-10 pointer-events-none flex flex-col items-center justify-end pb-4 sm:pb-6 px-3 transition-opacity duration-500"
           style={{
             background:
-              'radial-gradient(circle at center, rgba(4,7,17,0.78) 0%, rgba(2,4,10,0.96) 75%)',
+              'radial-gradient(circle at 50% 48%, rgba(0,0,0,0) 0%, rgba(1,2,6,0.22) 34%, rgba(1,1,4,0.82) 78%, rgba(0,0,2,0.95) 100%)',
           }}
         >
-          <div className="max-w-md w-full agrou-wood-panel !border-[#7a5d42] rounded-3xl p-5 text-center shadow-2xl space-y-2.5 pointer-events-auto">
-            <div className="w-11 h-11 rounded-2xl bg-[#1b1420] border border-[#8e6bb5]/60 mx-auto flex items-center justify-center text-[#d2b3ff]">
-              <EyeOff className="w-5 h-5" />
-            </div>
-            <span className="text-[10px] font-mono uppercase tracking-widest text-[#f2be6b] font-bold block">
-              🤖 {lang === 'vi' ? 'QUẢN TRÒ MÁY ĐIỀU HÀNH ĐÊM' : 'AUTO-GM NIGHT SEQUENCE'} · {t.antiCheatNightBadge}
-            </span>
-            <h4 className="text-base font-black text-slate-100">
-              {t.sleepingTitle(myRole.name[lang])}
-            </h4>
-
-            {/* Clear Role Wake Guidance Banner */}
-            <div
-              data-testid="blindfold-wake-guidance"
-              className={`rounded-2xl p-2.5 border text-left space-y-1 ${
-                myWakeGuidance.wakesTonight
-                  ? 'bg-amber-950/50 border-amber-500/50 text-amber-100'
-                  : 'bg-slate-900/80 border-slate-700 text-slate-300'
-              }`}
-            >
-              <div className="text-[11px] font-extrabold text-amber-300">
-                {myWakeGuidance.headline}
+          {/* Compact bottom bar so the glowing campfire embers remain starkly visible in the dark center! */}
+          <div className="max-w-2xl w-full agrou-wood-panel !bg-[#120c08]/92 !border-[#6e4e31] rounded-2xl p-3 sm:p-3.5 shadow-2xl space-y-2 pointer-events-auto">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-[#1b1420] border border-[#8e6bb5]/60 flex items-center justify-center text-[#d2b3ff] shrink-0">
+                  <EyeOff className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs sm:text-sm font-black text-[#fce8c3] truncate">
+                    {t.sleepingTitle(myRole.name[lang])}
+                  </div>
+                  <div
+                    data-testid="blindfold-wake-guidance"
+                    className="text-[10px] sm:text-[11px] text-[#d6be9c] truncate"
+                  >
+                    {myWakeGuidance.headline} ·{' '}
+                    {lang === 'vi'
+                      ? 'Màn đêm bao trùm, chỉ còn ánh lửa trại le lói...'
+                      : 'Darkness falls, leaving only the campfire embers glowing...'}
+                  </div>
+                </div>
               </div>
-              <p className="text-[10px] text-slate-300 leading-relaxed">
-                {myWakeGuidance.subtext}
-              </p>
-            </div>
 
-            {currentNightStep && (
-              <div className="bg-indigo-950/60 border border-indigo-500/40 rounded-2xl p-2.5 space-y-1.5">
-                <div className="text-xs font-extrabold text-amber-300">
+              {currentNightStep && (
+                <span className="px-2 py-0.5 rounded-lg bg-indigo-950/85 border border-indigo-500/50 text-[10px] font-extrabold text-amber-300 whitespace-nowrap">
                   {lang === 'vi'
                     ? `Đang gọi (${currentNightStep.stepIndex + 1}/${currentNightStep.totalSteps}): ${ROLES[currentNightStep.roleId].name.vi}`
                     : `Calling (${currentNightStep.stepIndex + 1}/${currentNightStep.totalSteps}): ${ROLES[currentNightStep.roleId].name[lang]}`}
-                </div>
-                <p className="text-[11px] text-indigo-200 italic">
-                  {currentNightStep.gmNarration[lang]}
+                </span>
+              )}
+            </div>
+
+            {currentNightStep && (
+              <div className="flex flex-wrap items-center justify-between gap-1.5 bg-[#0a0812]/80 border border-indigo-500/30 rounded-xl px-2.5 py-1.5">
+                <p className="text-[10px] sm:text-[11px] text-indigo-200 italic truncate max-w-full">
+                  “{currentNightStep.gmNarration[lang]}”
                 </p>
-                <div className="flex flex-wrap items-center justify-center gap-1 pt-1">
+                <div className="flex flex-wrap items-center gap-1">
                   {nightSchedule.map((st, idx) => (
                     <span
                       key={st.key}
-                      className={`px-2 py-0.5 rounded-md text-[9px] font-bold border ${
+                      className={`px-1.5 py-0.5 rounded text-[9px] font-bold border ${
                         idx === nightStepIndex
                           ? 'bg-amber-500 text-slate-950 border-amber-300'
                           : st.isHumanTurn
-                          ? 'bg-rose-950/90 text-rose-200 border-rose-400 animate-pulse'
+                          ? 'bg-rose-950/90 text-rose-200 border-rose-400'
                           : idx < nightStepIndex
                           ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700/50'
                           : 'bg-slate-900 text-slate-400 border-slate-800'
@@ -2844,18 +3140,18 @@ export default function App() {
               </div>
             )}
 
-            <div className="pt-1.5 flex flex-wrap items-center justify-center gap-2">
+            <div className="flex flex-wrap items-center justify-center sm:justify-end gap-1.5">
               {myNightStepIdx !== -1 && myNightStepIdx !== nightStepIndex && (
                 <button
                   type="button"
                   data-testid="blindfold-jump-my-turn-btn"
                   onClick={handleJumpToMyNightTurn}
-                  className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer ring-2 ring-rose-400/50"
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
                 >
                   <FastForward className="w-3.5 h-3.5 fill-white" />
                   <span>
                     {lang === 'vi'
-                      ? `⚡ Tua Tới Lượt Của Tôi (${myRole.name.vi})`
+                      ? `⚡ Tua Tới Lượt Tôi (${myRole.name.vi})`
                       : `⚡ Jump to My Turn (${myRole.name[lang]})`}
                   </span>
                 </button>
@@ -2865,13 +3161,11 @@ export default function App() {
                   type="button"
                   data-testid="blindfold-switch-active-role-btn"
                   onClick={handleSwitchToActiveNightRole}
-                  className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
+                  className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
                 >
                   <span>🔮</span>
                   <span>
-                    {lang === 'vi'
-                      ? 'Đổi Sang Vai Có Kỹ Năng Đêm'
-                      : 'Switch to Active Night Role'}
+                    {lang === 'vi' ? 'Đổi Vai Có Kỹ Năng Đêm' : 'Switch to Night Role'}
                   </span>
                 </button>
               )}
@@ -2879,17 +3173,18 @@ export default function App() {
                 type="button"
                 data-testid="blindfold-next-step-btn"
                 onClick={handleAdvanceNightStep}
-                className="px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
               >
                 <Play className="w-3.5 h-3.5 fill-white" />
                 <span>
-                  {lang === 'vi' ? 'Qua bước tiếp' : 'Next Role Step'} ({Math.round(timerSeconds)}s)
+                  {lang === 'vi' ? 'Bước tiếp' : 'Next Step'} ({Math.round(timerSeconds)}s)
                 </span>
               </button>
               <button
                 type="button"
+                data-testid="blindfold-skip-night-btn"
                 onClick={handleAdvancePhaseFast}
-                className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 shadow-lg cursor-pointer"
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
               >
                 <FastForward className="w-3.5 h-3.5 fill-slate-950" />
                 <span>{t.skipNightLongBtn}</span>
@@ -2930,7 +3225,6 @@ export default function App() {
                 roleId: previewRoles[0],
                 isAlive: true,
                 isHost: true,
-                isMayor: true,
                 hat: avatarConfig.hat,
                 cloakColor: avatarConfig.cloakColor,
               },
@@ -2992,7 +3286,8 @@ export default function App() {
             mayorName={players.find((p) => p.id === mayorId && p.isAlive)?.name || null}
             cameraPreset={cameraPreset}
             freeLook360={freeLook360}
-            isMicOn={isMicOn}
+            isMicOn={isMicOn && me.isAlive}
+            isDead={!me.isAlive}
             isMuted={isMuted}
             onAdjustTimer={(delta) =>
               setTimerSeconds((s) => Math.max(3, Math.min(600, s + delta)))
@@ -3003,12 +3298,13 @@ export default function App() {
               setShowMyRoleModal(true);
             }}
             onToggleFirstPerson={handleToggleFirstPerson}
-            onToggleFreeLook={() => setFreeLook360(!freeLook360)}
+            onToggleThirdPerson={handleToggleThirdPerson}
+            onToggleFreeLook={handleToggleFreeLook}
             onCycleCameraPreset={() =>
               setCameraPreset((prev) => getNextCameraPreset(prev))
             }
             onOpenOnboardingTour={() => setShowOnboardingTour(true)}
-            onToggleMic={() => setIsMicOn(!isMicOn)}
+            onToggleMic={handleToggleMicSafe}
             onToggleMute={() => {
               const m = sound.toggleMute();
               setIsMuted(m);
@@ -3017,8 +3313,11 @@ export default function App() {
           />
 
           {/* TOP-CENTER SINGLE-FOCUS ACTION CONSOLE (Never stacks 4 bars over villagers!) */}
-          <div className="mx-auto mb-auto mt-1 max-w-lg w-full flex flex-col items-center gap-1">
-            {phase === 'night' && currentNightStep && (
+          <div
+            data-tour-id="action-console"
+            className="mx-auto mb-auto mt-1 max-w-lg w-full flex flex-col items-center gap-1"
+          >
+            {phase === 'night' && currentNightStep && !nightDeathCinematic && (
               <NightActionConsole
                 lang={lang}
                 me={me}
@@ -3044,7 +3343,7 @@ export default function App() {
               />
             )}
 
-            {phase !== 'night' && !showOnboardingTour && (
+            {phase !== 'night' && !nightDeathCinematic && (
               <DayActionBar
                 lang={lang}
                 phase={phase}
@@ -3071,25 +3370,73 @@ export default function App() {
               />
             )}
 
-            {/* Ghost Soul Free-Flight Banner when User is Dead */}
-            {!me.isAlive && (
-              <div className="pointer-events-auto px-2.5 py-0.5 rounded-full bg-cyan-950/95 border border-cyan-400/60 text-[10px] font-bold text-cyan-200 flex items-center gap-1 shadow-lg max-w-[92vw]">
+            {/* Ghost Soul Free-Flight Banner when User is Dead (merged into direct-look banner when in FPV/TPV) */}
+            {!me.isAlive && !isDirectLookCam && !nightDeathCinematic && (
+              <div
+                data-testid="ghost-locked-banner"
+                className="pointer-events-auto px-2.5 py-0.5 rounded-full bg-cyan-950/95 border border-cyan-400/60 text-[10px] font-bold text-cyan-200 flex items-center gap-1.5 shadow-lg max-w-[94vw]"
+              >
                 <Ghost className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                <span className="truncate">{t.ghostBannerText}</span>
+                <span className="truncate">
+                  {lang === 'vi'
+                    ? '👻 Chế độ Hồn Ma · Bay tự do WASD · Space Lên / Ctrl Xuống · Giữ chuột kéo xoay 360° · 🔒 Chat & Mic đã khóa'
+                    : '👻 Ghost Mode · Free Flight WASD · Space Up / Ctrl Down · Drag to Look 360° · 🔒 Chat & Mic Locked'}
+                </span>
               </div>
             )}
 
-            {/* First-Person Mode Active Status Pill */}
-            {cameraPreset === 'first_person' && !isNightBlindfolded && (
+            {/* Direct-Look (First-Person or Behind-the-Back) Active Status Pill */}
+            {isDirectLookCam && !isNightBlindfolded && !nightDeathCinematic && (
               <div
                 data-testid="fpv-active-banner"
-                className="pointer-events-auto px-2.5 py-0.5 rounded-full bg-emerald-950/95 border border-emerald-400/60 text-[10px] font-bold text-emerald-200 flex items-center gap-1.5 shadow-lg max-w-[94vw] whitespace-nowrap"
+                className={`pointer-events-auto px-2.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1.5 shadow-lg max-w-[94vw] whitespace-nowrap border ${
+                  !me.isAlive
+                    ? 'bg-cyan-950/95 border-cyan-400/60 text-cyan-200'
+                    : 'bg-emerald-950/95 border-emerald-400/60 text-emerald-200'
+                }`}
               >
-                <View className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="truncate">{t.firstPersonBanner}</span>
+                {!me.isAlive ? (
+                  <Ghost className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                ) : (
+                  <View className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                )}
+                <span className="truncate">
+                  {!me.isAlive
+                    ? lang === 'vi'
+                      ? `👻 Hồn Ma (${cameraPreset === 'third_person' ? 'Sau lưng [B]' : 'Góc 1 [V]'}) · Bay tự do WASD · Space Lên / Ctrl Xuống · Giữ chuột kéo xoay 360°`
+                      : `👻 Ghost (${cameraPreset === 'third_person' ? 'Behind [B]' : 'FPV [V]'}) · Free Flight WASD · Space Up / Ctrl Down · Drag to Look 360°`
+                    : cameraPreset === 'third_person'
+                    ? lang === 'vi'
+                      ? 'Góc nhìn sau lưng [B] · Giữ chuột kéo để xoay 360° (bấm 360° khóa chuột) · WASD Đi · Space Nhảy · E/Click Tương tác'
+                      : 'Behind View [B] · Hold-Drag to Look 360° (360° Locks Cursor) · WASD Move · Space Jump · E/Click Interact'
+                    : lang === 'vi'
+                    ? 'Góc nhìn 1 [V] · Giữ chuột kéo để xoay 360° (bấm 360° khóa chuột) · WASD Đi · Space Nhảy · E/Click Tương tác'
+                    : 'FPV [V] · Hold-Drag to Look 360° (360° Locks Cursor) · WASD Move · Space Jump · E/Click Interact'}
+                </span>
               </div>
             )}
           </div>
+
+          {/* CLICKABLE RETURN-TO-SEAT BUTTON (Shown whenever the player stands up & walks around) */}
+          {shellState === 'playing' &&
+            isUserRoaming &&
+            me.isAlive &&
+            !isNightBlindfolded &&
+            !nightDeathCinematic && (
+              <div className="mx-auto mb-2 pointer-events-auto flex justify-center">
+                <button
+                  type="button"
+                  data-testid="return-to-seat-btn"
+                  onClick={handleReturnToSeat}
+                  className="px-4 py-2 rounded-2xl bg-[#382313]/95 hover:bg-[#e86f24] border-2 border-[#f5b82e] text-[#fff6e5] font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow-2xl transition-all active:scale-95 cursor-pointer"
+                >
+                  <span>🪑</span>
+                  <span>
+                    {lang === 'vi' ? 'Ngồi lại vào ghế của bạn [X]' : 'Sit Back on Your Stool [X]'}
+                  </span>
+                </button>
+              </div>
+            )}
 
           {/* MOBILE & OPEN-WORLD VIRTUAL D-PAD (Warm Agrou Wood, Zero backdrop-blur) */}
           {canUseVirtualDpad && (
@@ -3098,14 +3445,18 @@ export default function App() {
               className="fixed bottom-24 right-2 sm:right-auto sm:bottom-28 sm:left-3 z-30 pointer-events-auto flex flex-col items-center gap-0.5 agrou-wood-panel p-1 sm:p-1.5 rounded-xl shadow-lg"
             >
               <span className="text-[7px] sm:text-[8px] font-mono uppercase text-[#f2be6b] font-bold">
-                {cameraPreset === 'first_person' && me.isAlive
-                  ? t.dpadWalkFpv
+                {isDirectLookCam && me.isAlive
+                  ? cameraPreset === 'third_person'
+                    ? lang === 'vi'
+                      ? 'Đi Bộ Sau Lưng'
+                      : 'Behind Walk'
+                    : t.dpadWalkFpv
                   : me.isAlive
                   ? t.dpadWalkNight
                   : t.dpadFlyGhost}
               </span>
               <div className="flex items-center gap-0.5">
-                {cameraPreset === 'first_person' && (
+                {isDirectLookCam && (
                   <button
                     type="button"
                     data-testid="fpv-turn-left-btn"
@@ -3129,7 +3480,7 @@ export default function App() {
                 >
                   <ArrowUp className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                 </button>
-                {cameraPreset === 'first_person' && (
+                {isDirectLookCam && (
                   <button
                     type="button"
                     data-testid="fpv-turn-right-btn"
@@ -3178,14 +3529,84 @@ export default function App() {
                   <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                 </button>
               </div>
+              {isUserRoaming && me.isAlive && (
+                <button
+                  type="button"
+                  data-testid="dpad-return-seat-btn"
+                  onClick={handleReturnToSeat}
+                  className="mt-0.5 w-full px-1.5 py-0.5 rounded-md bg-[#4a2d17] hover:bg-[#e86f24] border border-[#f5b82e]/70 text-[9px] font-extrabold text-[#fff4e0] cursor-pointer"
+                >
+                  🪑 {lang === 'vi' ? 'Về ghế' : 'Sit'}
+                </button>
+              )}
             </div>
           )}
 
-          {/* UNIFIED COLLAPSIBLE BOTTOM CONTROL DOCK */}
-          <div
-            data-tour-id="bottom-dock"
-            className="mx-auto w-full max-w-[1060px] pointer-events-auto flex flex-col items-center"
-          >
+          {/* UNIFIED COLLAPSIBLE BOTTOM CONTROL DOCK (Hidden while Night Blindfolded or Night Death Cinematic active) */}
+          {!isNightBlindfolded && !nightDeathCinematic && (
+          <div className="mx-auto w-full max-w-[1060px] pointer-events-auto flex flex-col items-center">
+            {/* Subtle Desktop Movement Controls Legend */}
+            {!isDirectLookCam && !showOnboardingTour && (
+              <div
+                data-testid="movement-controls-legend"
+                className="hidden md:flex items-center gap-2 mb-1 px-2.5 py-0.5 rounded-full bg-[#19110b]/88 border border-[#5e4128]/70 text-[10px] text-[#e4cda9] font-semibold shadow"
+              >
+                {me.isAlive ? (
+                  <>
+                    <span>
+                      <strong className="text-[#f5b82e]">WASD</strong>{' '}
+                      {lang === 'vi' ? 'Đứng dậy & Đi' : 'Stand & Walk'}
+                    </span>
+                    <span className="opacity-40">·</span>
+                    <span>
+                      <strong className="text-[#f5b82e]">
+                        {lang === 'vi' ? 'Kéo chuột' : 'Drag'}
+                      </strong>{' '}
+                      {lang === 'vi' ? 'Xoay 360°' : 'Look 360°'}
+                    </span>
+                    <span className="opacity-40">·</span>
+                    <span>
+                      <strong className="text-[#f5b82e]">Shift</strong>{' '}
+                      {lang === 'vi' ? 'Chạy nhanh' : 'Sprint'}
+                    </span>
+                    <span className="opacity-40">·</span>
+                    <span>
+                      <strong className="text-[#f5b82e]">Space</strong>{' '}
+                      {lang === 'vi' ? 'Nhảy' : 'Jump'}
+                    </span>
+                    <span className="opacity-40">·</span>
+                    <span>
+                      <strong className="text-[#f5b82e]">X</strong>{' '}
+                      {lang === 'vi' ? 'Về ghế' : 'Sit'}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span>
+                      <strong className="text-cyan-300">WASD</strong>{' '}
+                      {lang === 'vi' ? 'Bay tự do' : 'Free Flight'}
+                    </span>
+                    <span className="opacity-40">·</span>
+                    <span>
+                      <strong className="text-cyan-300">Space / Ctrl</strong>{' '}
+                      {lang === 'vi' ? 'Bay lên / Hạ xuống' : 'Ascend / Descend'}
+                    </span>
+                    <span className="opacity-40">·</span>
+                    <span>
+                      <strong className="text-cyan-300">
+                        {lang === 'vi' ? 'Kéo chuột' : 'Drag'}
+                      </strong>{' '}
+                      {lang === 'vi' ? 'Xoay 360°' : 'Look 360°'}
+                    </span>
+                    <span className="opacity-40">·</span>
+                    <span>
+                      <strong className="text-cyan-300">X</strong>{' '}
+                      {lang === 'vi' ? 'Về bia mộ' : 'Home Grave'}
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
             <button
               type="button"
               onClick={() => setIsDockCollapsed(!isDockCollapsed)}
@@ -3208,18 +3629,14 @@ export default function App() {
 
             {(!isDockCollapsed || showOnboardingTour) && (
               <div className="w-full space-y-1.5">
-                {/* Agrou 3D Campfire Emote Wheel, Fun Props & Quick Tag Popover */}
+                {/* Agrou 3D Campfire Emote Wheel & Fun Props Popover */}
                 {activeToolPopover === 'props' && (
                   <AgrouEmoteWheel
                     lang={lang}
                     isDayPhase={phase !== 'night'}
                     activePropTool={activePropTool}
-                    tagToolMode={tagToolMode}
                     onTriggerEmote={(emote) => handleTriggerEmote(emote, me.id)}
                     onSelectPropTool={setActivePropTool}
-                    onToggleTagMode={(mode) =>
-                      setTagToolMode((m) => (m === mode ? 'none' : mode))
-                    }
                   />
                 )}
 
@@ -3231,10 +3648,11 @@ export default function App() {
                       userPlayerId={me.id}
                       phase={phase}
                       isPlayerAwakeAtNight={isPlayerAwakeAtNight}
-                      isMicOn={isMicOn}
-                      onToggleMic={() => setIsMicOn((m) => !m)}
+                      isMicOn={isMicOn && me.isAlive}
+                      onToggleMic={handleToggleMicSafe}
                       activeSpeakers={activeSpeakers}
                       onTriggerUserSpeech={(transcript) => {
+                        if (!me.isAlive) return;
                         setActiveSpeakers((prev) =>
                           prev.includes(me.name) ? prev : [me.name, ...prev]
                         );
@@ -3247,7 +3665,7 @@ export default function App() {
                             senderRole: me.roleId,
                             text: transcript,
                             timestamp: Date.now(),
-                            isGhost: !me.isAlive,
+                            isGhost: false,
                           },
                         ]);
                       }}
@@ -3257,7 +3675,10 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="w-full agrou-wood-panel rounded-xl sm:rounded-2xl p-1.5 sm:p-2.5 space-y-1 sm:space-y-1.5">
+                <div
+                  data-tour-id="bottom-dock"
+                  className="w-full agrou-wood-panel rounded-xl sm:rounded-2xl p-1.5 sm:p-2.5 space-y-1 sm:space-y-1.5"
+                >
                 {/* Contextual Role Power & Action Strip */}
                 <div className="flex items-center justify-between gap-1 border-b border-[#5e422b]/80 pb-1">
                   <div className="flex flex-wrap items-center gap-1 text-xs min-w-0">
@@ -3319,7 +3740,7 @@ export default function App() {
                           setActiveToolPopover((p) => (p === 'props' ? 'none' : 'props'))
                         }
                         className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
-                          activeToolPopover === 'props' || activePropTool || tagToolMode !== 'none'
+                          activeToolPopover === 'props' || activePropTool
                             ? 'bg-[#e86f24] border-[#ffc389] text-white'
                             : 'bg-[#362417] border-[#69482e] text-[#f3ca82] hover:bg-[#493120]'
                         }`}
@@ -3338,13 +3759,17 @@ export default function App() {
                         setActiveToolPopover((p) => (p === 'voice' ? 'none' : 'voice'))
                       }
                       className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
-                        activeToolPopover === 'voice' || isMicOn
+                        !me.isAlive
+                          ? 'bg-[#2a1518] border-rose-500/50 text-rose-300'
+                          : activeToolPopover === 'voice' || isMicOn
                           ? 'bg-emerald-700 border-emerald-400 text-white'
                           : 'bg-[#302016] border-[#61422a] text-emerald-300 hover:bg-[#422c1e]'
                       }`}
                     >
-                      <Mic className="w-3 h-3" />
-                      <span className="hidden sm:inline">Voice</span>
+                      {!me.isAlive ? <Lock className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
+                      <span className="hidden sm:inline">
+                        {!me.isAlive ? (lang === 'vi' ? 'Mic Khóa' : 'Mic Locked') : 'Voice'}
+                      </span>
                     </button>
 
                     <button
@@ -3457,7 +3882,6 @@ export default function App() {
                     const suspectTag = suspectTags[p.id];
                     const isVoteLockedOut =
                       isDayVoting &&
-                      tagToolMode === 'none' &&
                       !activePropTool &&
                       (!me.isAlive ||
                         !p.isAlive ||
@@ -3481,13 +3905,7 @@ export default function App() {
                         aria-pressed={isSelected}
                         disabled={isVoteLockedOut}
                         title={seatTooltip}
-                        onClick={() => {
-                          if (tagToolMode !== 'none') {
-                            handleTogglePlayerSuspectTag(p.id, tagToolMode);
-                          } else {
-                            handleSelect3DPlayer(p.id);
-                          }
-                        }}
+                        onClick={() => handleSelect3DPlayer(p.id)}
                         onContextMenu={(e) => {
                           e.preventDefault();
                           handleTogglePlayerSuspectTag(p.id);
@@ -3561,7 +3979,11 @@ export default function App() {
                             )}
                           </div>
                           <div className="hidden sm:block text-[9px] font-mono text-[#d4bea1] leading-tight max-w-[165px] truncate">
-                            {!p.isAlive
+                            {!me.isAlive
+                              ? `${!p.isAlive ? '👻 ' : ''}${ROLES[p.roleId].name[lang]}${
+                                  vCount > 0 ? ` · ${vCount} ${t.votesUnit}` : ''
+                                }`
+                              : !p.isAlive
                               ? t.ghostStatus
                               : vCount > 0
                               ? `${vCount} ${t.votesUnit} · ${voterLabels.join(', ')}`
@@ -3594,6 +4016,7 @@ export default function App() {
               </div>
             )}
           </div>
+          )}
         </div>
       )}
 
@@ -3646,10 +4069,11 @@ export default function App() {
                   userPlayerId={me.id}
                   phase={phase}
                   isPlayerAwakeAtNight={isPlayerAwakeAtNight}
-                  isMicOn={isMicOn}
-                  onToggleMic={() => setIsMicOn((m) => !m)}
+                  isMicOn={isMicOn && me.isAlive}
+                  onToggleMic={handleToggleMicSafe}
                   activeSpeakers={activeSpeakers}
                   onTriggerUserSpeech={(transcript) => {
+                    if (!me.isAlive) return;
                     setActiveSpeakers((prev) =>
                       prev.includes(me.name) ? prev : [me.name, ...prev]
                     );
@@ -3662,7 +4086,7 @@ export default function App() {
                         senderRole: me.roleId,
                         text: transcript,
                         timestamp: Date.now(),
-                        isGhost: !me.isAlive,
+                        isGhost: false,
                       },
                     ]);
                   }}
@@ -3729,22 +4153,56 @@ export default function App() {
                   <div ref={chatBottomRef} />
                 </div>
 
+                {!me.isAlive ? (
+                  <div
+                    data-testid="dead-chat-locked-banner"
+                    className="mt-3 rounded-xl bg-rose-950/75 border border-rose-500/60 px-3 py-2.5 flex items-center justify-between gap-2 text-xs text-rose-200 font-bold"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>
+                        {lang === 'vi'
+                          ? '👻 Bạn đã chết thành Hồn Ma — Khung chat và Micro đã bị khóa cho đến hết ván!'
+                          : '👻 You are dead (Ghost) — Chat and Microphone are locked until the match ends!'}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="pt-3 flex gap-2">
                   <input
                     type="text"
+                    data-testid="chat-message-input"
+                    disabled={!me.isAlive}
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                    placeholder={t.chatPlaceholder}
-                    className="flex-1 bg-[#070a14] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                    placeholder={
+                      !me.isAlive
+                        ? lang === 'vi'
+                          ? '🔒 Hồn Ma không thể chat...'
+                          : '🔒 Ghosts cannot chat...'
+                        : t.chatPlaceholder
+                    }
+                    className={`flex-1 bg-[#070a14] border rounded-xl px-3 py-2 text-xs focus:outline-none ${
+                      !me.isAlive
+                        ? 'border-rose-900/60 text-slate-500 cursor-not-allowed opacity-65'
+                        : 'border-slate-700 text-slate-100 focus:border-amber-500'
+                    }`}
                   />
                   <button
                     type="button"
+                    data-testid="chat-send-btn"
+                    disabled={!me.isAlive}
                     onClick={handleSendMessage}
-                    className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                    className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1 ${
+                      !me.isAlive
+                        ? 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
+                        : 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
+                    }`}
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>{t.sendBtn}</span>
+                    {!me.isAlive ? <Lock className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
+                    <span>{!me.isAlive ? (lang === 'vi' ? 'Đã khóa' : 'Locked') : t.sendBtn}</span>
                   </button>
                 </div>
               </div>
@@ -3855,6 +4313,18 @@ export default function App() {
                 >
                   <View className="w-3.5 h-3.5" />
                   <span>{t.firstPersonShort}</span>
+                </button>
+                <button
+                  type="button"
+                  data-testid="pause-toggle-tpv-btn"
+                  onClick={handleToggleThirdPerson}
+                  className={`px-2.5 py-1.5 rounded-lg border text-xs font-extrabold flex items-center gap-1 cursor-pointer ${
+                    cameraPreset === 'third_person'
+                      ? 'bg-amber-600 border-amber-300 text-white'
+                      : 'bg-slate-900 border-slate-700 text-amber-300'
+                  }`}
+                >
+                  <span>{lang === 'vi' ? 'Sau lưng [B]' : 'Behind [B]'}</span>
                 </button>
                 <button
                   type="button"
@@ -4138,8 +4608,17 @@ export default function App() {
         />
       )}
 
+      {/* 9A. END-OF-NIGHT SHORT-FILM KILL / DEATH CINEMATIC OVERLAY (ZERO EARLY TRIGGER & ZERO LEAK) */}
+      {shellState === 'playing' && nightDeathCinematic && (
+        <NightDeathCinematicOverlay
+          cinematic={nightDeathCinematic}
+          lang={lang}
+          onContinue={handleDismissNightDeathCinematic}
+        />
+      )}
+
       {/* 9B. AUTHENTIC REAL-LIFE AI GAME MASTER DAWN / DUSK ANNOUNCEMENT OVERLAY */}
-      {shellState === 'playing' && gmAnnouncement && (
+      {shellState === 'playing' && gmAnnouncement && !nightDeathCinematic && (
         <GMAnnouncementModal
           announcement={gmAnnouncement}
           lang={lang}

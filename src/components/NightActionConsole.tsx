@@ -162,23 +162,28 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
         </span>
       </p>
 
-      {/* Witch Heal Control */}
+      {/* Witch Heal Control — STRICT ANTI-LEAK: Only reveal bitten target while Heal potion is still available */}
       {me.roleId === 'witch' && currentNightStep.key === 'witch' && (
         <div className="flex flex-wrap items-center justify-between gap-2 bg-[#1c3621] border border-[#5cb85c]/60 rounded-xl px-2.5 py-1.5">
           <span className="text-[11px] text-[#dcfce7] font-bold">
-            🐺{' '}
-            {lang === 'vi'
-              ? `Bị Sói cắn: ${
-                  players.find((p) => p.id === tonightWolfVictimId)?.name || 'Không rõ'
-                }`
-              : `Bitten: ${
-                  players.find((p) => p.id === tonightWolfVictimId)?.name || 'Unknown'
+            {me.hasUsedHeal || me.hasUsedPower
+              ? lang === 'vi'
+                ? '🧪 Bình Cứu đã dùng hết — Không thể thấy nạn nhân bị Sói cắn đêm nay'
+                : '🧪 Heal potion depleted — Tonight’s wolf victim is hidden'
+              : `🐺 ${
+                  lang === 'vi'
+                    ? `Bị Sói cắn: ${
+                        players.find((p) => p.id === tonightWolfVictimId)?.name || 'Không rõ'
+                      }`
+                    : `Bitten: ${
+                        players.find((p) => p.id === tonightWolfVictimId)?.name || 'Unknown'
+                      }`
                 }`}
           </span>
           <button
             type="button"
             data-testid="role-console-witch-heal-btn"
-            disabled={Boolean(me.hasUsedHeal) || !tonightWolfVictimId}
+            disabled={Boolean(me.hasUsedHeal) || Boolean(me.hasUsedPower) || !tonightWolfVictimId}
             onClick={onToggleWitchHeal}
             className={`px-2.5 py-1 rounded-lg text-[11px] font-extrabold border flex items-center gap-1 cursor-pointer ${
               witchSaveUsedTonight

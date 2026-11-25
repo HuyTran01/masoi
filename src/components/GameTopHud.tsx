@@ -6,10 +6,12 @@ import {
   Eye,
   FastForward,
   HelpCircle,
+  Lock,
   Mic,
   MicOff,
   Moon,
   Sun,
+  UserRound,
   Users,
   View,
   Volume2,
@@ -36,11 +38,13 @@ interface GameTopHudProps {
   cameraPreset: CameraViewPreset;
   freeLook360: boolean;
   isMicOn: boolean;
+  isDead?: boolean;
   isMuted: boolean;
   onAdjustTimer: (deltaSec: number) => void;
   onAdvancePhaseFast: () => void;
   onOpenRoleCard: () => void;
   onToggleFirstPerson: () => void;
+  onToggleThirdPerson: () => void;
   onToggleFreeLook: () => void;
   onCycleCameraPreset: () => void;
   onOpenOnboardingTour: () => void;
@@ -67,11 +71,13 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
   cameraPreset,
   freeLook360,
   isMicOn,
+  isDead = false,
   isMuted,
   onAdjustTimer,
   onAdvancePhaseFast,
   onOpenRoleCard,
   onToggleFirstPerson,
+  onToggleThirdPerson,
   onToggleFreeLook,
   onCycleCameraPreset,
   onOpenOnboardingTour,
@@ -80,7 +86,18 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
   onPause,
 }) => {
   const t = UI_TEXT[lang];
-  const cleanFpvShort = lang === 'vi' ? 'Góc nhìn 1' : 'FPV';
+  const cleanFpvShort = lang === 'vi' ? 'Góc 1' : 'FPV';
+  const tpvLabel =
+    lang === 'vi'
+      ? 'Sau lưng [B]'
+      : lang === 'fr'
+      ? 'Dos [B]'
+      : lang === 'es'
+      ? 'Espalda [B]'
+      : lang === 'ja'
+      ? '背面 [B]'
+      : 'Behind [B]';
+  const tpvShort = lang === 'vi' ? 'Sau lưng' : '3rd';
 
   return (
     <div className="flex items-center justify-between gap-1.5 sm:gap-2">
@@ -291,6 +308,28 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
 
         <button
           type="button"
+          data-testid="toggle-tpv-btn"
+          tabIndex={-1}
+          onClick={(e) => {
+            e.currentTarget.blur();
+            onToggleThirdPerson();
+          }}
+          className={`px-2 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center gap-1 cursor-pointer ${
+            cameraPreset === 'third_person'
+              ? 'bg-[#b45309] border-[#fde68a] text-white'
+              : 'bg-[#1c130c] border-[#6b4a2e] text-[#fcd34d] hover:bg-[#312115]'
+          }`}
+          title={tpvLabel}
+          aria-label={tpvLabel}
+        >
+          <UserRound className="w-3.5 h-3.5 shrink-0" />
+          <span className="hidden md:inline">{tpvLabel}</span>
+          <span className="hidden sm:inline md:hidden">{tpvShort}</span>
+        </button>
+
+        <button
+          type="button"
+          data-testid="toggle-freelook-btn"
           tabIndex={-1}
           onClick={(e) => {
             e.currentTarget.blur();
@@ -301,7 +340,11 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
               ? 'bg-[#2d68a8] border-[#93c5fd] text-white'
               : 'bg-[#1c130c] border-[#6b4a2e] text-[#93c5fd] hover:bg-[#312115]'
           }`}
-          title={t.freeLook360}
+          title={
+            lang === 'vi'
+              ? 'Khóa chuột xoay 360° không giới hạn (bấm Esc để mở khóa chuột)'
+              : 'Lock cursor for unlimited 360° look (press Esc to unlock)'
+          }
         >
           <Compass className="w-3.5 h-3.5" />
           <span className="hidden lg:inline">{t.freeLook360}</span>
@@ -339,20 +382,40 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
 
         <button
           type="button"
+          data-testid="hud-mic-toggle-btn"
           tabIndex={-1}
+          disabled={isDead}
           onClick={(e) => {
             e.currentTarget.blur();
+            if (isDead) return;
             onToggleMic();
           }}
-          className={`hidden sm:flex p-2 rounded-xl border cursor-pointer ${
-            isMicOn
-              ? 'bg-[#9e2b25] border-[#fca5a5] text-white'
-              : 'bg-[#1c130c] border-[#6b4a2e] text-[#d6bfa2] hover:bg-[#312115]'
+          className={`hidden sm:flex p-2 rounded-xl border ${
+            isDead
+              ? 'bg-[#1a1310] border-rose-900/60 text-rose-400/70 opacity-75 cursor-not-allowed'
+              : isMicOn
+              ? 'bg-[#9e2b25] border-[#fca5a5] text-white cursor-pointer'
+              : 'bg-[#1c130c] border-[#6b4a2e] text-[#d6bfa2] hover:bg-[#312115] cursor-pointer'
           }`}
-          title={t.toggleMic}
-          aria-label={t.toggleMic}
+          title={
+            isDead
+              ? lang === 'vi'
+                ? '👻 Đã chết (Hồn Ma) — Micro đã bị khóa'
+                : '👻 Dead (Ghost) — Microphone Locked'
+              : t.toggleMic
+          }
+          aria-label={isDead ? 'Mic locked while dead' : t.toggleMic}
         >
-          {isMicOn ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
+          {isDead ? (
+            <span className="relative flex items-center">
+              <MicOff className="w-4 h-4" />
+              <Lock className="w-2.5 h-2.5 -ml-1 -mt-2 text-rose-400" />
+            </span>
+          ) : isMicOn ? (
+            <Mic className="w-4 h-4" />
+          ) : (
+            <MicOff className="w-4 h-4" />
+          )}
         </button>
 
         <button

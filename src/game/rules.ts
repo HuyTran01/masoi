@@ -197,8 +197,31 @@ export function resolveNightActions(
   const logicExplanations: NightLogicStep[] = [];
   const victimCausesMap = new Map<string, string[]>();
   const victimLogicMap = new Map<string, string[]>();
+  const victimMetaMap = new Map<
+    string,
+    {
+      causeType: NightVictimDetail['causeType'];
+      killerId?: string | null;
+      killerName?: string | null;
+      killerRoleId?: RoleId | null;
+      linkedLoverId?: string | null;
+      linkedLoverName?: string | null;
+    }
+  >();
 
-  const addVictimReason = (id: string, shortCause: string, detailedReason: string) => {
+  const addVictimReason = (
+    id: string,
+    shortCause: string,
+    detailedReason: string,
+    meta?: {
+      causeType: NightVictimDetail['causeType'];
+      killerId?: string | null;
+      killerName?: string | null;
+      killerRoleId?: RoleId | null;
+      linkedLoverId?: string | null;
+      linkedLoverName?: string | null;
+    }
+  ) => {
     const prevCauses = victimCausesMap.get(id) || [];
     if (!prevCauses.includes(shortCause)) prevCauses.push(shortCause);
     victimCausesMap.set(id, prevCauses);
@@ -206,6 +229,10 @@ export function resolveNightActions(
     const prevReasons = victimLogicMap.get(id) || [];
     prevReasons.push(detailedReason);
     victimLogicMap.set(id, prevReasons);
+
+    if (meta && !victimMetaMap.has(id)) {
+      victimMetaMap.set(id, meta);
+    }
   };
 
   let elderAttacked = false;
@@ -358,6 +385,11 @@ export function resolveNightActions(
     }
   }
 
+  const alphaWolf =
+    updated.find((p) => p.isAlive && p.roleId === 'werewolf') ||
+    updated.find((p) => p.isAlive && p.roleId === 'wolf_pup') ||
+    null;
+
   for (const vId of victimsOfWolves) {
     killedPlayerIds.add(vId);
     const victimObj = updated.find((p) => p.id === vId);
@@ -366,7 +398,15 @@ export function resolveNightActions(
       const detailText = wasElderSecondBite
         ? `Già Làng ${victimObj.name} đã mất mạng đầu tiên từ trước, đêm qua tiếp tục bị Đàn Ma Sói cắn lần thứ 2 mà không có Bảo Vệ che chở hay Bình Cứu của Phù Thủy → Tử vong.`
         : `${victimObj.name} (${ROLES[victimObj.roleId].name.vi}) bị Đàn Ma Sói chọn cắn đêm qua. Không được Bảo Vệ che chở và Phù Thủy không dùng Bình Cứu → Tử vong vì vết cắn Ma Sói.`;
-      addVictimReason(vId, '🐺 Bị Ma Sói cắn', detailText);
+      const attacker =
+        updated.find((p) => p.isAlive && (p.roleId === 'werewolf' || p.roleId === 'wolf_pup') && p.id !== vId) ||
+        alphaWolf;
+      addVictimReason(vId, '🐺 Bị Ma Sói cắn', detailText, {
+        causeType: 'werewolf',
+        killerId: attacker?.id ?? null,
+        killerName: attacker?.name ?? null,
+        killerRoleId: attacker?.roleId ?? 'werewolf',
+      });
       logicExplanations.push({
         badge: '🐺 Ma Sói Cắn Chết',
         title: `${victimObj.name} tử vong do bị Ma Sói cắn`,
@@ -390,7 +430,12 @@ export function resolveNightActions(
       const poisonDetail = wasAlsoGuarded
         ? `${poisoned.name} (${ROLES[poisoned.roleId].name.vi}) bị Phù Thủy quăng Bình Độc. Dù người này có Khiên Bảo Vệ đêm qua, độc dược của Phù Thủy xuyên qua mọi lớp bảo vệ → Tử vong.`
         : `${poisoned.name} (${ROLES[poisoned.roleId].name.vi}) bị Phù Thủy chỉ định ném Bình Độc (xuyên qua khiên Bảo Vệ và xuyên qua 2 mạng Già Làng) → Tử vong ngay trong đêm.`;
-      addVictimReason(poisoned.id, '🧪 Trúng Bình Độc Phù Thủy', poisonDetail);
+      addVictimReason(poisoned.id, '🧪 Trúng Bình Độc Phù Thủy', poisonDetail, {
+        causeType: 'witch_poison',
+        killerId: witchPlayer?.id ?? null,
+        killerName: witchPlayer?.name ?? null,
+        killerRoleId: 'witch',
+      });
       logicExplanations.push({
         badge: '🧪 Phù Thủy Đầu Độc',
         title: `${poisoned.name} tử vong do trúng Bình Độc của Phù Thủy`,
@@ -484,7 +529,14 @@ export function resolveNightActions(
           toProcess.push(lover.id);
           summary.push(`💔 Tình nhân ${lover.name} không chịu nổi nỗi đau mất ${victim.name} nên đã quyên sinh!`);
           const loverReason = `${lover.name} (${ROLES[lover.roleId].name.vi}) không bị Sói cắn hay trúng độc trực tiếp, nhưng vì được Cupid ghép đôi Tình Nhân với ${victim.name} (đã tử vong đêm qua) nên phải quyên sinh chết theo luật dây chuyền.`;
-          addVictimReason(lover.id, `💔 Quyên sinh theo Tình Nhân (${victim.name})`, loverReason);
+          addVictimReason(lover.id, `💔 Quyên sinh theo Tình Nhân (${victim.name})`, loverReason, {
+            causeType: 'cupid_lover',
+            killerId: victim.id,
+            killerName: victim.name,
+            killerRoleId: 'cupid',
+            linkedLoverId: victim.id,
+            linkedLoverName: victim.name,
+          });
           logicExplanations.push({
             badge: '💔 Tình Nhân Quyên Sinh',
             title: `${lover.name} chết dây chuyền theo Tình Nhân ${victim.name}`,
@@ -512,12 +564,19 @@ export function resolveNightActions(
       if (!p) return null;
       const causes = victimCausesMap.get(id) || ['🐺 Tử vong trong đêm'];
       const reasons = victimLogicMap.get(id) || ['Thiệt mạng trong đêm qua.'];
+      const meta = victimMetaMap.get(id);
       return {
         playerId: p.id,
         name: p.name,
         roleId: p.roleId,
         causes,
         logicExplanation: reasons.join(' + '),
+        causeType: meta?.causeType ?? 'unknown',
+        killerId: meta?.killerId ?? null,
+        killerName: meta?.killerName ?? null,
+        killerRoleId: meta?.killerRoleId ?? null,
+        linkedLoverId: meta?.linkedLoverId ?? null,
+        linkedLoverName: meta?.linkedLoverName ?? null,
       };
     })
     .filter(Boolean) as NightVictimDetail[];

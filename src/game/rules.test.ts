@@ -31,6 +31,7 @@ import {
   buildDawnGMAnnouncement,
   buildDuskGMAnnouncement,
   buildPrivateHumanNightNotice,
+  determineEndOfNightCinematic,
   CustomTimerConfig,
   DEFAULT_TIMER_CONFIG,
 } from './autoGM.ts';
@@ -428,7 +429,7 @@ test('[Authentic AI GM Announcements] Dawn/Dusk briefings announce casualties cl
   assert.equal(singleDeathDawn.chatMessageText.includes('Bình Độc'), false, 'Must not leak poison cause');
   assert.equal(singleDeathDawn.chatMessageText.includes('Tiên Tri'), false, 'Must not leak Seer');
 
-  // Case 3: Multi-death + Bot Hunter dying shot at dawn
+  // Case 3: Multi-death + Bot Hunter dying shot at dawn MUST NOT leak Hunter role or shot cause!
   const afterMultiDeath: Player[] = beforePlayers.map((p) =>
     p.id === 'b3' || p.id === 'b5' ? { ...p, isAlive: false } : { ...p }
   );
@@ -448,7 +449,23 @@ test('[Authentic AI GM Announcements] Dawn/Dusk briefings announce casualties cl
     lang: 'vi',
   });
   assert.equal(multiDawn.victims.length, 2);
-  assert.ok(multiDawn.publicEvents.some((e) => e.includes('Thợ Săn') && e.includes('Tuấn Kiệt')));
+  assert.deepEqual(
+    multiDawn.victims.map((v) => v.name),
+    ['Minh Hoàng', 'Tuấn Kiệt'],
+    'Victims must be sorted neutrally by seat number'
+  );
+  assert.equal(multiDawn.publicEvents.length, 0, 'Dawn publicEvents must NOT leak Hunter revenge shot');
+  const fullDawnText = [
+    multiDawn.headline,
+    multiDawn.gmQuote,
+    multiDawn.spokenNarration,
+    multiDawn.chatMessageText,
+    multiDawn.dayBarSummary,
+    ...multiDawn.victims.map((v) => v.tag),
+  ].join(' ');
+  assert.equal(fullDawnText.includes('Thợ Săn'), false, 'Dawn announcement must NOT mention Thợ Săn');
+  assert.equal(fullDawnText.includes('bắn'), false, 'Dawn announcement must NOT mention shot/bắn');
+  assert.equal(fullDawnText.includes('kéo theo'), false, 'Dawn announcement must NOT mention kéo theo');
 
   // Case 4: Private human notices for Cupid Lover link & Ghost Soul death
   const afterLoverLinked: Player[] = beforePlayers.map((p) =>
@@ -683,6 +700,201 @@ test('[Day Voting Integrity] castSingleDayVote prevents multi-voting and buildVo
     entries[1].voters.map((v) => v.name),
     ['Minh Hoàng']
   );
+});
+
+test('[Zero-Leak Night Kill Short Film & Dawn Hunter] End-of-night cinematic activates ONLY on confirmed death & Dawn never leaks Hunter', () => {
+  const baseRoster: Player[] = [
+    { id: 'u_wolf', name: 'Sói Đầu Đàn', avatar: '🐺', roleId: 'werewolf', isAlive: true, isHost: true },
+    { id: 'b_guard', name: 'Đức Huy', avatar: '🛡️', roleId: 'bodyguard', isAlive: true, isBot: true },
+    { id: 'b_witch', name: 'Thảo My', avatar: '🧪', roleId: 'witch', isAlive: true, isBot: true },
+    { id: 'b_elder', name: 'Minh Hoàng', avatar: '👴', roleId: 'elder', isAlive: true, isBot: true, elderLives: 2 },
+    { id: 'b_cursed', name: 'Bảo Châu', avatar: '🌗', roleId: 'cursed', isAlive: true, isBot: true },
+    { id: 'b_vil', name: 'Tuấn Kiệt', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true },
+  ];
+
+  // 1. Wolf target SAVED by Bodyguard -> NO kill short film (must return null!)
+  const guarded = resolveNightActions(baseRoster, {
+    wolfTargetId: 'b_vil',
+    guardTargetId: 'b_vil',
+  });
+  const guardedCinematic = determineEndOfNightCinematic({
+    beforeHuman: baseRoster[0],
+    afterPlayers: guarded.updatedPlayers,
+    nightResult: guarded.result,
+    lang: 'vi',
+  });
+  assert.equal(guardedCinematic, null, 'Must NOT trigger kill film when target was saved by Bodyguard');
+
+  // 2. Wolf target HEALED by Witch -> NO kill short film
+  const healed = resolveNightActions(baseRoster, {
+    wolfTargetId: 'b_vil',
+    witchHealTargetId: 'b_vil',
+  });
+  const healedCinematic = determineEndOfNightCinematic({
+    beforeHuman: baseRoster[0],
+    afterPlayers: healed.updatedPlayers,
+    nightResult: healed.result,
+    lang: 'vi',
+  });
+  assert.equal(healedCinematic, null, 'Must NOT trigger kill film when target was healed by Witch');
+
+  // 3. Wolf bites Elder on 1st life -> Elder survives -> NO kill short film
+  const elderSurvive = resolveNightActions(baseRoster, {
+    wolfTargetId: 'b_elder',
+  });
+  const elderCinematic = determineEndOfNightCinematic({
+    beforeHuman: baseRoster[0],
+    afterPlayers: elderSurvive.updatedPlayers,
+    nightResult: elderSurvive.result,
+    lang: 'vi',
+  });
+  assert.equal(elderCinematic, null, 'Must NOT trigger kill film when Elder survives first bite');
+
+  // 4. Wolf bites Cursed -> Cursed converts instead of dying -> NO kill short film
+  const cursedConvert = resolveNightActions(baseRoster, {
+    wolfTargetId: 'b_cursed',
+  });
+  const cursedCinematic = determineEndOfNightCinematic({
+    beforeHuman: baseRoster[0],
+    afterPlayers: cursedConvert.updatedPlayers,
+    nightResult: cursedConvert.result,
+    lang: 'vi',
+  });
+  assert.equal(cursedCinematic, null, 'Must NOT trigger kill film when Cursed converts instead of dying');
+
+  // 5. Wolf target ACTUALLY DIES at end of night -> Wolf viewer gets wolf_kill short film
+  const confirmedKill = resolveNightActions(baseRoster, {
+    wolfTargetId: 'b_vil',
+  });
+  const wolfCinematic = determineEndOfNightCinematic({
+    beforeHuman: baseRoster[0],
+    afterPlayers: confirmedKill.updatedPlayers,
+    nightResult: confirmedKill.result,
+    lang: 'vi',
+  });
+  assert.ok(wolfCinematic !== null, 'Confirmed wolf kill must trigger end-of-night short film for wolf player');
+  assert.equal(wolfCinematic?.mode, 'wolf_kill');
+  assert.equal(wolfCinematic?.victimId, 'b_vil');
+  assert.equal(wolfCinematic?.revealKiller, true);
+
+  // 6. Living non-wolf Villager viewer when a bot dies -> MUST return null (zero leak of wolf kill!)
+  const villagerViewerCinematic = determineEndOfNightCinematic({
+    beforeHuman: baseRoster[1], // living Bodyguard
+    afterPlayers: confirmedKill.updatedPlayers,
+    nightResult: confirmedKill.result,
+    lang: 'vi',
+  });
+  assert.equal(villagerViewerCinematic, null, 'Living non-wolf players must NEVER see wolf kill short film');
+
+  // 7. Human player ACTUALLY DIES at night -> Now a Ghost (Chat/Mic locked), so reveal exact cause & killer!
+  // 7a. Human killed by Werewolf
+  const victimWolfCinematic = determineEndOfNightCinematic({
+    beforeHuman: baseRoster[5], // b_vil died to wolf
+    beforePlayers: baseRoster,
+    afterPlayers: confirmedKill.updatedPlayers,
+    nightResult: confirmedKill.result,
+    lang: 'vi',
+  });
+  assert.ok(victimWolfCinematic !== null);
+  assert.equal(victimWolfCinematic?.mode, 'victim_death');
+  assert.equal(victimWolfCinematic?.revealKiller, true);
+  assert.equal(victimWolfCinematic?.causeType, 'werewolf');
+  assert.equal(victimWolfCinematic?.killerId, 'u_wolf');
+  assert.equal(victimWolfCinematic?.killerName, 'Sói Đầu Đàn');
+  assert.ok(victimWolfCinematic?.reasonText.includes('Sói Đầu Đàn'));
+
+  // 7b. Human Werewolf goes hunting & gets poisoned by Witch -> Immediately learns Witch poisoned them!
+  const wolfPoisoned = resolveNightActions(baseRoster, {
+    wolfTargetId: 'b_vil',
+    witchPoisonTargetId: 'u_wolf',
+  });
+  const poisonedWolfCinematic = determineEndOfNightCinematic({
+    beforeHuman: baseRoster[0], // u_wolf died to Witch poison
+    beforePlayers: baseRoster,
+    afterPlayers: wolfPoisoned.updatedPlayers,
+    nightResult: wolfPoisoned.result,
+    lang: 'vi',
+  });
+  assert.ok(poisonedWolfCinematic !== null);
+  assert.equal(poisonedWolfCinematic?.mode, 'victim_death');
+  assert.equal(poisonedWolfCinematic?.revealKiller, true);
+  assert.equal(poisonedWolfCinematic?.causeType, 'witch_poison');
+  assert.equal(poisonedWolfCinematic?.killerId, 'b_witch');
+  assert.equal(poisonedWolfCinematic?.killerName, 'Thảo My');
+  assert.equal(poisonedWolfCinematic?.killerRoleId, 'witch');
+  assert.ok(poisonedWolfCinematic?.reasonText.includes('Phù Thủy') && poisonedWolfCinematic?.reasonText.includes('Thảo My'));
+
+  // 7c. Human Werewolf kills Hunter & gets shot by Hunter's dying revenge shot -> Immediately learns Hunter shot them!
+  const rosterWithHunter: Player[] = baseRoster.map((p) =>
+    p.id === 'b_vil' ? { ...p, roleId: 'hunter' } : { ...p }
+  );
+  const wolfBitesHunter = resolveNightActions(rosterWithHunter, { wolfTargetId: 'b_vil' });
+  const afterHunterRevenge = wolfBitesHunter.updatedPlayers.map((p) =>
+    p.id === 'u_wolf' ? { ...p, isAlive: false } : { ...p }
+  );
+  const shotWolfCinematic = determineEndOfNightCinematic({
+    beforeHuman: rosterWithHunter[0],
+    beforePlayers: rosterWithHunter,
+    afterPlayers: afterHunterRevenge,
+    nightResult: wolfBitesHunter.result,
+    hunterShotEvent: {
+      hunterId: 'b_vil',
+      hunterName: 'Tuấn Kiệt',
+      hunterSeat: 6,
+      targetId: 'u_wolf',
+      targetName: 'Sói Đầu Đàn',
+      targetSeat: 1,
+    },
+    lang: 'vi',
+  });
+  assert.ok(shotWolfCinematic !== null);
+  assert.equal(shotWolfCinematic?.mode, 'victim_death');
+  assert.equal(shotWolfCinematic?.revealKiller, true);
+  assert.equal(shotWolfCinematic?.causeType, 'hunter_shot');
+  assert.equal(shotWolfCinematic?.killerId, 'b_vil');
+  assert.equal(shotWolfCinematic?.killerName, 'Tuấn Kiệt');
+  assert.equal(shotWolfCinematic?.killerRoleId, 'hunter');
+  assert.ok(shotWolfCinematic?.reasonText.includes('Thợ Săn') && shotWolfCinematic?.reasonText.includes('Tuấn Kiệt'));
+
+  // 8. Dawn announcement with Hunter night revenge shot leaks ZERO Hunter info across all 5 languages
+  const afterHunterDawn: Player[] = baseRoster.map((p) =>
+    p.id === 'b_guard' || p.id === 'b_vil' ? { ...p, isAlive: false } : { ...p }
+  );
+  const forbiddenTerms = ['Thợ Săn', 'Hunter', 'Chasseur', 'Cazador', 'ハンター', 'kéo theo', 'shot', 'bắn'];
+  for (const lang of ['vi', 'en', 'fr', 'es', 'ja'] as Language[]) {
+    const ann = buildDawnGMAnnouncement({
+      round: 2,
+      beforePlayers: baseRoster,
+      afterPlayers: afterHunterDawn,
+      nightKilledIds: ['b_guard'],
+      hunterShotEvent: {
+        hunterName: 'Đức Huy',
+        hunterSeat: 2,
+        targetId: 'b_vil',
+        targetName: 'Tuấn Kiệt',
+        targetSeat: 6,
+      },
+      humanPlayerId: 'u_wolf',
+      lang,
+    });
+    assert.equal(ann.victims.length, 2);
+    assert.equal(ann.publicEvents.length, 0);
+    const combined = [
+      ann.headline,
+      ann.gmQuote,
+      ann.spokenNarration,
+      ann.chatMessageText,
+      ann.dayBarSummary,
+      ...ann.victims.map((v) => v.tag),
+    ].join(' ');
+    for (const term of forbiddenTerms) {
+      assert.equal(
+        combined.includes(term),
+        false,
+        `Dawn Hunter announcement in ${lang} leaked forbidden term "${term}": ${combined}`
+      );
+    }
+  }
 });
 
 

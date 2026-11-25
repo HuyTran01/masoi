@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  Lock,
   Mic,
   MicOff,
   Radio,
@@ -221,14 +222,15 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
   compact = false,
 }) => {
   const [internalMicOn, setInternalMicOn] = useState<boolean>(false);
-  const isMicOn = controlledMicOn !== undefined ? controlledMicOn : internalMicOn;
-  const handleToggleMic = () => {
-    if (onToggleMic) onToggleMic();
-    else setInternalMicOn((m) => !m);
-  };
   const vt = VOICE_I18N[lang] || VOICE_I18N.vi;
   const userPlayer = players.find((p) => p.id === userPlayerId) || players[0];
   const isUserAlive = userPlayer?.isAlive ?? true;
+  const isMicOn = isUserAlive && (controlledMicOn !== undefined ? controlledMicOn : internalMicOn);
+  const handleToggleMic = () => {
+    if (!isUserAlive) return;
+    if (onToggleMic) onToggleMic();
+    else setInternalMicOn((m) => !m);
+  };
   const isWerewolf =
     userPlayer?.roleId === 'werewolf' || userPlayer?.roleId === 'wolf_pup';
 
@@ -243,9 +245,12 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
   // Determine current voice channel label & theme
   const channelInfo = !isUserAlive
     ? {
-        label: vt.ghostChannel,
-        borderClass: 'border-cyan-500/50 bg-[#081523]/95',
-        badgeClass: 'bg-cyan-950 text-cyan-300 border-cyan-500/40',
+        label:
+          lang === 'vi'
+            ? '👻 Hồn Ma — Mic & Chat Đã Khóa'
+            : '👻 Ghost — Mic & Chat Locked',
+        borderClass: 'border-rose-500/50 bg-[#140a10]/95',
+        badgeClass: 'bg-rose-950 text-rose-300 border-rose-500/50',
       }
     : phase === 'night' && isWerewolf
     ? {
@@ -367,6 +372,7 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
   }, [activeSpeakers, players, isUserAlive, phase, isWerewolf, vt, ttsEnabled, lang]);
 
   const handlePushToSpeak = () => {
+    if (!isUserAlive) return;
     sound.playCardFlip();
     if (!isMicOn) {
       handleToggleMic();
@@ -441,22 +447,31 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
           </span>
         </div>
 
-        {/* Right: Mic Toggle + Quick Push-to-Speak Button */}
+        {/* Right: Mic Toggle + Quick Push-to-Speak Button (Strictly Locked When Dead) */}
         <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
             data-testid="voice-mic-toggle-btn"
+            disabled={!isUserAlive}
             onClick={() => {
+              if (!isUserAlive) return;
               sound.playCardFlip();
               handleToggleMic();
             }}
-            className={`px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-extrabold flex items-center gap-1 transition-all cursor-pointer ${
-              isMicOn
-                ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-sm'
-                : 'bg-rose-600 hover:bg-rose-500 text-white shadow-sm'
+            className={`px-2 py-0.5 rounded-full text-[9px] sm:text-[10px] font-extrabold flex items-center gap-1 transition-all ${
+              !isUserAlive
+                ? 'bg-slate-800 border border-rose-500/40 text-rose-300 opacity-80 cursor-not-allowed'
+                : isMicOn
+                ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-sm cursor-pointer'
+                : 'bg-rose-600 hover:bg-rose-500 text-white shadow-sm cursor-pointer'
             }`}
           >
-            {isMicOn ? (
+            {!isUserAlive ? (
+              <>
+                <Lock className="w-3 h-3" />
+                <span>{lang === 'vi' ? 'Mic Đã Khóa' : 'Mic Locked'}</span>
+              </>
+            ) : isMicOn ? (
               <>
                 <Mic className="w-3 h-3" />
                 <span>{vt.micOnBtn}</span>
@@ -469,15 +484,17 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
             )}
           </button>
 
-          <button
-            type="button"
-            data-testid="voice-ptt-btn"
-            onClick={handlePushToSpeak}
-            className="hidden sm:flex px-2 py-0.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 text-[10px] font-extrabold items-center gap-1 cursor-pointer"
-          >
-            <Waves className="w-3 h-3 text-amber-400" />
-            <span>{vt.speakNowBtn}</span>
-          </button>
+          {isUserAlive && (
+            <button
+              type="button"
+              data-testid="voice-ptt-btn"
+              onClick={handlePushToSpeak}
+              className="hidden sm:flex px-2 py-0.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 text-[10px] font-extrabold items-center gap-1 cursor-pointer"
+            >
+              <Waves className="w-3 h-3 text-amber-400" />
+              <span>{vt.speakNowBtn}</span>
+            </button>
+          )}
         </div>
       </div>
     );
@@ -533,29 +550,50 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
             <span>{ttsEnabled ? vt.ttsOn : vt.ttsOff}</span>
           </button>
 
-          <button
-            type="button"
-            onClick={handlePushToSpeak}
-            className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span>{vt.speakNowBtn}</span>
-          </button>
+          {isUserAlive && (
+            <button
+              type="button"
+              onClick={handlePushToSpeak}
+              className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-amber-200 text-xs font-bold flex items-center gap-1 cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>{vt.speakNowBtn}</span>
+            </button>
+          )}
 
           <button
             type="button"
+            data-testid="drawer-voice-mic-btn"
+            disabled={!isUserAlive}
             onClick={() => {
+              if (!isUserAlive) return;
               sound.playCardFlip();
               handleToggleMic();
             }}
-            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 cursor-pointer ${
-              isMicOn
-                ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md'
-                : 'bg-rose-600 hover:bg-rose-500 text-white shadow-md'
+            className={`px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 ${
+              !isUserAlive
+                ? 'bg-slate-800 border border-rose-500/50 text-rose-300 opacity-85 cursor-not-allowed'
+                : isMicOn
+                ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-md cursor-pointer'
+                : 'bg-rose-600 hover:bg-rose-500 text-white shadow-md cursor-pointer'
             }`}
           >
-            {isMicOn ? <Mic className="w-3.5 h-3.5" /> : <MicOff className="w-3.5 h-3.5" />}
-            <span>{isMicOn ? vt.micOnBtn : vt.micOffBtn}</span>
+            {!isUserAlive ? (
+              <>
+                <Lock className="w-3.5 h-3.5" />
+                <span>{lang === 'vi' ? 'Đã khóa Mic (Hồn Ma)' : 'Mic Locked (Ghost)'}</span>
+              </>
+            ) : isMicOn ? (
+              <>
+                <Mic className="w-3.5 h-3.5" />
+                <span>{vt.micOnBtn}</span>
+              </>
+            ) : (
+              <>
+                <MicOff className="w-3.5 h-3.5" />
+                <span>{vt.micOffBtn}</span>
+              </>
+            )}
           </button>
         </div>
       </div>

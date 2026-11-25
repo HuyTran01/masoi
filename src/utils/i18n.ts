@@ -245,7 +245,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     firstPersonBtn: 'Góc Nhìn Thứ Nhất [V]',
     firstPersonShort: 'Góc Nhìn 1 [V]',
     firstPersonBanner:
-      '👁️ GÓC NHÌN THỨ NHẤT [V]: Kéo chuột/màn hình để nhìn 360°, WASD/D-Pad để đi bộ, phím [E]/Click chọn mục tiêu!',
+      '👁️ GÓC NHÌN THỨ NHẤT [V]: Giữ chuột kéo để xoay 360° (hoặc bấm 360° khóa chuột), WASD/D-Pad để đi bộ, phím [E]/Click chọn mục tiêu!',
     fpvTargetPrompt: (name) => `🎯 Đang ngắm: ${name} — Bấm [E] hoặc Click để tương tác`,
     dpadWalkFpv: 'Đi Bộ Góc Nhìn 1',
     switchCamera: 'Đổi góc máy 3D',
@@ -369,53 +369,53 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     finishTourBtn: 'Hoàn Tất & Bắt Đầu!',
     tourSteps: [
       {
-        badge: 'BƯỚC 1 / 5 · CHỐNG GIAN LẬN TUYỆT ĐỐI',
-        title: 'Màn Đêm Tối Mù & Gọi Vai Theo Thứ Tự',
+        badge: 'BƯỚC 1 / 5 · ĐỒNG HỒ & TRẠNG THÁI VÁN ĐẤU',
+        title: 'Theo Dõi Pha Đấu, Thời Gian & Số Người Sống',
         description:
-          'Khi màn đêm buông xuống, tầm nhìn của mọi người chơi sẽ tự động tối đi. Chỉ khi đến lượt thức dậy của vai trò bạn nắm giữ, mắt bạn mới mở sáng để hành động — ngăn chặn 100% việc nhìn lén!',
+          'Thanh góc trên bên trái hiển thị vòng Đêm/Ngày hiện tại, đồng hồ đếm ngược (có nút -10s / +15s tùy chỉnh) và tổng số người chơi còn sống trong làng.',
         tips: [
-          'Mỗi vai thức dậy đều có hiệu ứng âm thanh & câu thoại đặc trưng riêng.',
-          'Thanh tiến trình ban đêm hiển thị rõ thứ tự gọi vai để bạn nắm bắt nhịp độ.',
+          'Ban đêm, tầm nhìn sẽ tự động che tối để chống gian lận cho đến đúng lượt vai trò của bạn thức dậy.',
+          'Bạn có thể tăng/giảm thời gian hoặc bấm nút qua pha nhanh bất cứ lúc nào khi đấu với AI.',
         ],
       },
       {
-        badge: 'BƯỚC 2 / 5 · THẾ GIỚI MỞ & HACK NÃO',
-        title: 'Di Chuyển Thế Giới Mở & Sói Tự Cắn Đồng Bọn',
+        badge: 'BƯỚC 2 / 5 · BẢNG HÀNH ĐỘNG THEO PHA',
+        title: 'Chỉ Dẫn Nhiệm Vụ Ban Đêm & Bỏ Phiếu Ban Ngày',
         description:
-          'Khi đến lượt thức dậy ban đêm, bạn có thể dùng phím WASD / D-Pad để tự do đi bộ tới vị trí một người chơi, HOẶC chạm trực tiếp vào người đó để phi thân nhanh tới!',
+          'Bảng trung tâm phía trên luôn cho biết bạn cần làm gì ngay lúc này: chọn mục tiêu dùng kỹ năng vào Ban Đêm, xem Tin Sáng khi Thảo Luận, hoặc chốt phiếu & xem bảng kiểm phiếu minh bạch khi Bỏ Phiếu.',
         tips: [
-          '🐺 Chiến thuật "Hack Não": Đàn Sói có thể chọn cắn chính mình hoặc Sói Con để lừa Phù Thủy hoặc kích hoạt Cuồng Nộ 2 mạng!',
-          'Kéo màn hình hoặc bật nút 360° để xoay góc nhìn toàn cảnh ngôi làng.',
+          'Mỗi người chơi chỉ có duy nhất 1 phiếu bầu công bằng — có thể bấm "Đổi phiếu" hoặc chọn Lửa Trại để bỏ phiếu trắng.',
+          'Với Phù Thủy, nút Bình Cứu Sống sẽ xuất hiện trực tiếp ngay trên bảng này khi đến lượt.',
         ],
       },
       {
-        badge: 'BƯỚC 3 / 5 · ĐẠO CỤ VẬT LÝ 3D BAN NGÀY',
-        title: 'Ném Cà Chua 🍅, Trứng Thối 🥚, Tặng Hoa & Tạt Nước',
+        badge: 'BƯỚC 3 / 5 · SÂN KHẤU LÀNG 3D & VÒNG LỬA TRẠI',
+        title: 'Quan Sát Toàn Cảnh 3D, Di Chuyển & Tương Tác Trực Tiếp',
         description:
-          'Khi trời sáng bước vào Thảo Luận, bạn có thể chọn Cà Chua, Trứng Thối, Hoa Hồng hoặc Xô Nước để ném thẳng vào nhân vật 3D với hiệu ứng văng mảnh 3D chân thực!',
+          'Khu vực trung tâm là vòng lửa trại 3D nơi mọi nhân vật ngồi quây quần. Kéo màn hình để xoay góc nhìn, bấm trực tiếp vào nhân vật 3D để dùng kỹ năng đêm, ném đạo cụ ban ngày hoặc bỏ phiếu.',
         tips: [
-          'Chọn loại đạo cụ rồi chạm vào nhân vật 3D hoặc thẻ ghế bên dưới để ném.',
-          'Khi sang giai đoạn Bỏ Phiếu, chạm trực tiếp vào nghi phạm để dồn phiếu treo cổ.',
+          'Dùng phím WASD để đứng dậy đi dạo quanh làng (Shift chạy, Space nhảy, X ngồi lại ghế).',
+          'Nếu bị loại, bạn sẽ hóa thành Hồn Ma 3D bay lượn tự do nhưng chat & micro sẽ bị khóa để đảm bảo công bằng.',
         ],
       },
       {
-        badge: 'BƯỚC 4 / 5 · XUẤT HỒN BÓNG MA 3D',
-        title: 'Hóa Thành Bóng Ma Bay Vòng Vèo Khi Tử Trận',
+        badge: 'BƯỚC 4 / 5 · THANH CÔNG CỤ VAI TRÒ & GÓC NHÌN',
+        title: 'Xem Lại Thẻ Vai, Đổi Góc Nhìn Thứ Nhất & Âm Thanh',
         description:
-          'Nếu chẳng may bị Sói cắn hoặc treo cổ, bạn sẽ lập tức "Xuất Hồn" thành một Bóng Ma 3D phát sáng bay lượn tự do khắp ngôi làng.',
+          'Thanh góc trên bên phải giúp bạn mở lại Thẻ Bài Vai Trò bí mật, chuyển đổi giữa Góc Nhìn Thứ Nhất [V], chế độ xoay 360°, đổi góc máy 3D, bật/tắt Micro, Âm thanh [M] hoặc Tạm dừng [P].',
         tips: [
-          'Dùng WASD / D-Pad hoặc chạm mặt đất để lái hồn ma bay vòng vèo quanh người sống.',
-          'Trò chuyện riêng với các hồn ma khác trong kênh "Khu Vực Ma".',
+          'Bấm vào tên vai trò màu vàng để xem chi tiết kỹ năng & cách chơi bất cứ lúc nào.',
+          'Nhấn phím [V] để nhập vai góc nhìn thứ nhất và dùng [E] hoặc Click để tương tác.',
         ],
       },
       {
-        badge: 'BƯỚC 5 / 5 · BẢNG ĐIỀU KHIỂN ĐA NĂNG',
-        title: 'Kỹ Năng Vai Trò, Chọn Nhanh Ghế & Kênh Chat',
+        badge: 'BƯỚC 5 / 5 · BẢNG ĐIỀU KHIỂN DƯỚI & DANH SÁCH GHẾ',
+        title: 'Sổ Tay Suy Luận, Biểu Cảm, Chat & Chọn Nhanh Người Chơi',
         description:
-          'Thanh điều khiển phía dưới giúp bạn chọn nhanh bất kỳ người chơi nào trên điện thoại, dùng bình thuốc Phù Thủy, xem kết quả soi Tiên Tri và mở Kênh Chat.',
+          'Thanh điều khiển phía dưới chứa toàn bộ công cụ hỗ trợ: Sổ Tay ghi chú riêng, Biểu cảm & Đạo cụ ném 3D (Cà chua, Trứng, Hoa, Nước), Kênh Voice/Chat, BXH, Luật chơi và dãy ghế chọn nhanh từng người chơi.',
         tips: [
-          'Bấm phím [H] hoặc nút thu gọn để ẩn thanh điều khiển khi muốn ngắm trọn vẹn cảnh 3D.',
-          'Bạn đã sẵn sàng — hãy bắt đầu ván đấu ngay!',
+          'Chạm vào thẻ ghế ở hàng dưới để chọn mục tiêu cực nhanh, đặc biệt tiện trên màn hình nhỏ.',
+          'Nhấn phím [H] hoặc nút "Thu Gọn HUD" khi muốn ẩn thanh dưới để ngắm trọn cảnh làng 3D.',
         ],
       },
     ],
@@ -481,7 +481,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     firstPersonBtn: 'First-Person View [V]',
     firstPersonShort: '1st Person [V]',
     firstPersonBanner:
-      '👁️ FIRST-PERSON VIEW [V]: Drag to look around, WASD/D-Pad to walk, press [E]/Click to target!',
+      '👁️ FIRST-PERSON VIEW [V]: Move mouse to look around, WASD/D-Pad to walk, press [E]/Click to target!',
     fpvTargetPrompt: (name) => `🎯 Aiming at: ${name} — Press [E] or Click to interact`,
     dpadWalkFpv: '1st-Person Walk',
     switchCamera: 'Switch 3D Camera',
@@ -605,53 +605,53 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     finishTourBtn: 'Finish & Play!',
     tourSteps: [
       {
-        badge: 'STEP 1 / 5 · STRICT NIGHT ANTI-CHEAT',
-        title: 'Night Blindfold & Sequential Role Calls',
+        badge: 'STEP 1 / 5 · PHASE DIAL, TIMER & SURVIVORS',
+        title: 'Track Match Phase, Countdown & Alive Count',
         description:
-          'When night falls, everyone’s vision dims automatically. Only when your specific role is called do your eyes open to act — preventing any peeking!',
+          'The top-left panel displays the current Night/Day phase, countdown timer (with -10s / +15s controls), and how many villagers remain alive.',
         tips: [
-          'Every role features bespoke voice callouts and atmospheric sound effects.',
-          'The Night Order bar shows the exact sequence of waking roles.',
+          'At night, your screen is safely blindfolded until your own role is called to act.',
+          'Adjust the timer or fast-forward phases whenever you are practicing against AI.',
         ],
       },
       {
-        badge: 'STEP 2 / 5 · OPEN-WORLD NIGHT & BLUFFS',
-        title: 'Free Night Roaming & Werewolf Self-Bite Bluffs',
+        badge: 'STEP 2 / 5 · ACTIVE PHASE ACTION CONSOLE',
+        title: 'Night Role Tasks & Daytime Voting Console',
         description:
-          'On your night turn, use WASD / Virtual D-Pad to walk up to a player in the 3D village, OR tap them directly to dash over!',
+          'The top-center console always tells you your exact current action: target a player for Night abilities, review Morning Briefings during Day Debate, or lock in your single vote with live tallies.',
         tips: [
-          '🐺 Mindgame Tactic: Werewolves can bite themselves or the Wolf Pup to bait the Witch’s heal or trigger a 2-kill frenzy!',
-          'Drag anywhere or toggle 360° mode to look around the entire village.',
+          'Every living player casts 1 fair vote — click "Change" to switch or click Campfire to abstain.',
+          'When playing Witch, your Heal potion button appears right inside this panel on your turn.',
         ],
       },
       {
-        badge: 'STEP 3 / 5 · 3D PHYSICS DAY PROPS',
-        title: 'Throw Tomatoes 🍅, Rotten Eggs 🥚, Roses & Water',
+        badge: 'STEP 3 / 5 · 3D CAMPFIRE VILLAGE ARENA',
+        title: 'Explore the 3D Circle, Walk Around & Click Players',
         description:
-          'During Day Discussion, pick Tomatoes, Rotten Eggs, Roses, or Water Buckets to hurl at 3D characters with full 3D particle splats!',
+          'The central 3D arena shows every player gathered around the campfire. Drag to orbit the camera, and click any 3D character directly to use Night powers, throw Day props, or cast your vote.',
         tips: [
-          'Select a prop and tap any 3D character or bottom seat card to throw.',
-          'During Voting Phase, tap a suspect to cast your execution vote.',
+          'Use WASD to stand up and walk around the clearing (Shift sprint, Space jump, X sit back down).',
+          'If eliminated, you rise as a free-flying 3D Ghost with chat and mic locked for fair play.',
         ],
       },
       {
-        badge: 'STEP 4 / 5 · 3D GHOST SOUL FLIGHT',
-        title: 'Rise as a Free-Flying Ghost Soul Upon Death',
+        badge: 'STEP 4 / 5 · ROLE, CAMERA & AUDIO TOOLBAR',
+        title: 'Secret Role Card, First-Person View & Controls',
         description:
-          'If you are eliminated, your game isn’t over! You immediately ascend as a glowing 3D Ghost Soul that can fly freely around the village.',
+          'The top-right toolbar lets you reopen your Secret Role Card anytime, toggle First-Person View [V], 360° Free-Look, Camera Presets, Microphone, Audio [M], Tutorial, and Pause [P].',
         tips: [
-          'Use WASD / D-Pad or tap the ground to glide around living players.',
-          'Chat privately with fellow ghosts in the Ghost Realm channel.',
+          'Tap your gold Role badge anytime to check your exact powers and win condition.',
+          'Press [V] to enter First-Person mode and use [E] or Click to interact with players.',
         ],
       },
       {
-        badge: 'STEP 5 / 5 · ERGONOMIC CONTROL DOCK',
-        title: 'Role Powers, Quick Seat Bar & Village Chat',
+        badge: 'STEP 5 / 5 · BOTTOM CONTROL DOCK & SEAT STRIP',
+        title: 'Deduction Notebook, Emotes, Chat & Quick Seat Select',
         description:
-          'The bottom dock lets you quickly target players on mobile, trigger Witch potions, check Seer results, and open Village Chat.',
+          'The bottom dock holds your private Deduction Notebook, daytime 3D Emotes & Throwing Props (Tomato, Egg, Rose, Water), Voice/Chat, Leaderboard, Rules, and a quick-select strip for every seat.',
         tips: [
-          'Press [H] or tap the handle to collapse the dock for a full-screen 3D view.',
-          'You are ready — enjoy the hunt!',
+          'Tap any player chip along the bottom strip to target them instantly—especially handy on mobile.',
+          'Press [H] or tap the collapse tab to hide the dock for an unobstructed 3D view.',
         ],
       },
     ],
@@ -717,7 +717,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     firstPersonBtn: 'Vue 1re Personne [V]',
     firstPersonShort: '1re Pers. [V]',
     firstPersonBanner:
-      '👁️ VUE 1RE PERSONNE [V] : Glissez pour regarder, WASD/D-Pad pour marcher, [E]/Clic pour cibler !',
+      '👁️ VUE 1RE PERSONNE [V] : Bougez la souris pour regarder, WASD/D-Pad pour marcher, [E]/Clic pour cibler !',
     fpvTargetPrompt: (name) => `🎯 Cible : ${name} — Appuyez sur [E] ou Cliquez`,
     dpadWalkFpv: 'Marche 1re Pers.',
     switchCamera: 'Caméra 3D',
@@ -839,53 +839,53 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     finishTourBtn: 'Commencer !',
     tourSteps: [
       {
-        badge: 'ÉTAPE 1 / 5 · ANTI-TRICHE DE NUIT',
-        title: 'Nuit Noire & Appel par Rôle',
+        badge: 'ÉTAPE 1 / 5 · PHASE, CHRONO & SURVIVANTS',
+        title: 'Suivez la Phase, le Temps et les Joueurs Vivants',
         description:
-          'La nuit, la vision est masquée sauf lorsque votre rôle se réveille pour agir.',
+          'Le panneau en haut à gauche indique la phase Nuit/Jour, le compte à rebours (-10s / +15s) et le nombre de survivants.',
         tips: [
-          'Chaque rôle possède des effets sonores et voix uniques.',
-          'Suivez l’ordre d’appel nocturne en haut de l’écran.',
+          'La nuit, la vision est protégée jusqu’au réveil de votre rôle.',
+          'Ajustez le chrono ou passez rapidement la phase en mode IA.',
         ],
       },
       {
-        badge: 'ÉTAPE 2 / 5 · MONDE OUVERT & BLUFF',
-        title: 'Déplacement Libre & Bluff des Loups',
+        badge: 'ÉTAPE 2 / 5 · CONSOLE D’ACTION CENTRALE',
+        title: 'Missions Nocturnes & Vote Transparent du Jour',
         description:
-          'Déplacez-vous avec WASD / D-Pad ou cliquez directement sur une cible la nuit !',
+          'La barre centrale supérieure affiche votre action en cours : pouvoir de nuit, résumé matinal ou vote unique avec décompte en direct.',
         tips: [
-          '🐺 Les Loups peuvent mordre un allié pour tromper la Sorcière.',
-          'Faites glisser pour tourner la caméra à 360°.',
+          'Chaque joueur vivant dispose d’un vote équitable (ou vote blanc au feu de camp).',
+          'La potion de vie de la Sorcière apparaît directement dans cette console.',
         ],
       },
       {
-        badge: 'ÉTAPE 3 / 5 · OBJETS PHYSIQUES 3D',
-        title: 'Lancer de Tomates 🍅, Œufs Pourris 🥚 & Fleurs',
+        badge: 'ÉTAPE 3 / 5 · VILLAGE 3D & FEU DE CAMP',
+        title: 'Explorez le Cercle 3D et Interagissez en Direct',
         description:
-          'Le jour, lancez des tomates, œufs pourris, roses ou seaux d’eau en 3D sur les suspects !',
+          'Faites glisser pour tourner la caméra autour du feu de camp et cliquez directement sur les personnages 3D pour agir, lancer des objets ou voter.',
         tips: [
-          'Choisissez un objet puis cliquez sur un personnage 3D.',
-          'Pendant le vote, cliquez sur un suspect pour voter.',
+          'Utilisez WASD pour vous lever et marcher (X pour vous rasseoir).',
+          'Une fois éliminé, volez en Fantôme 3D avec micro et chat verrouillés.',
         ],
       },
       {
-        badge: 'ÉTAPE 4 / 5 · ESPRIT FANTÔME 3D',
-        title: 'Volez en Fantôme 3D après la Mort',
+        badge: 'ÉTAPE 4 / 5 · BARRE RÔLE, CAMÉRA & AUDIO',
+        title: 'Carte de Rôle, Vue 1re Personne [V] & Réglages',
         description:
-          'Si vous mourez, votre âme devient un fantôme 3D libre de voler autour du village.',
+          'En haut à droite : rouvrez votre carte secrète, activez la vue 1re personne [V], la rotation 360°, le micro, le son [M] ou la pause [P].',
         tips: [
-          'Utilisez WASD / D-Pad pour planer autour des survivants.',
-          'Discutez entre fantômes dans le canal dédié.',
+          'Cliquez sur le badge de votre rôle pour relire vos pouvoirs à tout moment.',
+          'Appuyez sur [V] pour passer en vue subjective.',
         ],
       },
       {
-        badge: 'ÉTAPE 5 / 5 · BARRE DE CONTRÔLE',
-        title: 'Pouvoirs, Sélection Rapide & Chat',
+        badge: 'ÉTAPE 5 / 5 · BARRE INFÉRIEURE & SIÈGES',
+        title: 'Carnet, Émotes 3D, Chat & Sélection Rapide',
         description:
-          'La barre inférieure permet de cibler rapidement un joueur, utiliser vos potions et discuter.',
+          'La barre du bas regroupe votre Carnet de déduction, les Émotes & Objets 3D (Tomate, Œuf, Rose, Eau), le Chat, le Classement et les cartes de joueurs.',
         tips: [
-          'Appuyez sur [H] pour masquer l’interface et admirer la scène 3D.',
-          'Bonne chance dans le village !',
+          'Touchez un siège en bas pour cibler un joueur instantanément.',
+          'Appuyez sur [H] pour masquer la barre et profiter de la vue 3D.',
         ],
       },
     ],
@@ -951,7 +951,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     firstPersonBtn: 'Primera Persona [V]',
     firstPersonShort: '1ra Pers. [V]',
     firstPersonBanner:
-      '👁️ PRIMERA PERSONA [V]: Arrastra para mirar, WASD/D-Pad para caminar, [E]/Clic para seleccionar!',
+      '👁️ PRIMERA PERSONA [V]: Mueve el ratón para mirar, WASD/D-Pad para caminar, [E]/Clic para seleccionar!',
     fpvTargetPrompt: (name) => `🎯 Apuntando a: ${name} — Pulsa [E] o Clic`,
     dpadWalkFpv: 'Caminar 1ra Pers.',
     switchCamera: 'Cámara 3D',
@@ -1073,53 +1073,53 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     finishTourBtn: '¡Empezar a Jugar!',
     tourSteps: [
       {
-        badge: 'PASO 1 / 5 · ANTI-TRAMPAS NOCTURNO',
-        title: 'Noche Oscura y Llamada por Turnos',
+        badge: 'PASO 1 / 5 · FASE, TEMPORIZADOR Y VIVOS',
+        title: 'Controla la Fase, el Tiempo y los Supervivientes',
         description:
-          'De noche la vista se oscurece automáticamente salvo cuando despierta tu rol.',
+          'El panel superior izquierdo muestra la fase Noche/Día, el temporizador (-10s / +15s) y cuántos jugadores siguen con vida.',
         tips: [
-          'Cada rol tiene voces y efectos de sonido propios.',
-          'La barra nocturna muestra el orden exacto de llamada.',
+          'De noche tu vista queda protegida hasta que despierta tu rol.',
+          'Ajusta el tiempo o avanza rápido cuando practiques con la IA.',
         ],
       },
       {
-        badge: 'PASO 2 / 5 · MUNDO ABIERTO Y ENGAÑOS',
-        title: 'Movimiento Libre y Auto-Mordida de Lobos',
+        badge: 'PASO 2 / 5 · CONSOLA DE ACCIÓN CENTRAL',
+        title: 'Instrucciones Nocturnas y Votación Diurna',
         description:
-          'Camina con WASD / D-Pad o toca directamente a un jugador para desplazarte.',
+          'La consola superior central indica tu acción actual: habilidades de noche, resumen del amanecer o tu voto único con conteo en vivo.',
         tips: [
-          '🐺 Los Lobos pueden morderse entre sí para engañar a la Bruja.',
-          'Arrastra la pantalla o activa 360° para mirar alrededor.',
+          'Cada jugador vivo tiene exactamente 1 voto justo (o abstención en la fogata).',
+          'Los botones de poción de la Bruja aparecen aquí en su turno.',
         ],
       },
       {
-        badge: 'PASO 3 / 5 · OBJETOS FÍSICOS 3D',
-        title: 'Lanza Tomates 🍅, Huevos Podridos 🥚 y Flores',
+        badge: 'PASO 3 / 5 · ALDEA 3D Y FOGATA CENTRAL',
+        title: 'Explora la Aldea 3D e Interactúa con los Jugadores',
         description:
-          'De día puedes lanzar tomates, huevos podridos, rosas o cubos de agua en 3D.',
+          'Arrastra para girar la cámara alrededor de la fogata y haz clic directo en cualquier personaje 3D para usar habilidades, lanzar objetos o votar.',
         tips: [
-          'Elige un objeto y toca a un personaje 3D.',
-          'En la votación, toca al sospechoso para votar.',
+          'Usa WASD para levantarte y caminar (X para volver a sentarte).',
+          'Si mueres, vuelas libre como Fantasma 3D con chat y micro bloqueados.',
         ],
       },
       {
-        badge: 'PASO 4 / 5 · VUELO DE FANTASMA 3D',
-        title: 'Vuela como Fantasma 3D al Morir',
+        badge: 'PASO 4 / 5 · BARRA DE ROL, CÁMARA Y AUDIO',
+        title: 'Carta de Rol, Primera Persona [V] y Ajustes',
         description:
-          'Si mueres, te conviertes en un Fantasma 3D brillante que vuela libremente por la aldea.',
+          'En la esquina superior derecha puedes revisar tu carta secreta, activar Primera Persona [V], giro 360°, micrófono, sonido [M] y pausa [P].',
         tips: [
-          'Usa WASD / D-Pad para volar alrededor de los vivos.',
-          'Habla con otros espíritus en el Canal Fantasma.',
+          'Pulsa tu insignia de rol para consultar tus poderes en cualquier momento.',
+          'Pulsa [V] para cambiar a vista en primera persona.',
         ],
       },
       {
-        badge: 'PASO 5 / 5 · PANEL DE CONTROL',
-        title: 'Habilidades, Selección Rápida y Chat',
+        badge: 'PASO 5 / 5 · PANEL INFERIOR Y ASIENTOS',
+        title: 'Cuaderno, Emotes 3D, Chat y Selección Rápida',
         description:
-          'El panel inferior te permite seleccionar jugadores en móvil, usar pociones y abrir el chat.',
+          'El panel inferior incluye tu Cuaderno privado, Emotes y Objetos 3D (Tomate, Huevo, Rosa, Agua), Voz/Chat, Ranking, Reglas y lista rápida de jugadores.',
         tips: [
-          'Pulsa [H] para ocultar los controles y ver la aldea 3D completa.',
-          '¡Todo listo para comenzar!',
+          'Toca cualquier asiento abajo para seleccionar un objetivo al instante.',
+          'Pulsa [H] para ocultar la barra y ver toda la aldea 3D.',
         ],
       },
     ],
@@ -1185,7 +1185,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     firstPersonBtn: '一人称視点 [V]',
     firstPersonShort: '一人称 [V]',
     firstPersonBanner:
-      '👁️ 一人称視点モード [V]: ドラッグで周囲を見渡し、WASD/十字キーで移動、[E]/クリックで対象選択！',
+      '👁️ 一人称視点モード [V]: マウス移動で周囲を見渡し、WASD/十字キーで移動、[E]/クリックで対象選択！',
     fpvTargetPrompt: (name) => `🎯 照準中: ${name} — [E]キーまたはクリックで選択`,
     dpadWalkFpv: '一人称移動',
     switchCamera: '3Dカメラ切替',
@@ -1307,53 +1307,53 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     finishTourBtn: '完了して開始！',
     tourSteps: [
       {
-        badge: 'ステップ 1 / 5 · 夜間不正防止システム',
-        title: '暗闇の夜と順番点呼',
+        badge: 'ステップ 1 / 5 · フェーズ・タイマー・生存者',
+        title: '進行フェーズと残り時間・生存人数を確認',
         description:
-          '夜になると全員の視界が暗転し、自分の役職の番が来た時だけ目が開いて行動できます。',
+          '左上のパネルで現在の夜／昼フェーズ、残り秒数（-10s / +15s 調整可）、村の生存人数をいつでも確認できます。',
         tips: [
-          '各役職に専用のボイスセリフと効果音があります。',
-          '画面上部のバーで夜の点呼順を確認できます。',
+          '夜の間、自分の役職の手番が来るまで視界は安全に遮断されます。',
+          'AI対戦中はタイマー調整やスキップボタンでテンポ良く進行できます。',
         ],
       },
       {
-        badge: 'ステップ 2 / 5 · オープンワールド移動＆頭脳戦',
-        title: '自由移動と人狼の自噛みブラフ',
+        badge: 'ステップ 2 / 5 · 中央アクションコンソール',
+        title: '夜の役職行動と昼の投票ガイド',
         description:
-          '夜の手番ではWASD/十字キーで歩いて近づくか、対象を直接タップして素早く駆け寄れます！',
+          '上部中央のコンソールに今行うべき行動が表示されます。夜のスキル対象決定、朝の報告確認、昼の投票と開票状況がここで完結します。',
         tips: [
-          '🐺 頭脳戦: 人狼はあえて仲間や狼の子を噛んで魔女を騙すことも可能です。',
-          '画面ドラッグまたは360°ボタンで村全体を見渡せます。',
+          '生存プレイヤーは全員公平に1票ずつ投票できます（焚き火で棄権も可能）。',
+          '魔女の蘇生薬ボタンも手番時にこのパネル内に表示されます。',
         ],
       },
       {
-        badge: 'ステップ 3 / 5 · 3D物理アイテム投げ',
-        title: 'トマト🍅・腐った卵🥚・花束・水バケツ',
+        badge: 'ステップ 3 / 5 · 3Dキャンプ村＆焚き火サークル',
+        title: '3D村を見渡し、キャラを直接クリックして行動',
         description:
-          '昼の議論中はトマトや腐った卵、バラの花束、水バケツを3Dキャラに投げつけて盛り上がりましょう！',
+          '中央の3Dステージに全員が集まります。ドラッグで視点回転し、3Dキャラクターを直接クリックして夜スキル・アイテム投げ・投票が行えます。',
         tips: [
-          'アイテムを選んで3Dキャラまたは下部の席カードをタップ。',
-          '投票フェーズでは怪しい人物をタップして投票します。',
+          'WASDで席を立って自由に歩けます（Shiftダッシュ・Spaceジャンプ・X着席）。',
+          '脱落後は3D幽霊として自由に飛行できます（公平性のためチャット・マイクはロック）。',
         ],
       },
       {
-        badge: 'ステップ 4 / 5 · 3D幽霊飛行モード',
-        title: '死亡後は3D幽霊となって村を飛行',
+        badge: 'ステップ 4 / 5 · 役職・カメラ・音声ツールバー',
+        title: '役職カード確認・一人称視点 [V]・各種設定',
         description:
-          'もし処刑や襲撃で倒れても、光る3D幽霊となって村の上空を自由に飛び回ることができます。',
+          '右上のバーから秘密の役職カードの再確認、一人称視点 [V]、360°回転、カメラ切替、マイク、音量 [M]、一時停止 [P] を操作できます。',
         tips: [
-          'WASD/十字キーや地面タップで生存者の周りを飛行できます。',
-          '霊界チャットで幽霊同士の会話が可能です。',
+          '役職バッジをクリックすると能力と勝利条件をいつでも確認できます。',
+          '[V]キーで一人称視点に切り替え、[E]またはクリックで対象選択できます。',
         ],
       },
       {
-        badge: 'ステップ 5 / 5 · 多機能コントロールパネル',
-        title: '役職スキル・クイック席選択・チャット',
+        badge: 'ステップ 5 / 5 · 下部ドック＆クイック席リスト',
+        title: '推理ノート・エモート・チャット・素早い対象選択',
         description:
-          '下部パネルからスマホでも簡単にターゲット選択や魔女の薬使用、チャットが可能です。',
+          '下部パネルには個人用推理ノート、昼の3Dエモート＆投げアイテム（トマト・卵・花束・水）、ボイス／チャット、順位、ルール、全席カードが揃っています。',
         tips: [
-          '[H]キーまたは折りたたみボタンで3D画面を全画面表示できます。',
-          '準備完了です！ゲームを始めましょう！',
+          '下部のプレイヤーカードをタップするとスマホでも素早く対象を選択できます。',
+          '[H]キーまたは折りたたみタブで下部バーを隠して3D画面を広く見られます。',
         ],
       },
     ],
