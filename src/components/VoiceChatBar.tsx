@@ -9,8 +9,10 @@ import {
   VolumeX,
   Sparkles,
   Waves,
+  X,
 } from 'lucide-react';
 import { Player, Language, Phase } from '../types/game';
+import { UI_TEXT } from '../utils/i18n';
 import { sound } from '../utils/sound';
 
 interface VoiceChatBarProps {
@@ -24,6 +26,7 @@ interface VoiceChatBarProps {
   onTriggerUserSpeech?: (transcript: string) => void;
   lang: Language;
   compact?: boolean;
+  onClose?: () => void;
 }
 
 const VOICE_I18N: Record<
@@ -220,8 +223,10 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
   onTriggerUserSpeech,
   lang,
   compact = false,
+  onClose,
 }) => {
   const [internalMicOn, setInternalMicOn] = useState<boolean>(false);
+  const t = UI_TEXT[lang];
   const vt = VOICE_I18N[lang] || VOICE_I18N.vi;
   const userPlayer = players.find((p) => p.id === userPlayerId) || players[0];
   const isUserAlive = userPlayer?.isAlive ?? true;
@@ -253,10 +258,7 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
   // Determine current voice channel label & theme
   const channelInfo = !isUserAlive
     ? {
-        label:
-          lang === 'vi'
-            ? '👻 Hồn Ma — Mic & Chat Đã Khóa'
-            : '👻 Ghost — Mic & Chat Locked',
+        label: t.ghostMicChatLocked,
         borderClass: 'border-rose-500/50 bg-[#140a10]/95',
         badgeClass: 'bg-rose-950 text-rose-300 border-rose-500/50',
       }
@@ -385,11 +387,7 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
         players.find((p) => !p.isAlive && p.id !== userPlayerId) ||
         null;
       if (!deadOther) {
-        setLiveTranscript(
-          lang === 'vi'
-            ? 'Kênh Hồn Ma đang im lặng — quan sát ván đấu...'
-            : 'Ghost channel silent — spectating the match...'
-        );
+        setLiveTranscript(t.ghostChannelSilent);
         return;
       }
       const quote =
@@ -399,11 +397,7 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
       return;
     }
     if (isSoloWolfAtNight) {
-      setLiveTranscript(
-        lang === 'vi'
-          ? 'Bạn là Sói duy nhất đêm nay — hãy tự chọn mục tiêu.'
-          : 'You are the lone Wolf tonight — choose your target.'
-      );
+      setLiveTranscript(t.loneWolfTonight);
       return;
     }
     if (filteredActiveSpeakers.length === 0) {
@@ -522,7 +516,7 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
             {!isUserAlive ? (
               <>
                 <Lock className="w-3 h-3" />
-                <span>{lang === 'vi' ? 'Mic Đã Khóa' : 'Mic Locked'}</span>
+                <span>{t.micLockedShort}</span>
               </>
             ) : isMicOn ? (
               <>
@@ -546,6 +540,18 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
             >
               <Waves className="w-3 h-3 text-amber-400" />
               <span>{vt.speakNowBtn}</span>
+            </button>
+          )}
+
+          {onClose && (
+            <button
+              type="button"
+              data-testid="close-voice-popover-btn"
+              onClick={onClose}
+              aria-label={t.closeEsc}
+              className="min-h-[32px] min-w-[32px] sm:min-h-0 sm:min-w-0 p-1 rounded-full bg-slate-800/90 hover:bg-slate-700 border border-slate-600/80 text-slate-200 flex items-center justify-center cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
@@ -634,7 +640,7 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
             {!isUserAlive ? (
               <>
                 <Lock className="w-3.5 h-3.5" />
-                <span>{lang === 'vi' ? 'Đã khóa Mic (Hồn Ma)' : 'Mic Locked (Ghost)'}</span>
+                <span>{t.micLockedShort}</span>
               </>
             ) : isMicOn ? (
               <>

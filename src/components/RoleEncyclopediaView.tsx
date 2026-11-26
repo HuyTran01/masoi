@@ -1,8 +1,24 @@
 import React, { useState } from 'react';
 import { BookOpen, Sparkles, Search } from 'lucide-react';
 import { ROLES } from '../game/roles';
-import { Faction, Language } from '../types/game';
+import { Faction, Language, RoleId } from '../types/game';
 import { TRANSLATIONS } from '../utils/i18n';
+
+const LOCALIZED_ROLE_BADGES: Record<RoleId, Record<Language, string>> = {
+  villager: { vi: '🛡️ Phổ thông', en: '🛡️ Core', fr: '🛡️ Standard', es: '🛡️ Común', ja: '🛡️ 基本' },
+  werewolf: { vi: '🐺 Hung bạo', en: '🐺 Predator', fr: '🐺 Prédateur', es: '🐺 Depredador', ja: '🐺 襲撃' },
+  seer: { vi: '🔮 Thần thánh', en: '🔮 Oracle', fr: '🔮 Oracle', es: '🔮 Oráculo', ja: '🔮 予知' },
+  bodyguard: { vi: '🛡️ Hộ vệ', en: '🛡️ Protector', fr: '🛡️ Protecteur', es: '🛡️ Protector', ja: '🛡️ 護衛' },
+  witch: { vi: '🧪 Dược sư', en: '🧪 Alchemist', fr: '🧪 Alchimiste', es: '🧪 Alquimista', ja: '🧪 薬師' },
+  hunter: { vi: '🎯 Thiện xạ', en: '🎯 Marksman', fr: '🎯 Tireur', es: '🎯 Tirador', ja: '🎯 狙撃' },
+  cupid: { vi: '💘 Se duyên', en: '💘 Matchmaker', fr: '💘 Cupidon', es: '💘 Enlazador', ja: '💘 縁結び' },
+  wolf_pup: { vi: '🔥 Cuồng nộ', en: '🔥 Frenzy', fr: '🔥 Furie', es: '🔥 Furia', ja: '🔥 狂乱' },
+  tanner: { vi: '🎭 Đơn độc', en: '🎭 Solo', fr: '🎭 Solitaire', es: '🎭 Solitario', ja: '🎭 単独' },
+  elder: { vi: '👑 Kiên cường', en: '👑 Resilient', fr: '👑 Résistant', es: '👑 Resistente', ja: '👑 頑強' },
+  doppelganger: { vi: '🪞 Sao chép', en: '🪞 Mimic', fr: '🪞 Imitateur', es: '🪞 Imitador', ja: '🪞 模倣' },
+  cursed: { vi: '🌓 Biến hình', en: '🌓 Shapeshifter', fr: '🌓 Métamorphe', es: '🌓 Cambiaformas', ja: '🌓 変異' },
+  traitor: { vi: '🗡️ Gián điệp', en: '🗡️ Spy', fr: '🗡️ Espion', es: '🗡️ Espía', ja: '🗡️ 間者' },
+};
 
 interface RoleEncyclopediaViewProps {
   lang: Language;
@@ -206,7 +222,7 @@ export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang
                 </div>
 
                 <span className="text-[11px] text-slate-500 font-mono">
-                  {role.badge}
+                  {LOCALIZED_ROLE_BADGES[role.id]?.[lang] || role.badge}
                 </span>
               </div>
 

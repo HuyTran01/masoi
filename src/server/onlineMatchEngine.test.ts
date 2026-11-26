@@ -240,6 +240,16 @@ test('Full multi-human progression: Night -> Dawn Hunter Revenge -> Day Voting (
   assert.equal(night2State.phase, 'night');
   assert.equal(night2State.round, 2);
   assert.equal(night2State.players.filter((p) => p.isAlive).length, 4);
+  // BUG-08 Online Parity: Dusk voteBreakdown preserves Campfire Abstain row with Mayor x2 weight (2 + 1 = 3)
+  const day1AbstainRow = night2State.duskAnnouncement?.voteBreakdown?.find(
+    (row) => row.playerId === CAMPFIRE_ABSTAIN_ID
+  );
+  assert.ok(day1AbstainRow, 'Online Dusk tie voteBreakdown must preserve __CAMPFIRE_ABSTAIN__ row');
+  assert.equal(day1AbstainRow.votes, 3);
+  assert.deepEqual(
+    day1AbstainRow.voters?.map((v) => v.id),
+    ['u_host', 'u_seer']
+  );
 
   // Night 2: Wolf bites u_witch, Witch heals herself, Seer skips -> Peaceful Dawn!
   assert.equal(mgr.submitNightAction('FULL-02', 'u_wolf', { actionType: 'wolf_bite', targetId: 'u_witch' }, t0 + 5000).ok, true);
@@ -262,6 +272,18 @@ test('Full multi-human progression: Night -> Dawn Hunter Revenge -> Day Voting (
     mgr.getMatchState('FULL-02')?.duskAnnouncement?.chatMessageText.includes('__CAMPFIRE_ABSTAIN__'),
     false,
     'Dusk announcement must never leak raw CAMPFIRE_ABSTAIN_ID token'
+  );
+  // BUG-08 Online Parity: Dusk voteBreakdown counts Mayor x2 consistently & preserves auto-abstain row
+  const day2Breakdown = mgr.getMatchState('FULL-02')?.duskAnnouncement?.voteBreakdown || [];
+  assert.equal(
+    day2Breakdown.find((row) => row.playerId === 'u_wolf')?.votes,
+    2,
+    'Mayor x2 vote weight must be reflected in Dusk voteBreakdown'
+  );
+  assert.equal(
+    day2Breakdown.find((row) => row.playerId === CAMPFIRE_ABSTAIN_ID)?.votes,
+    1,
+    'Auto-abstained player must appear in Dusk voteBreakdown abstain row'
   );
 
   // Last wolf lynched -> Villagers win immediately!

@@ -13,6 +13,7 @@ interface AgrouNotebookDrawerProps {
   lang: Language;
   players: Player[];
   meId: string;
+  isAlive?: boolean;
   mayorId: string | null;
   notebook: AgrouNotebookState;
   onUpdatePlayerNote: (playerId: string, patch: Partial<PlayerNotebookNote>) => void;
@@ -61,6 +62,7 @@ export const AgrouNotebookDrawer: React.FC<AgrouNotebookDrawerProps> = ({
   lang,
   players,
   meId,
+  isAlive = true,
   mayorId,
   notebook,
   onUpdatePlayerNote,
@@ -76,7 +78,7 @@ export const AgrouNotebookDrawer: React.FC<AgrouNotebookDrawerProps> = ({
       aria-modal="true"
       aria-label={lang === 'vi' ? 'Sổ Tay Suy Luận Lửa Trại' : 'Campfire Deduction Notebook'}
       data-testid="agrou-notebook-drawer"
-      className="fixed inset-y-3 right-3 z-40 w-[min(410px,calc(100vw-24px))] pointer-events-auto flex flex-col agrou-parchment-panel rounded-2xl overflow-hidden"
+      className="fixed top-16 bottom-3 md:bottom-[124px] right-3 z-40 w-[min(410px,calc(100vw-24px))] pointer-events-auto flex flex-col agrou-parchment-panel rounded-2xl overflow-hidden"
     >
       {/* Parchment Header */}
       <div className="px-4 py-3 bg-[#e6d1ae] border-b-2 border-[#b28450] flex items-center justify-between gap-2">
@@ -288,12 +290,30 @@ export const AgrouNotebookDrawer: React.FC<AgrouNotebookDrawerProps> = ({
       </div>
 
       {/* Footer Share Button */}
-      <div className="px-4 py-2.5 bg-[#e6d1ae] border-t-2 border-[#b28450] flex items-center justify-between gap-2">
+      <div className="px-4 py-2.5 bg-[#e6d1ae] border-t-2 border-[#b28450] space-y-1.5">
+        {!isAlive && (
+          <div
+            data-testid="notebook-ghost-share-notice"
+            className="text-[11px] font-extrabold text-[#7d1919] bg-[#f8e1dc] border border-[#cf7b6f] rounded-lg px-2.5 py-1 text-center"
+          >
+            {lang === 'vi'
+              ? '👻 Hồn Ma không thể gửi lên Chat Làng'
+              : '👻 Ghosts cannot share to Village Chat'}
+          </div>
+        )}
         <button
           type="button"
           data-testid="notebook-share-chat-btn"
-          onClick={onShareSummaryToChat}
-          className="flex-1 py-2 px-3 rounded-xl bg-[#9e4716] hover:bg-[#b5531c] text-[#fff6e8] font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow"
+          disabled={!isAlive}
+          onClick={() => {
+            if (!isAlive) return;
+            onShareSummaryToChat();
+          }}
+          className={`w-full py-2 px-3 rounded-xl font-extrabold text-xs flex items-center justify-center gap-1.5 shadow ${
+            isAlive
+              ? 'bg-[#9e4716] hover:bg-[#b5531c] text-[#fff6e8] cursor-pointer'
+              : 'bg-[#b39879] text-[#5e4630] opacity-65 cursor-not-allowed'
+          }`}
         >
           <Send className="w-3.5 h-3.5" />
           <span>

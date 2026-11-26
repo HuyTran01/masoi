@@ -28,6 +28,7 @@ export interface AgrouSeatVisual {
   ghostWolfEarsGroup: THREE.Group;
   ghostHatVariants: Record<AgrouHatId, THREE.Group>;
   hitbox: THREE.Mesh;
+  ghostHitbox: THREE.Mesh;
   stoolHitbox: THREE.Mesh;
   haloMat: THREE.MeshBasicMaterial;
   lanternMat: THREE.MeshStandardMaterial;
@@ -822,6 +823,7 @@ export function buildAgrouAdventurerPool(
     // 15. Personalized Spectral Ghost Adventurer (matches this exact deceased player's look, hair, beard, pauldrons, backpack, cloak tint & hat!)
     const ghostGroup = new THREE.Group();
     ghostGroup.visible = false;
+    ghostGroup.userData = { seatIndex: i, playerId: '' };
 
     const baseSkinCol = new THREE.Color(SKIN_TONES[i % SKIN_TONES.length]);
     const baseHairCol = new THREE.Color(HAIR_COLORS[i % HAIR_COLORS.length]);
@@ -1180,6 +1182,16 @@ export function buildAgrouAdventurerPool(
       ghostHeadGroup.add(ghostHatVariants[hk]);
     });
 
+    // Raycast Hitbox following the floating ghost spirit (BUG-32)
+    const ghostHitbox = new THREE.Mesh(
+      trackGeo(new THREE.CylinderGeometry(0.58, 0.58, 1.85, 8)),
+      trackMat(new THREE.MeshBasicMaterial({ visible: false }))
+    );
+    ghostHitbox.position.y = 0.85;
+    ghostHitbox.userData = { seatIndex: i, isGhostHitbox: true, playerId: '' };
+    ghostGroup.add(ghostHitbox);
+    clickables.push(ghostHitbox);
+
     scene.add(ghostGroup);
 
     // 16. Raycast Hitbox
@@ -1188,7 +1200,7 @@ export function buildAgrouAdventurerPool(
       trackMat(new THREE.MeshBasicMaterial({ visible: false }))
     );
     hitbox.position.y = 0.95;
-    hitbox.userData = { seatIndex: i };
+    hitbox.userData = { seatIndex: i, playerId: '' };
     group.add(hitbox);
     clickables.push(hitbox);
 
@@ -1221,6 +1233,7 @@ export function buildAgrouAdventurerPool(
       ghostWolfEarsGroup,
       ghostHatVariants,
       hitbox,
+      ghostHitbox,
       stoolHitbox,
       haloMat,
       lanternMat,

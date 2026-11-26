@@ -10,6 +10,7 @@ import type {
 import { ROLES } from '../game/roles.ts';
 import {
   applyDayLynch,
+  buildVoteTallyEntries,
   castSingleDayVote,
   checkWinCondition,
   generateBalancedRoster,
@@ -654,6 +655,11 @@ function finalizeDusk(
     ? beforePlayers.find((p) => p.id === lynchedId) ?? null
     : null;
 
+  const allDuskVotes = match.pendingDuskVotes || [];
+  const playerTargetVotes = allDuskVotes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID);
+  const votingMayorId = beforePlayers.find((p) => p.isMayor)?.id ?? null;
+  const duskTally = tallyVotesWithMayor(allDuskVotes, votingMayorId);
+
   updateMayorAfterDeaths(match, ctx, 'dusk', now);
 
   const duskAnn = buildDuskGMAnnouncement({
@@ -662,13 +668,44 @@ function finalizeDusk(
     afterPlayers: match.players,
     lynchedVictim,
     voteCounts: match.pendingDuskVoteCounts || {},
-    votes: match.pendingDuskVotes || [],
+    votes: playerTargetVotes,
     isTie: Boolean(match.pendingDuskIsTie),
     elderLynchedPenalty: Boolean(match.pendingDuskElderPenalty),
     hunterShotEvent: match.pendingDuskHunterShotEvent ?? null,
     humanPlayerId: '__PUBLIC__',
     lang: 'vi',
   });
+  // Align Dusk voteBreakdown with Mayor x2 weighting & preserve Campfire Abstain row (BUG-08 Online Parity)
+  const weightedBreakdown = buildVoteTallyEntries(beforePlayers, playerTargetVotes).map((entry) => ({
+    ...entry,
+    votes: duskTally.counts[entry.playerId] ?? entry.votes,
+  }));
+  if (duskTally.abstainCount > 0) {
+    const abstainVoters = duskTally.abstainerIds
+      .map((id) => {
+        const idx = beforePlayers.findIndex((p) => p.id === id);
+        if (idx < 0) return null;
+        return {
+          id: beforePlayers[idx].id,
+          name: beforePlayers[idx].name,
+          avatar: beforePlayers[idx].avatar,
+          seatNumber: idx + 1,
+        };
+      })
+      .filter(
+        (v): v is { id: string; name: string; avatar: string; seatNumber: number } => Boolean(v)
+      );
+    weightedBreakdown.push({
+      playerId: CAMPFIRE_ABSTAIN_ID,
+      name: 'Lửa Trại (Phiếu Trắng)',
+      avatar: '🔥',
+      seatNumber: 0,
+      votes: duskTally.abstainCount,
+      voters: abstainVoters,
+    });
+  }
+  weightedBreakdown.sort((a, b) => b.votes - a.votes || a.seatNumber - b.seatNumber);
+  duskAnn.voteBreakdown = weightedBreakdown;
   duskAnn.privateNotice = null;
   duskAnn.isHumanDead = false;
   match.duskAnnouncement = duskAnn;
@@ -877,7 +914,7 @@ function resolveDayVotingToDusk(
   match.pendingDuskBeforePlayers = beforePlayers;
   match.pendingLynchedVictimId = tally.targetId;
   match.pendingDuskVoteCounts = { ...tally.counts };
-  match.pendingDuskVotes = match.dayVotes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID);
+  match.pendingDuskVotes = [...match.dayVotes];
   match.pendingDuskIsTie = tally.isTie;
   match.pendingDuskElderPenalty = false;
   match.pendingDuskHunterShotEvent = null;

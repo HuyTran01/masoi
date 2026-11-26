@@ -9,6 +9,7 @@ import {
   VoteRecord,
 } from '../types/game';
 import { ROLES } from './roles';
+import { UI_TEXT } from '../utils/i18n';
 import {
   buildVoteTallyEntries,
   getDyingWolfVictimsForWitch,
@@ -357,6 +358,7 @@ export function getHumanRoleWakeGuidance(
     };
   }
 
+  const rolePrefix = UI_TEXT[lang].yourRoleIs;
   switch (player.roleId) {
     case 'doppelganger':
       return round === 1
@@ -365,7 +367,9 @@ export function getHumanRoleWakeGuidance(
             headline:
               lang === 'vi'
                 ? `🪞 Vai của bạn (${roleName}) thức dậy ở Bước 1 Đêm Đầu!`
-                : `🪞 Your role (${roleName}) wakes on Step 1 of Night 1!`,
+                : lang === 'en'
+                ? `🪞 Your role (${roleName}) wakes on Step 1 of Night 1!`
+                : `🪞 ${rolePrefix}: ${roleName}`,
             subtext:
               lang === 'vi'
                 ? 'Hãy chọn 1 người chơi làm hình mẫu. Khi người đó chết, bạn sẽ kế thừa vai của họ.'
@@ -376,7 +380,9 @@ export function getHumanRoleWakeGuidance(
             headline:
               lang === 'vi'
                 ? `🪞 ${roleName} chỉ thức dậy vào Đêm 1 (Đang chờ hình mẫu tử trận)`
-                : `🪞 ${roleName} only wakes on Night 1 (Waiting to inherit role)`,
+                : lang === 'en'
+                ? `🪞 ${roleName} only wakes on Night 1 (Waiting to inherit role)`
+                : `🪞 ${rolePrefix}: ${roleName}`,
             subtext:
               lang === 'vi'
                 ? 'Khi người bạn chọn làm hình mẫu chết, bạn sẽ lập tức biến thành vai trò của họ.'
@@ -389,7 +395,9 @@ export function getHumanRoleWakeGuidance(
             headline:
               lang === 'vi'
                 ? `💘 Vai của bạn (${roleName}) thức dậy ở Đêm Đầu Tiên!`
-                : `💘 Your role (${roleName}) wakes on Night 1!`,
+                : lang === 'en'
+                ? `💘 Your role (${roleName}) wakes on Night 1!`
+                : `💘 ${rolePrefix}: ${roleName}`,
             subtext:
               lang === 'vi'
                 ? 'Chọn 2 người chơi bất kỳ để ghép thành cặp Tình Nhân sinh tử.'
@@ -400,7 +408,9 @@ export function getHumanRoleWakeGuidance(
             headline:
               lang === 'vi'
                 ? `💘 ${roleName} đã ghép đôi xong ở Đêm 1 (Từ Đêm 2 ngủ như Dân Làng)`
-                : `💘 ${roleName} already linked Lovers on Night 1 (Sleeps from Night 2+)`,
+                : lang === 'en'
+                ? `💘 ${roleName} already linked Lovers on Night 1 (Sleeps from Night 2+)`
+                : `💘 ${rolePrefix}: ${roleName}`,
             subtext:
               lang === 'vi'
                 ? 'Từ đêm thứ 2 trở đi, Cupid không thức dậy nữa mà suy luận ban ngày cùng Dân Làng.'
@@ -413,7 +423,9 @@ export function getHumanRoleWakeGuidance(
         headline:
           lang === 'vi'
             ? `🐺 Vai của bạn (${roleName}) thức dậy mỗi đêm ở lượt Ma Sói!`
-            : `🐺 Your role (${roleName}) wakes every night on the Werewolf turn!`,
+            : lang === 'en'
+            ? `🐺 Your role (${roleName}) wakes every night on the Werewolf turn!`
+            : `🐺 ${rolePrefix}: ${roleName}`,
         subtext:
           lang === 'vi'
             ? 'Khi Quản Trò Máy gọi Ma Sói, bảng hành động sẽ mở để bạn chọn con mồi.'
@@ -425,7 +437,9 @@ export function getHumanRoleWakeGuidance(
         headline:
           lang === 'vi'
             ? `🧪 Vai của bạn (${roleName}) thức dậy ngay sau lượt Ma Sói!`
-            : `🧪 Your role (${roleName}) wakes right after the Werewolves!`,
+            : lang === 'en'
+            ? `🧪 Your role (${roleName}) wakes right after the Werewolves!`
+            : `🧪 ${rolePrefix}: ${roleName}`,
         subtext:
           lang === 'vi'
             ? 'Quản Trò Máy sẽ báo ai vừa bị Sói cắn để bạn chọn Cứu hoặc Đầu Độc.'
@@ -437,7 +451,9 @@ export function getHumanRoleWakeGuidance(
         headline:
           lang === 'vi'
             ? `🔮 Vai của bạn (${roleName}) thức dậy mỗi đêm ở lượt Tiên Tri!`
-            : `🔮 Your role (${roleName}) wakes every night on the Seer turn!`,
+            : lang === 'en'
+            ? `🔮 Your role (${roleName}) wakes every night on the Seer turn!`
+            : `🔮 ${rolePrefix}: ${roleName}`,
         subtext:
           lang === 'vi'
             ? 'Khi đến lượt Tiên Tri, hãy chọn 1 người chơi để biết chính xác họ là Sói hay Dân.'
@@ -449,7 +465,9 @@ export function getHumanRoleWakeGuidance(
         headline:
           lang === 'vi'
             ? `🛡️ Vai của bạn (${roleName}) thức dậy mỗi đêm ở lượt Bảo Vệ!`
-            : `🛡️ Your role (${roleName}) wakes every night on the Bodyguard turn!`,
+            : lang === 'en'
+            ? `🛡️ Your role (${roleName}) wakes every night on the Bodyguard turn!`
+            : `🛡️ ${rolePrefix}: ${roleName}`,
         subtext:
           lang === 'vi'
             ? 'Chọn 1 người để đặt khiên chống Sói cắn (không trùng người đêm trước).'
@@ -461,7 +479,9 @@ export function getHumanRoleWakeGuidance(
         headline:
           lang === 'vi'
             ? `🎯 Vai của bạn là ${roleName} (Kỹ năng Phản Đòn Khi Chết — Ngủ ban đêm)`
-            : `🎯 Your role is ${roleName} (Death Retribution Passive — Sleeps at night)`,
+            : lang === 'en'
+            ? `🎯 Your role is ${roleName} (Death Retribution Passive — Sleeps at night)`
+            : `🎯 ${rolePrefix} ${roleName}`,
         subtext:
           lang === 'vi'
             ? 'Thợ Săn không thức dậy ban đêm. Ngay khi bạn bị Sói cắn hoặc bị treo cổ, Quản Trò Máy sẽ gọi bạn rút súng bắn kéo theo 1 người!'
@@ -473,7 +493,9 @@ export function getHumanRoleWakeGuidance(
         headline:
           lang === 'vi'
             ? `👑 Vai của bạn là ${roleName} (Nội tại 2 Mạng chống Sói — Ngủ ban đêm)`
-            : `👑 Your role is ${roleName} (2 Lives vs Wolves Passive — Sleeps at night)`,
+            : lang === 'en'
+            ? `👑 Your role is ${roleName} (2 Lives vs Wolves Passive — Sleeps at night)`
+            : `👑 ${rolePrefix} ${roleName}`,
         subtext:
           lang === 'vi'
             ? `Bạn có ${player.elderLives ?? 2} mạng trước hàm răng Ma Sói và tự động chịu đòn mà không cần thức dậy.`
@@ -485,7 +507,9 @@ export function getHumanRoleWakeGuidance(
         headline:
           lang === 'vi'
             ? `🌓 Vai của bạn là ${roleName} (Nội tại Hóa Sói khi bị cắn — Ngủ ban đêm)`
-            : `🌓 Your role is ${roleName} (Turns into Werewolf if bitten — Sleeps at night)`,
+            : lang === 'en'
+            ? `🌓 Your role is ${roleName} (Turns into Werewolf if bitten — Sleeps at night)`
+            : `🌓 ${rolePrefix} ${roleName}`,
         subtext:
           lang === 'vi'
             ? 'Hiện tại bạn thuộc phe Dân Làng. Nếu đêm nay bị Sói cắn, bạn không chết mà biến thành Ma Sói từ đêm sau!'
@@ -497,7 +521,9 @@ export function getHumanRoleWakeGuidance(
         headline:
           lang === 'vi'
             ? `🎭 Vai của bạn là ${roleName} (Thắng khi bị treo cổ ban ngày — Ngủ ban đêm)`
-            : `🎭 Your role is ${roleName} (Wins if executed by Day Vote — Sleeps at night)`,
+            : lang === 'en'
+            ? `🎭 Your role is ${roleName} (Wins if executed by Day Vote — Sleeps at night)`
+            : `🎭 ${rolePrefix} ${roleName}`,
         subtext:
           lang === 'vi'
             ? 'Ban đêm bạn ngủ. Khi trời sáng, hãy giả vờ khả nghi để lừa cả làng bỏ phiếu treo cổ mình!'
@@ -509,7 +535,9 @@ export function getHumanRoleWakeGuidance(
         headline:
           lang === 'vi'
             ? `🗡️ Vai của bạn là ${roleName} (Gián điệp Phe Sói — Không thức ban đêm)`
-            : `🗡️ Your role is ${roleName} (Werewolf Minion — Sleeps at night)`,
+            : lang === 'en'
+            ? `🗡️ Your role is ${roleName} (Werewolf Minion — Sleeps at night)`
+            : `🗡️ ${rolePrefix} ${roleName}`,
         subtext:
           lang === 'vi'
             ? 'Bạn thắng cùng phe Ma Sói và Tiên Tri soi bạn ra Dân Làng. Hãy bảo vệ Sói vào ban ngày!'
@@ -521,7 +549,9 @@ export function getHumanRoleWakeGuidance(
         headline:
           lang === 'vi'
             ? `🧑‍🌾 Vai của bạn là ${roleName} (Không có kỹ năng đêm — Suy luận ban ngày)`
-            : `🧑‍🌾 Your role is ${roleName} (No night action — Day Deduction & Voting)`,
+            : lang === 'en'
+            ? `🧑‍🌾 Your role is ${roleName} (No night action — Day Deduction & Voting)`
+            : `🧑‍🌾 ${rolePrefix} ${roleName}`,
         subtext:
           lang === 'vi'
             ? 'Dân Làng ngủ suốt đêm. Bạn có thể bấm "Tua Tới Sáng" ngay để bước vào Thảo Luận & Bỏ Phiếu!'

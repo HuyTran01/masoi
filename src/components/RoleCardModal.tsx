@@ -8,6 +8,7 @@ interface RoleCardModalProps {
   roleId: RoleId;
   playerName: string;
   isAlive: boolean;
+  isMidMatch?: boolean;
   lang: Language;
   onClose: () => void;
   onStartTour?: () => void;
@@ -32,6 +33,7 @@ const ROLE_CARD_TEXT: Record<
     tipsTitle: string;
     hideBtn: string;
     enterBtn: string;
+    closeCardBtn: string;
     tourBtn: string;
   }
 > = {
@@ -52,6 +54,7 @@ const ROLE_CARD_TEXT: Record<
     tipsTitle: 'Chiến Thuật & Mẹo Chơi:',
     hideBtn: 'Úp Thẻ Bảo Mật',
     enterBtn: 'Vào Trận Ngay',
+    closeCardBtn: 'Đóng Thẻ Bài',
     tourBtn: '🧭 Hướng dẫn 5 bước',
   },
   en: {
@@ -71,6 +74,7 @@ const ROLE_CARD_TEXT: Record<
     tipsTitle: 'Strategy & Tips:',
     hideBtn: 'Hide Card',
     enterBtn: 'Enter Match',
+    closeCardBtn: 'Close Card',
     tourBtn: '🧭 5-Step Guide',
   },
   fr: {
@@ -90,6 +94,7 @@ const ROLE_CARD_TEXT: Record<
     tipsTitle: 'Stratégie & Conseils :',
     hideBtn: 'Cacher la Carte',
     enterBtn: 'Jouer',
+    closeCardBtn: 'Fermer la Carte',
     tourBtn: '🧭 Guide en 5 étapes',
   },
   es: {
@@ -109,6 +114,7 @@ const ROLE_CARD_TEXT: Record<
     tipsTitle: 'Estrategia y Consejos:',
     hideBtn: 'Ocultar Carta',
     enterBtn: 'Entrar al Juego',
+    closeCardBtn: 'Cerrar Carta',
     tourBtn: '🧭 Guía de 5 pasos',
   },
   ja: {
@@ -128,6 +134,7 @@ const ROLE_CARD_TEXT: Record<
     tipsTitle: '戦略とヒント：',
     hideBtn: 'カードを伏せる',
     enterBtn: '試合へ進む',
+    closeCardBtn: 'カードを閉じる',
     tourBtn: '🧭 5ステップガイド',
   },
 };
@@ -136,6 +143,7 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
   roleId,
   playerName,
   isAlive,
+  isMidMatch = false,
   lang,
   onClose,
   onStartTour,
@@ -203,10 +211,14 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
       aria-modal="true"
       aria-labelledby="role-card-modal-title"
       data-testid="role-card-modal"
+      onClick={onClose}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto pointer-events-auto"
       style={{ backgroundColor: 'rgba(5, 8, 17, 0.88)' }}
     >
-      <div className="relative w-full max-w-md bg-[#0d1322] border-2 border-amber-600/50 rounded-2xl p-5 shadow-2xl text-slate-100">
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-md bg-[#0d1322] border-2 border-amber-600/50 rounded-2xl p-5 shadow-2xl text-slate-100"
+      >
         {/* Close Button */}
         <button
           type="button"
@@ -316,7 +328,7 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
                   onClick={onClose}
                   className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold cursor-pointer"
                 >
-                  {ct.enterBtn}
+                  {isMidMatch ? ct.closeCardBtn : ct.enterBtn}
                 </button>
               </div>
 

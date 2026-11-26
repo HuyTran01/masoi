@@ -1,6 +1,44 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { AGROU_CLOAK_COLORS, AGROU_HATS, AgrouHatId, AgrouMapBiome } from '../game/agrouMechanics';
+import { Language } from '../types/game';
+
+const BIOME_PREVIEW_THEMES: Record<
+  AgrouMapBiome,
+  {
+    bgCss: string;
+    hemiSky: number;
+    hemiGround: number;
+    keyColor: number;
+    rimColor: number;
+    pedestalColor: number;
+  }
+> = {
+  forest: {
+    bgCss: 'radial-gradient(circle at 50% 35%, #24402a 0%, #162419 60%, #0e140f 100%)',
+    hemiSky: 0xffe6bd,
+    hemiGround: 0x243b22,
+    keyColor: 0xfff1d6,
+    rimColor: 0xff8c3a,
+    pedestalColor: 0x4d331f,
+  },
+  frostpeak: {
+    bgCss: 'radial-gradient(circle at 50% 32%, #2b5984 0%, #162c47 60%, #0b1626 100%)',
+    hemiSky: 0xdff2ff,
+    hemiGround: 0x5d748f,
+    keyColor: 0xe8f6ff,
+    rimColor: 0x38bdf8,
+    pedestalColor: 0x9bb7cf,
+  },
+  autumn: {
+    bgCss: 'radial-gradient(circle at 50% 35%, #3c7a42 0%, #204526 60%, #112416 100%)',
+    hemiSky: 0xd8f3ff,
+    hemiGround: 0x4e7535,
+    keyColor: 0xfff3c4,
+    rimColor: 0xfacc15,
+    pedestalColor: 0x638f3d,
+  },
+};
 
 function buildPreviewHat(hat: AgrouHatId): THREE.Group {
   const g = new THREE.Group();
@@ -68,25 +106,27 @@ interface AvatarPreview3DProps {
   cloakColor: number;
   mapBiome?: AgrouMapBiome;
   playerName?: string;
+  lang?: Language;
 }
 
-const Fallback2DAvatarPreview: React.FC<{ hat: AgrouHatId; cloakColor: number }> = ({
-  hat,
-  cloakColor,
-}) => {
+const Fallback2DAvatarPreview: React.FC<{
+  hat: AgrouHatId;
+  cloakColor: number;
+  mapBiome: AgrouMapBiome;
+  lang: Language;
+}> = ({ hat, cloakColor, mapBiome, lang }) => {
   const hexColor =
     AGROU_CLOAK_COLORS.find((c) => c.hex === cloakColor)?.cssHex ||
     `#${(cloakColor >>> 0).toString(16).padStart(6, '0')}`;
   const hatMeta = AGROU_HATS.find((h) => h.id === hat);
+  const theme = BIOME_PREVIEW_THEMES[mapBiome] || BIOME_PREVIEW_THEMES.forest;
 
   return (
     <div
       data-testid="avatar-preview-2d-fallback"
-      className="w-full h-full flex flex-col items-center justify-center relative select-none"
-      style={{
-        background:
-          'radial-gradient(circle at 50% 35%, #473221 0%, #241810 68%, #150e09 100%)',
-      }}
+      data-biome={mapBiome}
+      className="w-full h-full flex flex-col items-center justify-center relative select-none rounded-xl overflow-hidden"
+      style={{ background: theme.bgCss }}
     >
       <svg
         viewBox="0 0 180 210"
@@ -157,26 +197,35 @@ const Fallback2DAvatarPreview: React.FC<{ hat: AgrouHatId; cloakColor: number }>
       </svg>
       {hatMeta && (
         <span className="mt-1 px-2.5 py-0.5 rounded-full bg-[#1a110b]/85 border border-[#8e6338]/70 text-xs font-bold text-[#f6d99a]">
-          {hatMeta.icon} {hatMeta.label.vi}
+          {hatMeta.icon} {hatMeta.label[lang] || hatMeta.label.vi}
         </span>
       )}
     </div>
   );
 };
 
-export const AvatarPreview3D: React.FC<AvatarPreview3DProps> = ({ hat, cloakColor }) => {
+export const AvatarPreview3D: React.FC<AvatarPreview3DProps> = ({
+  hat,
+  cloakColor,
+  mapBiome = 'forest',
+  lang = 'vi',
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const hatRef = useRef(hat);
   const cloakRef = useRef(cloakColor);
+  const biomeRef = useRef<AgrouMapBiome>(mapBiome);
   const rebuildRef = useRef<(() => void) | null>(null);
+  const rotRef = useRef({ yaw: 0, pitch: 0, dragging: false, interacted: false, lastX: 0, lastY: 0 });
+  const [isDragging, setIsDragging] = useState(false);
   const [useFallback2D, setUseFallback2D] = useState(false);
 
   hatRef.current = hat;
   cloakRef.current = cloakColor;
+  biomeRef.current = mapBiome;
 
   useEffect(() => {
     rebuildRef.current?.();
-  }, [hat, cloakColor]);
+  }, [hat, cloakColor, mapBiome]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -209,18 +258,22 @@ export const AvatarPreview3D: React.FC<AvatarPreview3DProps> = ({ hat, cloakColo
     camera.position.set(0, 1.45, 3.6);
     camera.lookAt(0, 1.0, 0);
 
-    scene.add(new THREE.HemisphereLight(0xffe6bd, 0x2b1d12, 1.35));
-    const keyLight = new THREE.DirectionalLight(0xfff1d6, 1.75);
+    const initTheme = BIOME_PREVIEW_THEMES[biomeRef.current] || BIOME_PREVIEW_THEMES.forest;
+    const hemiLight = new THREE.HemisphereLight(initTheme.hemiSky, initTheme.hemiGround, 1.35);
+    scene.add(hemiLight);
+    const keyLight = new THREE.DirectionalLight(initTheme.keyColor, 1.75);
     keyLight.position.set(2.5, 4, 3);
     scene.add(keyLight);
-    const rimLight = new THREE.PointLight(0xff8c3a, 1.5, 8);
+    const rimLight = new THREE.PointLight(initTheme.rimColor, 1.5, 8);
     rimLight.position.set(-2, 1.6, -1.5);
     scene.add(rimLight);
 
-    const pedestal = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.95, 1.05, 0.18, 12),
-      new THREE.MeshStandardMaterial({ color: 0x4d331f, roughness: 0.9, flatShading: true })
-    );
+    const pedestalMat = new THREE.MeshStandardMaterial({
+      color: initTheme.pedestalColor,
+      roughness: 0.9,
+      flatShading: true,
+    });
+    const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.05, 0.18, 12), pedestalMat);
     pedestal.position.y = -0.09;
     scene.add(pedestal);
 
@@ -285,6 +338,12 @@ export const AvatarPreview3D: React.FC<AvatarPreview3DProps> = ({ hat, cloakColo
 
     const applyCosmetics = () => {
       cloakMat.color.setHex(cloakRef.current);
+      const theme = BIOME_PREVIEW_THEMES[biomeRef.current] || BIOME_PREVIEW_THEMES.forest;
+      hemiLight.color.setHex(theme.hemiSky);
+      hemiLight.groundColor.setHex(theme.hemiGround);
+      keyLight.color.setHex(theme.keyColor);
+      rimLight.color.setHex(theme.rimColor);
+      pedestalMat.color.setHex(theme.pedestalColor);
       while (hatAnchor.children.length > 0) {
         hatAnchor.remove(hatAnchor.children[0]);
       }
@@ -296,19 +355,45 @@ export const AvatarPreview3D: React.FC<AvatarPreview3DProps> = ({ hat, cloakColo
     rebuildRef.current = applyCosmetics;
     applyCosmetics();
 
+    const resizeObserver =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(() => {
+            if (!renderer) return;
+            const nw = container.clientWidth;
+            const nh = container.clientHeight;
+            if (nw > 0 && nh > 0) {
+              camera.aspect = nw / nh;
+              camera.updateProjectionMatrix();
+              renderer.setSize(nw, nh);
+            }
+          })
+        : null;
+    resizeObserver?.observe(container);
+
     let rafId = 0;
     const clock = new THREE.Clock();
     const animate = () => {
       rafId = requestAnimationFrame(animate);
       const t = clock.getElapsedTime();
-      heroGroup.rotation.y = Math.sin(t * 0.75) * 0.65;
-      heroGroup.position.y = Math.sin(t * 2.2) * 0.03;
+      const rot = rotRef.current;
+      if (rot.interacted) {
+        heroGroup.rotation.y = rot.yaw;
+        heroGroup.rotation.x = rot.pitch;
+        heroGroup.position.y = rot.dragging ? 0 : Math.sin(t * 2.2) * 0.025;
+      } else {
+        const swayY = Math.sin(t * 0.75) * 0.65;
+        heroGroup.rotation.y = swayY;
+        heroGroup.rotation.x = 0;
+        heroGroup.position.y = Math.sin(t * 2.2) * 0.03;
+        rot.yaw = swayY;
+      }
       renderer?.render(scene, camera);
     };
     animate();
 
     return () => {
       cancelAnimationFrame(rafId);
+      resizeObserver?.disconnect();
       rebuildRef.current = null;
       if (renderer) {
         renderer.domElement.removeEventListener('webglcontextlost', onContextLost);
@@ -321,8 +406,50 @@ export const AvatarPreview3D: React.FC<AvatarPreview3DProps> = ({ hat, cloakColo
   }, [useFallback2D]);
 
   if (useFallback2D) {
-    return <Fallback2DAvatarPreview hat={hat} cloakColor={cloakColor} />;
+    return (
+      <Fallback2DAvatarPreview hat={hat} cloakColor={cloakColor} mapBiome={mapBiome} lang={lang} />
+    );
   }
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  const activeTheme = BIOME_PREVIEW_THEMES[mapBiome] || BIOME_PREVIEW_THEMES.forest;
+
+  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!rotRef.current.dragging) return;
+    rotRef.current.dragging = false;
+    setIsDragging(false);
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      data-testid="avatar-preview-3d-canvas"
+      data-biome={mapBiome}
+      style={{ background: activeTheme.bgCss }}
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture?.(e.pointerId);
+        rotRef.current.dragging = true;
+        rotRef.current.interacted = true;
+        rotRef.current.lastX = e.clientX;
+        rotRef.current.lastY = e.clientY;
+        setIsDragging(true);
+      }}
+      onPointerMove={(e) => {
+        if (!rotRef.current.dragging) return;
+        const dx = e.clientX - rotRef.current.lastX;
+        const dy = e.clientY - rotRef.current.lastY;
+        rotRef.current.yaw += dx * 0.014;
+        rotRef.current.pitch = Math.max(-0.35, Math.min(0.35, rotRef.current.pitch + dy * 0.008));
+        rotRef.current.lastX = e.clientX;
+        rotRef.current.lastY = e.clientY;
+      }}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      className={`w-full h-full rounded-xl overflow-hidden touch-none select-none ${
+        isDragging ? 'cursor-grabbing' : 'cursor-grab'
+      }`}
+    />
+  );
 };

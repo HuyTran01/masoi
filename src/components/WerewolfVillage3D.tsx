@@ -27,6 +27,9 @@ import {
   CameraViewPreset,
   computeCampfireCircleRadius,
   computeDefaultFpvYawFromSeatAngle,
+  computeFpvYawTowardOrigin,
+  computeCameraViewRay,
+  clampAndSlideCampfireCollision,
   clampFpvPitch,
   computeFpvCameraPose,
   computeThirdPersonCameraPose,
@@ -69,8 +72,13 @@ interface WerewolfVillage3DProps {
   emoteEvents?: AgrouEmoteEvent[];
   deathCinematic?: NightDeathCinematicState | null;
   returnToSeatTrigger?: number;
+  returnToSeatSeq?: number;
+  jumpTriggerSeq?: number;
+  ghostVerticalRate?: number;
+  allowTitleOrbit?: boolean;
   isUiOverlayOpen?: boolean;
   onPointerLockChange?: (locked: boolean) => void;
+  onFreeLookChange?: (active: boolean) => void;
   onAimedPlayerChange?: (playerId: string | null) => void;
   onAimedCampfireChange?: (aimed: boolean) => void;
   onAimedOwnSeatChange?: (aimed: boolean) => void;
@@ -78,6 +86,7 @@ interface WerewolfVillage3DProps {
   onReturnToSeat?: () => void;
   onSelectPlayer: (playerId: string) => void;
   onVoteCampfireAbstain?: () => void;
+  onSelectCampfire?: () => void;
 }
 
 interface ActiveProjectile3D {
@@ -170,8 +179,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
   emoteEvents = [],
   deathCinematic = null,
   returnToSeatTrigger = 0,
+  returnToSeatSeq = 0,
+  jumpTriggerSeq = 0,
+  ghostVerticalRate = 0,
+  allowTitleOrbit = false,
   isUiOverlayOpen = false,
   onPointerLockChange,
+  onFreeLookChange,
   onAimedPlayerChange,
   onAimedCampfireChange,
   onAimedOwnSeatChange,
@@ -179,8 +193,10 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
   onReturnToSeat,
   onSelectPlayer,
   onVoteCampfireAbstain,
+  onSelectCampfire,
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
+  const canvasElemRef = useRef<HTMLCanvasElement | null>(null);
   const labelContainerRef = useRef<HTMLDivElement>(null);
   const labelElsRef = useRef<(HTMLDivElement | null)[]>([]);
   const campfireLabelRef = useRef<HTMLDivElement | null>(null);
@@ -213,8 +229,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     emoteEvents,
     deathCinematic,
     returnToSeatTrigger,
+    returnToSeatSeq,
+    jumpTriggerSeq,
+    ghostVerticalRate,
+    allowTitleOrbit,
     isUiOverlayOpen,
     onPointerLockChange,
+    onFreeLookChange,
     onAimedPlayerChange,
     onAimedCampfireChange,
     onAimedOwnSeatChange,
@@ -222,6 +243,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     onReturnToSeat,
     onSelectPlayer,
     onVoteCampfireAbstain,
+    onSelectCampfire,
     hoveredPlayerId: null as string | null,
     hoveredCampfire: false,
     hoveredOwnSeat: false,
@@ -239,21 +261,20 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     polarAngle: 0.41,
     cameraDist: 15.6,
     isDraggingOrbit: false,
+    hasUserDraggedTitle: false,
     isPointerLocked: false,
-    requestPointerLockFlag: false,
     releasePointerLockFlag: false,
     // First-Person & Third-Person Direct-Look State
     fpvYaw: Math.PI,
     fpvPitch: -0.04,
     fpvThrowSwingTimer: 0,
     snapCameraImmediate: false,
-    resetDirectLookAnchor: false,
+    resetDirectLookAnchor: true,
     // Open-World Roaming, Jump/Sprint/Crouch & Mouse Gaze Tracking
     userRoamX: 0,
     userRoamZ: 5.65,
     isUserRoaming: false,
     dashTargetPos: null as THREE.Vector3 | null,
-    lastProximitySelectTime: 0,
     jumpQueued: false,
     crouchToggled: false,
     mouseWorldLookPoint: new THREE.Vector3(0, 1.35, 0),
@@ -269,8 +290,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     const prevPreset = stateRef.current.cameraPreset;
     const prevDeath = stateRef.current.deathCinematic;
     const prevReturnTrigger = stateRef.current.returnToSeatTrigger;
+    const prevReturnSeq = stateRef.current.returnToSeatSeq;
+    const prevJumpSeq = stateRef.current.jumpTriggerSeq;
     const prevFreeLook = stateRef.current.freeLook360;
     const prevUiOpen = stateRef.current.isUiOverlayOpen;
+    const prevTitleScreen = stateRef.current.isTitleScreen;
+    const prevAllowTitleOrbit = stateRef.current.allowTitleOrbit;
+    const prevUserPlayerId = stateRef.current.userPlayerId;
     stateRef.current = {
       ...stateRef.current,
       players,
@@ -296,8 +322,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       emoteEvents,
       deathCinematic,
       returnToSeatTrigger,
+      returnToSeatSeq,
+      jumpTriggerSeq,
+      ghostVerticalRate,
+      allowTitleOrbit,
       isUiOverlayOpen,
       onPointerLockChange,
+      onFreeLookChange,
       onAimedPlayerChange,
       onAimedCampfireChange,
       onAimedOwnSeatChange,
@@ -305,17 +336,40 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       onReturnToSeat,
       onSelectPlayer,
       onVoteCampfireAbstain,
+      onSelectCampfire,
     };
 
-    if (freeLook360 && !prevFreeLook && !isUiOverlayOpen && !isTitleScreen) {
-      stateRef.current.requestPointerLockFlag = true;
-    } else if (
+    if (
       (!freeLook360 && prevFreeLook) ||
       (isUiOverlayOpen && !prevUiOpen) ||
       isTitleScreen ||
       Boolean(deathCinematic)
     ) {
       stateRef.current.releasePointerLockFlag = true;
+    }
+
+    const canTitleOrbitNow = isTitleScreen && Boolean(allowTitleOrbit);
+    if (isUiOverlayOpen && !prevUiOpen && !canTitleOrbitNow) {
+      stateRef.current.keysPressed.clear();
+      stateRef.current.isDraggingOrbit = false;
+      if (canvasElemRef.current) {
+        canvasElemRef.current.style.cursor = '';
+      }
+    }
+
+    if (!allowTitleOrbit && prevAllowTitleOrbit) {
+      stateRef.current.hasUserDraggedTitle = false;
+      stateRef.current.isDraggingOrbit = false;
+      if (canvasElemRef.current) {
+        canvasElemRef.current.style.cursor = '';
+      }
+    }
+
+    if (prevTitleScreen && !isTitleScreen) {
+      stateRef.current.hasUserDraggedTitle = false;
+      stateRef.current.azimuthAngle = 0;
+      stateRef.current.polarAngle = 0.41;
+      stateRef.current.cameraDist = 15.6;
     }
 
     if (deathCinematic && deathCinematic !== prevDeath) {
@@ -325,37 +379,80 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
     if (cameraPreset !== prevPreset) {
       stateRef.current.snapCameraImmediate = true;
-      stateRef.current.resetDirectLookAnchor = true;
+      if (cameraPreset === 'overhead') {
+        stateRef.current.polarAngle = 1.12;
+        stateRef.current.cameraDist = 18.2;
+      } else if (cameraPreset === 'dramatic') {
+        stateRef.current.polarAngle = 0.25;
+        stateRef.current.cameraDist = 12.2;
+      } else if (cameraPreset === 'campfire' || cameraPreset === 'orbit') {
+        stateRef.current.polarAngle = 0.41;
+        stateRef.current.cameraDist = 15.6;
+      }
     }
 
-    if (returnToSeatTrigger !== prevReturnTrigger) {
-      stateRef.current.isUserRoaming = false;
-      stateRef.current.dashTargetPos = null;
-      stateRef.current.crouchToggled = false;
+    if (
+      jumpTriggerSeq > 0 &&
+      jumpTriggerSeq !== prevJumpSeq &&
+      !isTitleScreen &&
+      !isUiOverlayOpen
+    ) {
+      const meP = players.find((p) => p.id === userPlayerId);
+      if (meP?.isAlive) {
+        stateRef.current.jumpQueued = true;
+        stateRef.current.isUserRoaming = true;
+      }
+    }
+
+    const triggeredReturnSeq =
+      returnToSeatSeq > 0 &&
+      returnToSeatSeq !== prevReturnSeq &&
+      !isTitleScreen &&
+      !isUiOverlayOpen;
+    if (returnToSeatTrigger !== prevReturnTrigger || triggeredReturnSeq) {
+      const meIdx = players.findIndex((p) => p.id === userPlayerId);
+      const meP = meIdx !== -1 ? players[meIdx] : null;
+      if (triggeredReturnSeq && meP && !meP.isAlive) {
+        const count = Math.max(1, players.length);
+        const circleR = computeCampfireCircleRadius(count);
+        const seatAngle = Math.PI / 2 + (meIdx / count) * Math.PI * 2;
+        stateRef.current.dashTargetPos = new THREE.Vector3(
+          Math.cos(seatAngle) * circleR,
+          0,
+          Math.sin(seatAngle) * circleR
+        );
+      } else {
+        stateRef.current.isUserRoaming = false;
+        stateRef.current.dashTargetPos = null;
+        stateRef.current.crouchToggled = false;
+        if (isDirectLookCameraPreset(cameraPreset)) {
+          stateRef.current.resetDirectLookAnchor = true;
+        }
+      }
     }
 
     if (
       isDirectLookCameraPreset(cameraPreset) &&
-      !isDirectLookCameraPreset(prevPreset)
+      (!isDirectLookCameraPreset(prevPreset) ||
+        userPlayerId !== prevUserPlayerId ||
+        (prevTitleScreen && !isTitleScreen))
     ) {
       const meIdx = Math.max(0, players.findIndex((p) => p.id === userPlayerId));
       const count = Math.max(1, players.length);
-      const circleR = computeCampfireCircleRadius(count);
       const seatAngle = Math.PI / 2 + (meIdx / count) * Math.PI * 2;
       stateRef.current.fpvYaw = computeDefaultFpvYawFromSeatAngle(seatAngle);
       stateRef.current.fpvPitch = cameraPreset === 'third_person' ? -0.1 : -0.04;
-      const meP = players[meIdx];
-      if (meP?.isAlive) {
-        const hx = Math.cos(seatAngle) * circleR;
-        const hz = Math.sin(seatAngle) * circleR;
-        stateRef.current.fpvYaw = Math.atan2(-hx, -hz);
-      }
+      stateRef.current.resetDirectLookAnchor = true;
+      stateRef.current.snapCameraImmediate = true;
     }
 
     if (phase !== prevPhase || isTitleScreen) {
       stateRef.current.isUserRoaming = false;
       stateRef.current.dashTargetPos = null;
       stateRef.current.crouchToggled = false;
+      if (phase !== prevPhase && isDirectLookCameraPreset(cameraPreset)) {
+        stateRef.current.resetDirectLookAnchor = true;
+      }
     }
 
     if (
@@ -408,8 +505,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     emoteEvents,
     deathCinematic,
     returnToSeatTrigger,
+    returnToSeatSeq,
+    jumpTriggerSeq,
+    ghostVerticalRate,
+    allowTitleOrbit,
     isUiOverlayOpen,
     onPointerLockChange,
+    onFreeLookChange,
     onAimedPlayerChange,
     onAimedCampfireChange,
     onAimedOwnSeatChange,
@@ -417,6 +519,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     onReturnToSeat,
     onSelectPlayer,
     onVoteCampfireAbstain,
+    onSelectCampfire,
   ]);
 
   useEffect(() => {
@@ -466,6 +569,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     renderer.setSize(width, height);
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
+    canvasElemRef.current = renderer.domElement;
 
     const onWebglContextLost = (e: Event) => {
       e.preventDefault();
@@ -925,8 +1029,28 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     let lastDragY = 0;
     let lastDragClientX = 0;
     let isPointerDown = false;
+    let activePointerId: number | null = null;
     let activePointerButton = 0;
     let dragDistance = 0;
+    let pointerLockAcquiredAt = 0;
+
+    const getIdleCursor = () => {
+      const st = stateRef.current;
+      const canTitleOrbit = st.isTitleScreen && Boolean(st.allowTitleOrbit);
+      if (st.isTitleScreen) return canTitleOrbit ? 'grab' : '';
+      if (st.isUiOverlayOpen) return '';
+      return isDirectLookCameraPreset(st.cameraPreset) ? 'crosshair' : 'grab';
+    };
+
+    const resetActiveInputs = () => {
+      stateRef.current.keysPressed.clear();
+      isPointerDown = false;
+      activePointerId = null;
+      activePointerButton = 0;
+      dragDistance = 0;
+      stateRef.current.isDraggingOrbit = false;
+      renderer.domElement.style.cursor = '';
+    };
 
     const getRayHitTarget = (
       clientX: number,
@@ -949,12 +1073,28 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         }
         const seatIdx = hit.object.userData.seatIndex;
         const seat = seats[seatIdx];
-        if (seat && seat.group.visible && seat.playerId) {
+        if (!seat || !seat.playerId) continue;
+        if (hit.object.userData.isGhostHitbox) {
+          if (seat.ghostGroup.visible) {
+            return { playerId: seat.playerId, isCampfire: false, isOwnSeat: false };
+          }
+          continue;
+        }
+        if (seat.group.visible) {
           return { playerId: seat.playerId, isCampfire: false, isOwnSeat: false };
         }
       }
-      // Check clickable own empty wooden stool when player is standing/roaming!
       const st = stateRef.current;
+      // Fallback stone-ring campfire check during day_voting so clicking the fire rocks also abstains
+      if (
+        st.phase === 'day_voting' &&
+        !st.isTitleScreen &&
+        raycaster.ray.intersectPlane(groundPlane, groundHitPoint) &&
+        Math.hypot(groundHitPoint.x, groundHitPoint.z) < 1.45
+      ) {
+        return { playerId: null, isCampfire: true, isOwnSeat: false };
+      }
+      // Check clickable own empty wooden stool when player is standing/roaming!
       if (st.isUserRoaming && !st.isTitleScreen) {
         const myIdx = st.players.findIndex((p) => p.id === st.userPlayerId && p.isAlive);
         if (myIdx !== -1 && seats[myIdx] && seats[myIdx].seatAnchorGroup.visible) {
@@ -965,22 +1105,6 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         }
       }
       return { playerId: null, isCampfire: false, isOwnSeat: false };
-    };
-
-    const requestCanvasPointerLock = () => {
-      try {
-        if (
-          document.pointerLockElement !== renderer.domElement &&
-          typeof renderer.domElement.requestPointerLock === 'function'
-        ) {
-          const maybePromise = renderer.domElement.requestPointerLock() as unknown as Promise<void> | undefined;
-          if (maybePromise && typeof maybePromise.catch === 'function') {
-            maybePromise.catch(() => {});
-          }
-        }
-      } catch {
-        // Ignore browser/iframe pointer lock refusal; drag + edge-pan still works smoothly
-      }
     };
 
     const releaseCanvasPointerLock = () => {
@@ -996,28 +1120,38 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     const onPointerLockChange = () => {
       const locked = document.pointerLockElement === renderer.domElement;
       stateRef.current.isPointerLocked = locked;
+      if (locked) {
+        pointerLockAcquiredAt = performance.now();
+      }
       stateRef.current.onPointerLockChange?.(locked);
+      stateRef.current.onFreeLookChange?.(locked);
+    };
+
+    const onPointerLockError = () => {
+      stateRef.current.isPointerLocked = false;
+      stateRef.current.onPointerLockChange?.(false);
+      stateRef.current.onFreeLookChange?.(false);
     };
 
     const onContextMenu = (e: MouseEvent) => {
-      // Allow smooth right-click drag camera rotation without browser popup menu
+      // Allow smooth right-click drag camera rotation on 3D canvas without blocking inputs/modals
       e.preventDefault();
     };
 
     const onPointerDown = (e: PointerEvent) => {
       const st = stateRef.current;
-      if (st.isUiOverlayOpen || st.isTitleScreen) return;
-      const isRightClick = e.button === 2;
-      if (!isRightClick && e.target !== renderer.domElement) return;
-      const targetEl = e.target as HTMLElement | null;
-      if (
-        isRightClick &&
-        targetEl &&
-        ['INPUT', 'TEXTAREA', 'SELECT'].includes(targetEl.tagName)
-      ) {
+      const canTitleOrbit = st.isTitleScreen && Boolean(st.allowTitleOrbit);
+      if (st.isTitleScreen ? !canTitleOrbit : st.isUiOverlayOpen) return;
+      const isPointerLocked = document.pointerLockElement === renderer.domElement;
+      // Restrict both left-click and right-click drag initiation to the 3D canvas
+      if (!isPointerLocked && e.target !== renderer.domElement) return;
+      // Ignore secondary touches while a drag is already active
+      if (isPointerDown && activePointerId !== null && e.pointerId !== activePointerId) {
         return;
       }
+      const isRightClick = e.button === 2;
       isPointerDown = true;
+      activePointerId = e.pointerId;
       activePointerButton = e.button;
       lastDragX = e.clientX;
       lastDragY = e.clientY;
@@ -1026,6 +1160,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       if (isRightClick) {
         // Right-click immediately engages pure camera look drag (never accidental walk/select)
         st.isDraggingOrbit = true;
+        if (canTitleOrbit) st.hasUserDraggedTitle = true;
         renderer.domElement.style.cursor = 'grabbing';
       }
     };
@@ -1039,6 +1174,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     };
 
     const onPointerMove = (e: PointerEvent) => {
+      if (isPointerDown && activePointerId !== null && e.pointerId !== activePointerId) {
+        return;
+      }
       const st = stateRef.current;
       const mePlayer = st.players.find((p) => p.id === st.userPlayerId);
       const isBlindfoldedNow =
@@ -1047,9 +1185,24 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       const isPointerLocked = document.pointerLockElement === renderer.domElement;
       st.isPointerLocked = isPointerLocked;
 
+      const canTitleOrbit = st.isTitleScreen && Boolean(st.allowTitleOrbit);
+      if (
+        (st.isTitleScreen && !canTitleOrbit) ||
+        (!st.isTitleScreen && (st.isUiOverlayOpen || isBlindfoldedNow || Boolean(st.deathCinematic)))
+      ) {
+        if (isPointerDown) {
+          isPointerDown = false;
+          activePointerId = null;
+          st.isDraggingOrbit = false;
+          renderer.domElement.style.cursor = '';
+        }
+        return;
+      }
+
       const isDraggingCanvas = isPointerDown && (activePointerButton === 2 || dragDistance > 4);
       const canRotateNow = shouldApplyCameraLook({
         isTitleScreen: st.isTitleScreen,
+        allowTitleOrbit: canTitleOrbit,
         isNightBlindfolded: isBlindfoldedNow,
         hasDeathCinematic: Boolean(st.deathCinematic),
         isUiOverlayOpen: st.isUiOverlayOpen,
@@ -1057,19 +1210,12 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         isDraggingCanvas: isPointerDown,
       });
 
-      if (st.isUiOverlayOpen || st.isTitleScreen || isBlindfoldedNow || st.deathCinematic) {
-        if (isPointerDown) {
-          isPointerDown = false;
-          st.isDraggingOrbit = false;
-        }
-        return;
-      }
-
-      if (isPointerLocked) {
+      if (isPointerLocked && !st.isTitleScreen) {
         // TRUE INFINITE 360° POINTER LOCK LOOK (zero screen-edge limits, menus paused until Esc/Alt)
         const dx = e.movementX || 0;
         const dy = e.movementY || 0;
-        if (Math.abs(dx) < 220 && Math.abs(dy) < 220 && (dx !== 0 || dy !== 0)) {
+        const spikeLimit = performance.now() - pointerLockAcquiredAt < 120 ? 45 : 220;
+        if (Math.abs(dx) < spikeLimit && Math.abs(dy) < spikeLimit && (dx !== 0 || dy !== 0)) {
           if (isDirectLook) {
             st.fpvYaw -= dx * 0.0042;
             st.fpvPitch = clampFpvPitch(
@@ -1093,7 +1239,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
         if (activePointerButton === 2 || dragDistance > 4) {
           st.isDraggingOrbit = true;
-          if (isDirectLook) {
+          if (canTitleOrbit) st.hasUserDraggedTitle = true;
+          renderer.domElement.style.cursor = 'grabbing';
+          if (isDirectLook && !st.isTitleScreen) {
             st.fpvYaw -= dx * 0.0058;
             st.fpvPitch = clampFpvPitch(
               st.fpvPitch - dy * 0.0045,
@@ -1107,6 +1255,11 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         }
       }
 
+      if (st.isTitleScreen) {
+        renderer.domElement.style.cursor = st.isDraggingOrbit ? 'grabbing' : canTitleOrbit ? 'grab' : '';
+        return;
+      }
+
       // Skip hover raycast & head-gaze tracking when pointer is over HUD/menus (not canvas)
       if (!isPointerLocked && e.target !== renderer.domElement) {
         return;
@@ -1116,7 +1269,12 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       if (now - lastHoverTime < 38) return;
       lastHoverTime = now;
       const hit = isPointerLocked
-        ? { playerId: st.aimedPlayerId, isCampfire: st.aimedCampfire, isOwnSeat: st.aimedOwnSeat }
+        ? isDirectLook
+          ? { playerId: st.aimedPlayerId, isCampfire: st.aimedCampfire, isOwnSeat: st.aimedOwnSeat }
+          : (() => {
+              const rect = renderer.domElement.getBoundingClientRect();
+              return getRayHitTarget(rect.left + rect.width / 2, rect.top + rect.height / 2);
+            })()
         : getRayHitTarget(e.clientX, e.clientY);
       st.hoveredPlayerId = hit.playerId;
       st.hoveredCampfire = hit.isCampfire;
@@ -1126,11 +1284,16 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       if (!isPointerLocked && !isDraggingCanvas) {
         if (hit.playerId) {
           const hoveredSeat = seats.find((s) => s.playerId === hit.playerId);
+          const hoveredPlayer = st.players.find((p) => p.id === hit.playerId);
           if (hoveredSeat) {
+            const gazeBase =
+              hoveredPlayer && !hoveredPlayer.isAlive && hoveredSeat.ghostGroup.visible
+                ? hoveredSeat.ghostPos
+                : hoveredSeat.currentPos;
             st.mouseWorldLookPoint.set(
-              hoveredSeat.currentPos.x,
-              hoveredSeat.currentPos.y + 1.48,
-              hoveredSeat.currentPos.z
+              gazeBase.x,
+              gazeBase.y + (hoveredPlayer && !hoveredPlayer.isAlive ? 1.05 : 1.48),
+              gazeBase.z
             );
             st.hasMouseLook = true;
           }
@@ -1151,10 +1314,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       renderer.domElement.style.cursor =
         st.isDraggingOrbit
           ? 'grabbing'
-          : hit.playerId ||
-            hit.isCampfire ||
-            hit.isOwnSeat ||
-            (isDirectLook && (st.aimedPlayerId || st.aimedCampfire || st.aimedOwnSeat))
+          : hit.playerId || hit.isCampfire || hit.isOwnSeat
           ? 'pointer'
           : isDirectLook
           ? 'crosshair'
@@ -1162,11 +1322,17 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     };
 
     const onPointerUp = (e: PointerEvent) => {
+      if (!isPointerDown || (activePointerId !== null && e.pointerId !== activePointerId)) {
+        return;
+      }
       const wasRightClick = activePointerButton === 2;
       const wasClick = !wasRightClick && dragDistance < 9;
       isPointerDown = false;
+      activePointerId = null;
       activePointerButton = 0;
+      dragDistance = 0;
       stateRef.current.isDraggingOrbit = false;
+      renderer.domElement.style.cursor = getIdleCursor();
 
       const st = stateRef.current;
       if (!wasClick || st.isTitleScreen || st.isUiOverlayOpen) return;
@@ -1175,44 +1341,49 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
       const isDirectLook = isDirectLookCameraPreset(st.cameraPreset);
       const hit = isPointerLocked
-        ? { playerId: null, isCampfire: false, isOwnSeat: false }
+        ? isDirectLook
+          ? { playerId: null, isCampfire: false, isOwnSeat: false }
+          : (() => {
+              const rect = renderer.domElement.getBoundingClientRect();
+              return getRayHitTarget(rect.left + rect.width / 2, rect.top + rect.height / 2);
+            })()
         : getRayHitTarget(e.clientX, e.clientY);
 
-      if (hit.isOwnSeat || (isDirectLook && st.aimedOwnSeat && st.isUserRoaming)) {
+      if (hit.isOwnSeat || (isPointerLocked && isDirectLook && st.aimedOwnSeat && st.isUserRoaming)) {
         st.isUserRoaming = false;
         st.dashTargetPos = null;
         st.crouchToggled = false;
+        if (isDirectLook) st.resetDirectLookAnchor = true;
         st.onReturnToSeat?.();
         return;
       }
 
-      if ((hit.isCampfire || (isDirectLook && st.aimedCampfire)) && st.phase === 'day_voting') {
-        st.onVoteCampfireAbstain?.();
+      if (
+        (hit.isCampfire || (isPointerLocked && isDirectLook && st.aimedCampfire)) &&
+        st.phase === 'day_voting'
+      ) {
+        if (st.onSelectCampfire) {
+          st.onSelectCampfire();
+        } else {
+          st.onVoteCampfireAbstain?.();
+        }
         return;
       }
-      const pid = hit.playerId || (isDirectLook ? st.aimedPlayerId : null);
+
+      // Only fall back to center crosshair aim when Pointer Lock is engaged (never override unlocked cursor clicks)
+      const pid = hit.playerId || (isPointerLocked && isDirectLook ? st.aimedPlayerId : null);
       if (pid) {
         st.onSelectPlayer(pid);
-      } else if (!isPointerLocked) {
+      } else if (!isPointerLocked && st.phase === 'day_discussion') {
         const me = st.players.find((p) => p.id === st.userPlayerId);
-        const isNightBlind =
-          st.phase === 'night' && Boolean(me?.isAlive) && !st.isPlayerAwakeAtNight;
-        const canRoam =
-          !isNightBlind &&
-          ((me && !me.isAlive) ||
-            (me?.isAlive &&
-              (st.phase === 'day_discussion' ||
-                st.phase === 'day_voting' ||
-                (st.phase === 'night' && st.isPlayerAwakeAtNight) ||
-                isDirectLook)));
-        if (canRoam) {
+        if (me) {
           const rect = renderer.domElement.getBoundingClientRect();
           pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
           pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
           raycaster.setFromCamera(pointer, camera);
           if (raycaster.ray.intersectPlane(groundPlane, groundHitPoint)) {
             const clampedR = Math.max(
-              me && !me.isAlive ? 0.5 : 2.1,
+              !me.isAlive ? 0.5 : 2.1,
               Math.min(23.5, Math.hypot(groundHitPoint.x, groundHitPoint.z))
             );
             const ang = Math.atan2(groundHitPoint.z, groundHitPoint.x);
@@ -1227,15 +1398,48 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       }
     };
 
+    const onPointerCancel = (e: PointerEvent) => {
+      if (activePointerId !== null && e.pointerId !== activePointerId) return;
+      resetActiveInputs();
+    };
+
+    const onWindowBlur = () => {
+      resetActiveInputs();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        resetActiveInputs();
+      }
+    };
+
     const onWheel = (e: WheelEvent) => {
       const st = stateRef.current;
-      if (st.isUiOverlayOpen) return;
+      const canTitleOrbit = st.isTitleScreen && Boolean(st.allowTitleOrbit);
+      if (st.isTitleScreen ? !canTitleOrbit : st.isUiOverlayOpen) return;
+      if (canTitleOrbit) st.hasUserDraggedTitle = true;
       st.cameraDist = Math.max(8.5, Math.min(27.5, st.cameraDist + e.deltaY * 0.012));
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const targetEl = e.target as HTMLElement | null;
+      const tag = targetEl?.tagName;
+      if (
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT' ||
+        targetEl?.isContentEditable
+      ) {
+        return;
+      }
+      // Ignore browser/OS shortcut combos (Cmd+A, Ctrl+S, Ctrl+W, Alt+*) while still allowing standalone Ctrl crouch
+      if (
+        e.metaKey ||
+        e.altKey ||
+        (e.ctrlKey && e.code !== 'ControlLeft' && e.code !== 'ControlRight')
+      ) {
+        return;
+      }
       const st = stateRef.current;
       if (
         [
@@ -1244,7 +1448,6 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           'KeyS',
           'KeyD',
           'KeyQ',
-          'KeyE',
           'ArrowUp',
           'ArrowDown',
           'ArrowLeft',
@@ -1277,6 +1480,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           st.isUserRoaming = false;
           st.dashTargetPos = null;
           st.crouchToggled = false;
+          if (isDirectLookCameraPreset(st.cameraPreset)) {
+            st.resetDirectLookAnchor = true;
+          }
         }
       }
     };
@@ -1287,10 +1493,14 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     const domElem = renderer.domElement;
     window.addEventListener('pointerdown', onPointerDown);
     domElem.addEventListener('pointerleave', onPointerLeaveCanvas);
-    window.addEventListener('contextmenu', onContextMenu);
+    domElem.addEventListener('contextmenu', onContextMenu);
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
+    window.addEventListener('blur', onWindowBlur);
+    document.addEventListener('visibilitychange', onVisibilityChange);
     document.addEventListener('pointerlockchange', onPointerLockChange);
+    document.addEventListener('pointerlockerror', onPointerLockError);
     domElem.addEventListener('wheel', onWheel, { passive: true });
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
@@ -1666,56 +1876,61 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       const isThirdPerson =
         !st.isTitleScreen && !activeDeathCinematic && st.cameraPreset === 'third_person';
       const isDirectLook = isFirstPerson || isThirdPerson;
+      const isUserGhost = !st.isTitleScreen && !activeDeathCinematic && Boolean(me && !me.isAlive);
+      const canTitleOrbit = st.isTitleScreen && Boolean(st.allowTitleOrbit);
+
+      // Clear any lingering drag/cursor state if a blocking overlay opens mid-drag
+      if (
+        (st.isTitleScreen ? !canTitleOrbit : st.isUiOverlayOpen) &&
+        (isPointerDown || st.isDraggingOrbit)
+      ) {
+        isPointerDown = false;
+        activePointerId = null;
+        activePointerButton = 0;
+        dragDistance = 0;
+        st.isDraggingOrbit = false;
+        renderer.domElement.style.cursor = '';
+      }
+
       const isSprinting =
         st.keysPressed.has('ShiftLeft') || st.keysPressed.has('ShiftRight');
+      const isLivingSprinting = !isUserGhost && isSprinting;
       const isCrouching =
-        st.keysPressed.has('ControlLeft') ||
-        st.keysPressed.has('ControlRight') ||
-        st.crouchToggled;
+        !isUserGhost &&
+        (st.keysPressed.has('ControlLeft') ||
+          st.keysPressed.has('ControlRight') ||
+          st.crouchToggled);
 
-      let inputX = st.moveVector.x;
-      let inputZ = st.moveVector.z;
-      if (st.keysPressed.has('KeyW') || st.keysPressed.has('ArrowUp')) inputZ -= 1;
-      if (st.keysPressed.has('KeyS') || st.keysPressed.has('ArrowDown')) inputZ += 1;
-      if (st.keysPressed.has('KeyA') || st.keysPressed.has('ArrowLeft')) inputX -= 1;
-      if (st.keysPressed.has('KeyD') || st.keysPressed.has('ArrowRight')) inputX += 1;
+      let inputX = st.isUiOverlayOpen ? 0 : st.moveVector.x;
+      let inputZ = st.isUiOverlayOpen ? 0 : st.moveVector.z;
+      if (!st.isUiOverlayOpen) {
+        if (st.keysPressed.has('KeyW') || st.keysPressed.has('ArrowUp')) inputZ -= 1;
+        if (st.keysPressed.has('KeyS') || st.keysPressed.has('ArrowDown')) inputZ += 1;
+        if (st.keysPressed.has('KeyA') || st.keysPressed.has('ArrowLeft')) inputX -= 1;
+        if (st.keysPressed.has('KeyD') || st.keysPressed.has('ArrowRight')) inputX += 1;
+      }
 
       const hasMoveInput = Math.hypot(inputX, inputZ) > 0.05;
       const targetFov = isFirstPerson
-        ? 62 + (isSprinting && hasMoveInput && !isCrouching ? 5.5 : isCrouching ? -2.5 : 0)
+        ? 62 + (isLivingSprinting && hasMoveInput && !isCrouching ? 5.5 : isCrouching ? -2.5 : 0)
         : isThirdPerson
-        ? 56 + (isSprinting && hasMoveInput && !isCrouching ? 4.5 : isCrouching ? -2.0 : 0)
+        ? 56 + (isLivingSprinting && hasMoveInput && !isCrouching ? 4.5 : isCrouching ? -2.0 : 0)
         : responsiveFraming.targetFov;
       if (Math.abs(camera.fov - targetFov) > 0.05) {
         camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 10, dt);
         camera.updateProjectionMatrix();
       }
 
-      // Handle deferred Pointer Lock requests/releases cleanly
-      if (st.requestPointerLockFlag) {
-        st.requestPointerLockFlag = false;
-        if (!st.isUiOverlayOpen && !st.isTitleScreen && !isNightBlindfolded && !activeDeathCinematic) {
-          requestCanvasPointerLock();
-        }
-      }
-      if (st.releasePointerLockFlag || st.isUiOverlayOpen || isNightBlindfolded || activeDeathCinematic) {
+      // Release Pointer Lock cleanly when UI overlays, title screen, blindfold, or cinematics activate
+      if (st.releasePointerLockFlag || st.isUiOverlayOpen || st.isTitleScreen || isNightBlindfolded || activeDeathCinematic) {
         st.releasePointerLockFlag = false;
         if (document.pointerLockElement === renderer.domElement) {
           releaseCanvasPointerLock();
         }
       }
 
-      // Only let KeyE turn camera if NOT aiming at an interactive target in FPV/TPV!
-      let turnInput = st.fpvLookTurnRate || 0;
-      if (!st.isUiOverlayOpen) {
-        if (st.keysPressed.has('KeyQ')) turnInput -= 1;
-        if (
-          st.keysPressed.has('KeyE') &&
-          !(isDirectLook && (st.aimedPlayerId || st.aimedCampfire || st.aimedOwnSeat))
-        ) {
-          turnInput += 1;
-        }
-      }
+      // Mobile touch turn buttons only (KeyE is strictly reserved for interact; KeyQ for Ghost descend)
+      const turnInput = st.isUiOverlayOpen ? 0 : st.fpvLookTurnRate || 0;
       if (Math.abs(turnInput) > 0.01) {
         if (isDirectLook) {
           st.fpvYaw -= turnInput * 2.1 * dt;
@@ -1729,8 +1944,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         st.isDraggingOrbit &&
         isPointerDown &&
         !st.isPointerLocked &&
-        !st.isUiOverlayOpen &&
-        !st.isTitleScreen &&
+        (canTitleOrbit || (!st.isUiOverlayOpen && !st.isTitleScreen)) &&
         !isNightBlindfolded &&
         !activeDeathCinematic
       ) {
@@ -1741,7 +1955,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           viewportWidth: rect.width,
         });
         if (Math.abs(edgeRate) > 0.001) {
-          if (isDirectLook) {
+          if (isDirectLook && !st.isTitleScreen) {
             st.fpvYaw += edgeRate * dt;
           } else {
             st.azimuthAngle += edgeRate * dt;
@@ -1751,6 +1965,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
       const canUserRoamAlive =
         !st.isTitleScreen &&
+        !st.isUiOverlayOpen &&
         !isNightBlindfolded &&
         !activeDeathCinematic &&
         Boolean(me?.isAlive) &&
@@ -1758,7 +1973,6 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           st.phase === 'day_voting' ||
           (st.phase === 'night' && st.isPlayerAwakeAtNight) ||
           isDirectLook);
-      const isUserGhost = !st.isTitleScreen && !activeDeathCinematic && Boolean(me && !me.isAlive);
 
       // Update Adventurers, Stationary Stools, Articulated Stand/Walk/Jump/Crouch, Head Tracking & Spectral Ghosts
       for (let i = 0; i < MAX_SEATS; i++) {
@@ -1768,11 +1982,17 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.seatAnchorGroup.visible = false;
           seat.ghostGroup.visible = false;
           seat.playerId = '';
+          seat.hitbox.userData.playerId = '';
+          seat.ghostGroup.userData.playerId = '';
+          seat.ghostHitbox.userData.playerId = '';
           continue;
         }
 
         const p = activePlayers[i];
         seat.playerId = p.id;
+        seat.hitbox.userData.playerId = p.id;
+        seat.ghostGroup.userData.playerId = p.id;
+        seat.ghostHitbox.userData.playerId = p.id;
         const isMe = p.id === st.userPlayerId;
 
         const angle = Math.PI / 2 + (i / count) * Math.PI * 2;
@@ -1868,16 +2088,15 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
               const mag = Math.hypot(moveWorldX, moveWorldZ) || 1;
               const nx = moveWorldX / mag;
               const nz = moveWorldZ / mag;
-              let nextX = seat.currentPos.x + nx * moveSpeed * simDt;
-              let nextZ = seat.currentPos.z + nz * moveSpeed * simDt;
-              const distC = Math.hypot(nextX, nextZ);
-              if (distC < 1.9 && distC > 1e-4) {
-                nextX *= 1.9 / distC;
-                nextZ *= 1.9 / distC;
-              } else if (distC > 23.5) {
-                nextX *= 23.5 / distC;
-                nextZ *= 23.5 / distC;
-              }
+              const { nextX, nextZ } = clampAndSlideCampfireCollision({
+                currentX: seat.currentPos.x,
+                currentZ: seat.currentPos.z,
+                moveWorldX: nx,
+                moveWorldZ: nz,
+                stepDist: moveSpeed * simDt,
+                minRadius: 1.9,
+                maxRadius: 23.5,
+              });
               seat.currentPos.x = nextX;
               seat.currentPos.z = nextZ;
               const targetBodyYaw = Math.atan2(nx, nz) - seat.group.rotation.y;
@@ -1886,20 +2105,6 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
                 Math.cos(targetBodyYaw - seat.bodyGroup.rotation.y)
               );
               seat.bodyGroup.rotation.y += diff * (1 - Math.exp(-12 * dt));
-            }
-
-            // Proximity auto-select only during night action turns
-            if (st.phase === 'night' && nowPerf - st.lastProximitySelectTime > 900) {
-              for (let j = 0; j < count; j++) {
-                const otherSeat = seats[j];
-                const otherP = activePlayers[j];
-                if (!otherP || !otherP.isAlive || j === i) continue;
-                if (seat.currentPos.distanceTo(otherSeat.homePos) < 1.55 && st.selectedTargetId !== otherP.id) {
-                  st.lastProximitySelectTime = nowPerf;
-                  st.onSelectPlayer(otherP.id);
-                  break;
-                }
-              }
             }
           } else if (st.dashTargetPos) {
             const dx = st.dashTargetPos.x - seat.currentPos.x;
@@ -1969,6 +2174,17 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             const aimToVictim = Math.atan2(vHome.x - seat.currentPos.x, vHome.z - seat.currentPos.z);
             seat.bodyGroup.rotation.y = aimToVictim - (-angle - Math.PI / 2);
           }
+        } else if (
+          isMe &&
+          st.isUiOverlayOpen &&
+          st.isUserRoaming &&
+          me?.isAlive &&
+          !st.isTitleScreen &&
+          !isNightBlindfolded &&
+          !activeDeathCinematic
+        ) {
+          // Hold current standing spot cleanly while a modal/drawer is open (no movement, no snap-back)
+          st.jumpQueued = false;
         } else {
           seat.yOffset = 0;
           seat.vy = 0;
@@ -1994,7 +2210,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         const shouldStand =
           isDeathKiller ||
           (isMe &&
-            canUserRoamAlive &&
+            (canUserRoamAlive || (st.isUiOverlayOpen && st.isUserRoaming && Boolean(me?.isAlive))) &&
             (st.isUserRoaming || distFromStool > 0.22 || seat.yOffset > 0.03 || seat.crouchBlend > 0.05));
         seat.standFactor = THREE.MathUtils.damp(seat.standFactor, shouldStand ? 1 : 0, 9.5, dt);
 
@@ -2342,11 +2558,16 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             if (hasMoveInput) {
               st.dashTargetPos = null;
             }
-            const verticalInput =
-              !st.isUiOverlayOpen
-                ? (st.keysPressed.has('Space') ? 1 : 0) -
-                  (st.keysPressed.has('ControlLeft') || st.keysPressed.has('ControlRight') ? 1 : 0)
-                : 0;
+            const keyVertical =
+              (st.keysPressed.has('Space') ? 1 : 0) -
+              (st.keysPressed.has('ShiftLeft') ||
+              st.keysPressed.has('ShiftRight') ||
+              st.keysPressed.has('KeyQ')
+                ? 1
+                : 0);
+            const verticalInput = !st.isUiOverlayOpen
+              ? Math.max(-1, Math.min(1, keyVertical + (st.ghostVerticalRate || 0)))
+              : 0;
             const gGround = sampleTerrainHeight(seat.ghostPos.x, seat.ghostPos.z, activeBiomeKey);
             const gRes = stepGhostFreeFlight({
               currentPos: seat.ghostPos,
@@ -2358,7 +2579,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
               inputX: st.isUiOverlayOpen ? 0 : inputX,
               inputZ: st.isUiOverlayOpen ? 0 : inputZ,
               verticalInput,
-              isSprinting,
+              isSprinting: false,
               dashTargetPos: st.dashTargetPos ? { x: st.dashTargetPos.x, z: st.dashTargetPos.z } : null,
               groundY: gGround,
               elapsedSec: elapsedTotal,
@@ -2609,20 +2830,49 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         st.aimedPlayerId = null;
         st.aimedCampfire = false;
         st.aimedOwnSeat = false;
-        const sweepAngle = Math.sin(elapsedTotal * 0.18) * 0.36;
-        const titleRadius = 15.8 * portraitDistMultiplier;
-        _targetCamPos.set(
-          Math.sin(sweepAngle) * titleRadius,
-          (5.65 + Math.sin(elapsedTotal * 0.35) * 0.35) * portraitDistMultiplier,
-          Math.cos(sweepAngle) * titleRadius
-        );
-        _targetLookAt.set(0, activeBiomeKey === 'autumn' ? 2.15 : 1.85, -3.2);
+        if (st.allowTitleOrbit && (st.isDraggingOrbit || st.hasUserDraggedTitle)) {
+          const dist = st.cameraDist * portraitDistMultiplier;
+          const polar = st.polarAngle;
+          const horizDist = Math.cos(polar) * dist;
+          const camY = Math.max(2.0, Math.sin(polar) * dist);
+          _targetCamPos.set(
+            Math.sin(st.azimuthAngle) * horizDist,
+            camY,
+            Math.cos(st.azimuthAngle) * horizDist
+          );
+          _targetLookAt.set(0, activeBiomeKey === 'autumn' ? 2.0 : 1.5, -1.2);
+        } else {
+          const sweepAngle = Math.sin(elapsedTotal * 0.18) * 0.36;
+          if (st.allowTitleOrbit) {
+            st.azimuthAngle = sweepAngle;
+            st.polarAngle = 0.36;
+            st.cameraDist = 15.8;
+          }
+          const titleRadius = 15.8 * portraitDistMultiplier;
+          _targetCamPos.set(
+            Math.sin(sweepAngle) * titleRadius,
+            (5.65 + Math.sin(elapsedTotal * 0.35) * 0.35) * portraitDistMultiplier,
+            Math.cos(sweepAngle) * titleRadius
+          );
+          _targetLookAt.set(0, activeBiomeKey === 'autumn' ? 2.15 : 1.85, -3.2);
+        }
       } else if (isDirectLook) {
         const mySeatIdx = Math.max(
           0,
           activePlayers.findIndex((p) => p.id === st.userPlayerId)
         );
         const mySeat = seats[mySeatIdx] || seats[0];
+        if (st.resetDirectLookAnchor) {
+          const anchorPos = isUserGhost
+            ? mySeat.ghostPos
+            : st.isUserRoaming
+            ? mySeat.currentPos
+            : mySeat.homePos;
+          st.fpvYaw = computeFpvYawTowardOrigin(anchorPos, mySeat.baseAngle);
+          st.fpvPitch = isThirdPerson ? -0.1 : -0.04;
+          st.resetDirectLookAnchor = false;
+          st.snapCameraImmediate = true;
+        }
         const fpvStance =
           mySeat.standFactor < 0.25
             ? 'seated'
@@ -2643,7 +2893,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             elapsedSec: elapsedTotal,
             isMoving: hasMoveInput,
             stance: fpvStance,
-            isSprinting: isSprinting && !isCrouching,
+            isSprinting: isLivingSprinting && !isCrouching,
             jumpHeight: mySeat.yOffset,
             crouchBlend: mySeat.crouchBlend,
             groundY: mySeat.currentPos.y,
@@ -2660,15 +2910,15 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             elapsedSec: elapsedTotal,
             isMoving: hasMoveInput,
             stance: fpvStance,
-            isSprinting: isSprinting && !isCrouching,
+            isSprinting: isLivingSprinting && !isCrouching,
             jumpHeight: mySeat.yOffset,
             crouchBlend: mySeat.crouchBlend,
             groundY: mySeat.currentPos.y,
             strafeInput: inputX,
           });
           fpvRigGroup.visible = !isNightBlindfolded;
-          const handBobFreq = !hasMoveInput ? 2.2 : isSprinting ? 13.8 : 10.4;
-          const handBobAmp = !hasMoveInput ? 0.006 : isSprinting ? 0.032 : 0.019;
+          const handBobFreq = !hasMoveInput ? 2.2 : isLivingSprinting ? 13.8 : 10.4;
+          const handBobAmp = !hasMoveInput ? 0.006 : isLivingSprinting ? 0.032 : 0.019;
           fpvLeftHandGroup.position.y = -0.25 + Math.sin(elapsedTotal * handBobFreq) * handBobAmp;
           fpvLeftHandGroup.position.x = -0.27 + Math.cos(elapsedTotal * handBobFreq * 0.5) * handBobAmp;
 
@@ -2724,24 +2974,38 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         _targetCamPos.set(directPose.eyePos.x, directPose.eyePos.y, directPose.eyePos.z);
         _targetLookAt.set(directPose.lookTarget.x, directPose.lookTarget.y, directPose.lookTarget.z);
 
+        // Use actual rendered view ray in TPV so center crosshair matches shoulder camera tilt
+        const aimRay = isThirdPerson
+          ? computeCameraViewRay(directPose.eyePos, directPose.lookTarget)
+          : directPose.forward;
+
         const candidates = [];
         for (let idx = 0; idx < count; idx++) {
           const p = activePlayers[idx];
           const s = seats[idx];
-          if (!p || !s || !s.group.visible) continue;
+          if (!p || !s) continue;
+          const useGhostPos = !p.isAlive && s.ghostGroup.visible;
+          const isVisible = useGhostPos ? s.ghostGroup.visible : s.group.visible;
+          if (!isVisible) continue;
           candidates.push({
             playerId: p.id,
-            pos: {
-              x: s.currentPos.x,
-              y: s.currentPos.y + (p.isAlive ? 1.25 : 0.85),
-              z: s.currentPos.z,
-            },
-            visible: s.group.visible,
+            pos: useGhostPos
+              ? {
+                  x: s.ghostPos.x,
+                  y: s.ghostPos.y + 0.85,
+                  z: s.ghostPos.z,
+                }
+              : {
+                  x: s.currentPos.x,
+                  y: s.currentPos.y + (p.isAlive ? 1.25 : 0.85),
+                  z: s.currentPos.z,
+                },
+            visible: isVisible,
           });
         }
         st.aimedPlayerId = findFpvCrosshairTarget({
           eyePos: directPose.eyePos,
-          forward: directPose.forward,
+          forward: aimRay,
           candidates,
           selfPlayerId: st.userPlayerId,
         });
@@ -2754,10 +3018,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           const sDist = Math.hypot(toStoolX, toStoolY, toStoolZ);
           const sDot =
             sDist > 0.35 && sDist < 12
-              ? (toStoolX * directPose.forward.x +
-                  toStoolY * directPose.forward.y +
-                  toStoolZ * directPose.forward.z) /
-                sDist
+              ? (toStoolX * aimRay.x + toStoolY * aimRay.y + toStoolZ * aimRay.z) / sDist
               : 0;
           st.aimedOwnSeat = sDot > 0.945;
         } else {
@@ -2772,10 +3033,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           const fDist = Math.hypot(toFireX, toFireY, toFireZ);
           const fDot =
             fDist > 0.5 && fDist < 18
-              ? (toFireX * directPose.forward.x +
-                  toFireY * directPose.forward.y +
-                  toFireZ * directPose.forward.z) /
-                fDist
+              ? (toFireX * aimRay.x + toFireY * aimRay.y + toFireZ * aimRay.z) / fDist
               : 0;
           st.aimedCampfire = fDot > 0.945;
         } else {
@@ -2786,15 +3044,8 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         st.aimedPlayerId = null;
         st.aimedCampfire = false;
         st.aimedOwnSeat = false;
-        let dist = st.cameraDist * portraitDistMultiplier;
-        let polar = st.polarAngle;
-        if (st.cameraPreset === 'overhead' && !st.isDraggingOrbit && !st.freeLook360) {
-          polar = 1.12;
-          dist = 18.2 * portraitDistMultiplier;
-        } else if (st.cameraPreset === 'dramatic' && !st.isDraggingOrbit && !st.freeLook360) {
-          polar = 0.25;
-          dist = 12.2 * portraitDistMultiplier;
-        }
+        const dist = st.cameraDist * portraitDistMultiplier;
+        const polar = st.polarAngle;
 
         const horizDist = Math.cos(polar) * dist;
         const camY = Math.max(2.0, Math.sin(polar) * dist);
@@ -2808,7 +3059,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         const focusId = st.hoveredPlayerId || st.selectedTargetId;
         if (focusId && !st.isTitleScreen && !st.isDraggingOrbit) {
           const focusSeat = seats.find((s) => s.playerId === focusId);
-          if (focusSeat && focusSeat.group.visible) {
+          if (focusSeat && (focusSeat.group.visible || focusSeat.ghostGroup.visible)) {
             _targetLookAt.lerp(focusSeat.worldPos, 0.16);
           }
         }
@@ -2918,15 +3169,20 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       resizeObserver.disconnect();
       window.removeEventListener('pointerdown', onPointerDown);
       domElem.removeEventListener('pointerleave', onPointerLeaveCanvas);
-      window.removeEventListener('contextmenu', onContextMenu);
+      domElem.removeEventListener('contextmenu', onContextMenu);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      window.removeEventListener('blur', onWindowBlur);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       document.removeEventListener('pointerlockchange', onPointerLockChange);
+      document.removeEventListener('pointerlockerror', onPointerLockError);
       releaseCanvasPointerLock();
       domElem.removeEventListener('wheel', onWheel);
       domElem.removeEventListener('webglcontextlost', onWebglContextLost);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      canvasElemRef.current = null;
       delete (window as unknown as Record<string, unknown>).__VILLAGE_DEBUG__;
       envHandle.dispose();
       adventurerPool.dispose();
@@ -2959,7 +3215,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         mapBiome={mapBiome}
         mayorId={mayorId}
         onSelectPlayer={onSelectPlayer}
-        onVoteCampfireAbstain={onVoteCampfireAbstain}
+        onVoteCampfireAbstain={onSelectCampfire ?? onVoteCampfireAbstain}
       />
     );
   }

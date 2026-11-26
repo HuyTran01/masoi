@@ -14,7 +14,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import { Language, RoleId } from '../types/game';
-import { ROLES } from '../game/roles';
+import { getRoleBadge, ROLES } from '../game/roles';
 import { CustomTimerConfig, DEFAULT_TIMER_CONFIG } from '../game/autoGM';
 import {
   AGROU_BIOMES,
@@ -52,7 +52,86 @@ interface TitleScreenOverlayProps {
   onStartAIPractice: () => void;
   onStartOnboardingTour: () => void;
   onOpenRulesEncyclopedia?: () => void;
+  onMinimizedChange?: (minimized: boolean) => void;
 }
+
+interface NumericDraftInputProps
+  extends Omit<
+    React.InputHTMLAttributes<HTMLInputElement>,
+    'type' | 'value' | 'onChange' | 'min' | 'max'
+  > {
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (next: number) => void;
+}
+
+const NumericDraftInput: React.FC<NumericDraftInputProps> = ({
+  value,
+  min,
+  max,
+  onCommit,
+  onBlur,
+  onFocus,
+  onKeyDown,
+  ...rest
+}) => {
+  const [draft, setDraft] = useState<string>(String(value));
+  const [focused, setFocused] = useState<boolean>(false);
+  const skipNextBlurRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!focused) setDraft(String(value));
+  }, [value, focused]);
+
+  const commit = (raw: string) => {
+    const parsed = parseInt(raw, 10);
+    if (Number.isNaN(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+    const clamped = Math.max(min, Math.min(max, parsed));
+    setDraft(String(clamped));
+    if (clamped !== value) onCommit(clamped);
+  };
+
+  return (
+    <input
+      {...rest}
+      type="number"
+      min={min}
+      max={max}
+      value={draft}
+      onFocus={(e) => {
+        skipNextBlurRef.current = false;
+        setFocused(true);
+        onFocus?.(e);
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={(e) => {
+        setFocused(false);
+        if (skipNextBlurRef.current) {
+          skipNextBlurRef.current = false;
+        } else {
+          commit(e.currentTarget.value);
+        }
+        onBlur?.(e);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          skipNextBlurRef.current = true;
+          commit(e.currentTarget.value);
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          skipNextBlurRef.current = true;
+          setDraft(String(value));
+          e.currentTarget.blur();
+        }
+        onKeyDown?.(e);
+      }}
+    />
+  );
+};
 
 export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
   lang,
@@ -78,15 +157,28 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
   onStartAIPractice,
   onStartOnboardingTour,
   onOpenRulesEncyclopedia,
+  onMinimizedChange,
 }) => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [guideMenuOpen, setGuideMenuOpen] = useState(false);
   const guideMenuRef = useRef<HTMLDivElement>(null);
+  const onMinimizedChangeRef = useRef(onMinimizedChange);
+  onMinimizedChangeRef.current = onMinimizedChange;
   const t = UI_TEXT[lang];
 
   useEffect(() => {
+    onMinimizedChangeRef.current?.(isTitleMenuMinimized);
+  }, [isTitleMenuMinimized]);
+
+  useEffect(() => {
+    return () => {
+      onMinimizedChangeRef.current?.(false);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!guideMenuOpen) return;
-    const handlePointerDown = (e: MouseEvent) => {
+    const handlePointerDown = (e: Event) => {
       if (guideMenuRef.current && !guideMenuRef.current.contains(e.target as Node)) {
         setGuideMenuOpen(false);
       }
@@ -96,9 +188,11 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
         setGuideMenuOpen(false);
       }
     };
+    document.addEventListener('pointerdown', handlePointerDown);
     document.addEventListener('mousedown', handlePointerDown);
     document.addEventListener('keydown', handleKeyDown);
     return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
@@ -110,50 +204,42 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
 
   const selectedRoleLabel =
     preferredRole === 'random'
-      ? lang === 'vi'
-        ? 'Vai ngẫu nhiên'
-        : 'Random role'
+      ? t.randomRoleShort
       : ROLES[preferredRole]?.name[lang] || preferredRole;
 
   const timerPresetLabel =
     timerConfig.nightActionSec <= 15
-      ? lang === 'vi'
-        ? 'Nhanh'
-        : 'Fast'
+      ? t.presetFast
       : timerConfig.nightActionSec >= 35
-      ? lang === 'vi'
-        ? 'Thư thả'
-        : 'Relaxed'
-      : lang === 'vi'
-      ? 'Chuẩn'
-      : 'Standard';
+      ? t.presetRelaxed
+      : t.presetStandard;
 
   const currentHatMeta = AGROU_HATS.find((h) => h.id === avatarConfig.hat);
   const currentTitleMeta = AGROU_TITLES.find((ti) => ti.id === avatarConfig.titleId);
 
   return (
-    <div className="fixed inset-0 z-30 pointer-events-none flex flex-col justify-between p-2.5 sm:p-4">
+    <div className="fixed inset-0 z-[45] pointer-events-none flex flex-col justify-between p-2 sm:p-4">
       {/* Top Bar: Carved-Wood Profile + Quick Utilities */}
-      <div className="flex items-center justify-between gap-2 pointer-events-auto">
-        <div className="flex items-center gap-1.5 sm:gap-2">
+      <div className="flex items-center justify-between gap-1.5 sm:gap-2 pointer-events-auto">
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
           <button
             type="button"
             data-testid="title-profile-btn"
-            aria-label={lang === 'vi' ? `Hồ sơ ${currentUser.name}` : `Profile ${currentUser.name}`}
+            aria-label={`${t.changeProfile} ${currentUser.name}`}
             onClick={() => {
               sound.playCardFlip();
               onOpenAccountModal(isLoggedIn ? 'profile' : 'login');
             }}
-            className="flex items-center gap-2 agrou-wood-panel hover:border-[#f5b82e] rounded-xl px-2.5 py-1.5 cursor-pointer transition-colors"
+            className="flex items-center gap-1.5 sm:gap-2 agrou-wood-panel hover:border-[#f5b82e] rounded-xl px-2 py-1 sm:px-2.5 sm:py-1.5 cursor-pointer transition-colors min-w-0"
           >
-            <span className="text-base sm:text-lg leading-none">
+            <span className="text-base sm:text-lg leading-none shrink-0">
               {currentHatMeta?.icon || currentUser.avatar}
             </span>
-            <div className="text-left leading-tight">
-              <div className="text-xs font-extrabold text-[#f6ebd8] max-w-[115px] sm:max-w-none truncate">
+            <div className="text-left leading-tight min-w-0">
+              <div className="text-[11px] sm:text-xs font-extrabold text-[#f6ebd8] max-w-[88px] sm:max-w-none truncate">
                 {currentUser.name}
               </div>
-              <div className="text-[10px] font-mono text-[#f5b82e]">
+              <div className="text-[10px] font-mono text-[#f5b82e] whitespace-nowrap">
                 ELO {currentUser.elo}
                 {currentTitleMeta && (
                   <span className="hidden md:inline text-[#d6bfa2] font-sans ml-1">
@@ -168,28 +254,28 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
           <button
             type="button"
             data-testid="open-avatar-locker-btn"
-            aria-label={lang === 'vi' ? 'Tủ Đồ & Bản Đồ' : 'Locker & Maps'}
+            aria-label={t.lockerAndMaps}
             onClick={() => {
               sound.playCardFlip();
               onOpenAvatarLocker();
             }}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl bg-[#382517] hover:bg-[#49301e] border border-[#e89c3e]/75 text-[#fde7c3] text-xs font-extrabold shadow-lg cursor-pointer transition-colors"
+            className="flex items-center gap-1.5 px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl bg-[#382517] hover:bg-[#49301e] border border-[#e89c3e]/75 text-[#fde7c3] text-xs font-extrabold shadow-lg cursor-pointer transition-colors shrink-0"
           >
             <Palette className="w-4 h-4 text-[#f5b82e] shrink-0" />
-            <span className="hidden sm:inline">
-              {lang === 'vi' ? 'Tủ Đồ & Bản Đồ' : 'Locker & Maps'}
+            <span className="hidden sm:inline whitespace-nowrap">
+              {t.lockerAndMaps}
             </span>
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           <button
             type="button"
             onClick={onToggleMute}
             aria-label={t.toggleSound}
             aria-pressed={isMuted}
             title={t.toggleSound}
-            className="p-2 rounded-xl agrou-wood-panel hover:border-[#e89c3e] text-[#f6ebd8] cursor-pointer"
+            className="p-1.5 sm:p-2 rounded-xl agrou-wood-panel hover:border-[#e89c3e] text-[#f6ebd8] cursor-pointer shrink-0"
           >
             {isMuted ? (
               <VolumeX className="w-4 h-4 text-[#c7ae8e]" />
@@ -198,7 +284,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
             )}
           </button>
 
-          <div className="relative" ref={guideMenuRef}>
+          <div className="relative shrink-0" ref={guideMenuRef}>
             <button
               type="button"
               data-testid="open-onboarding-tour-btn"
@@ -209,10 +295,10 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                 sound.playCardFlip();
                 setGuideMenuOpen((v) => !v);
               }}
-              className="px-2.5 sm:px-3 py-2 rounded-xl agrou-wood-panel hover:border-[#e89c3e] text-xs font-bold text-[#fde7c3] flex items-center gap-1.5 cursor-pointer"
+              className="px-2 sm:px-3 py-1.5 sm:py-2 rounded-xl agrou-wood-panel hover:border-[#e89c3e] text-xs font-bold text-[#fde7c3] flex items-center gap-1.5 cursor-pointer shrink-0"
             >
               <HelpCircle className="w-4 h-4 text-[#f5b82e] shrink-0" />
-              <span className="hidden sm:inline">{t.newbieGuide}</span>
+              <span className="hidden sm:inline whitespace-nowrap">{t.newbieGuide}</span>
             </button>
 
             {guideMenuOpen && (
@@ -234,9 +320,9 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                   }}
                   className="w-full text-left px-3 py-2 rounded-xl bg-[#2a1c12] hover:bg-[#3d2818] border border-[#785334] text-xs font-extrabold text-[#fde7c3] cursor-pointer"
                 >
-                  <div>📖 {lang === 'vi' ? 'Xem nhanh Luật & 13 Vai Trò' : 'Quick Rules & 13 Roles'}</div>
+                  <div>📖 {t.quickRulesTitle}</div>
                   <div className="text-[11px] font-normal text-[#d6bfa2] mt-0.5">
-                    {lang === 'vi' ? 'Đọc kỹ năng từng vai, không cần vào trận' : 'Read role abilities without starting a match'}
+                    {t.quickRulesDesc}
                   </div>
                 </button>
                 <button
@@ -249,9 +335,9 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                   }}
                   className="w-full text-left px-3 py-2 rounded-xl bg-[#422614] hover:bg-[#57321a] border border-[#e89c3e]/80 text-xs font-extrabold text-[#fff4de] cursor-pointer"
                 >
-                  <div>🧭 {lang === 'vi' ? 'Chơi Tutorial hướng dẫn 5 bước' : 'Play 5-Step Interactive Tutorial'}</div>
+                  <div>🧭 {t.playTutorialTitle}</div>
                   <div className="text-[11px] font-normal text-[#fde7c3]/85 mt-0.5">
-                    {lang === 'vi' ? 'Vào bàn tập thực hành trực tiếp cùng AI' : 'Jump into a guided live practice table'}
+                    {t.playTutorialDesc}
                   </div>
                 </button>
               </div>
@@ -263,7 +349,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
             onChange={(e) => onChangeLanguage(e.target.value as Language)}
             aria-label="Select Language"
             data-testid="language-select"
-            className="agrou-wood-panel text-xs font-bold rounded-xl px-2.5 py-2 text-[#f6ebd8] focus:outline-none cursor-pointer"
+            className="agrou-wood-panel text-[11px] sm:text-xs font-bold rounded-xl px-2 py-1.5 sm:px-2.5 sm:py-2 text-[#f6ebd8] focus:outline-none cursor-pointer whitespace-nowrap shrink-0"
           >
             <option value="vi">🇻🇳 Tiếng Việt</option>
             <option value="en">🇬🇧 English</option>
@@ -330,7 +416,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                 type="button"
                 data-testid="toggle-match-settings-btn"
                 aria-expanded={settingsOpen}
-                aria-label={lang === 'vi' ? 'Cài đặt ván đấu' : 'Match Settings'}
+                aria-label={t.matchSettings}
                 onClick={() => {
                   sound.playCardFlip();
                   setSettingsOpen((v) => !v);
@@ -342,38 +428,26 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                 }`}
               >
                 <SlidersHorizontal className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">
-                  {lang === 'vi' ? 'Cài đặt ván đấu' : 'Match Settings'}
-                </span>
+                <span className="hidden sm:inline">{t.matchSettings}</span>
               </button>
             )}
 
             <button
               type="button"
               data-testid="toggle-title-menu-btn"
-              aria-label={
-                isTitleMenuMinimized
-                  ? lang === 'vi'
-                    ? 'Mở Menu'
-                    : 'Expand'
-                  : lang === 'vi'
-                  ? 'Ngắm 3D'
-                  : '3D View'
-              }
+              aria-label={isTitleMenuMinimized ? t.expandMenuBtn : t.view3dBtn}
               onClick={onToggleMinimize}
               className="px-2.5 py-1.5 rounded-xl bg-[#1b120b] hover:bg-[#312115] border border-[#9c7248]/70 text-[11px] font-bold text-[#f5b82e] flex items-center gap-1 cursor-pointer"
             >
               {isTitleMenuMinimized ? (
                 <>
                   <ChevronUp className="w-3.5 h-3.5" />
-                  <span>{lang === 'vi' ? 'Mở Menu' : 'Expand'}</span>
+                  <span>{t.expandMenuBtn}</span>
                 </>
               ) : (
                 <>
                   <ChevronDown className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">
-                    {lang === 'vi' ? 'Ngắm 3D' : '3D View'}
-                  </span>
+                  <span className="hidden sm:inline">{t.view3dBtn}</span>
                 </>
               )}
             </button>
@@ -386,13 +460,13 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
             <div className="bg-[#1a110a]/90 border border-[#6b4a2e]/70 rounded-xl p-2 space-y-1.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#f5b82e]">
-                  🗺️ {lang === 'vi' ? 'Bản đồ 3D quanh lửa trại:' : '3D Campfire Map:'}
+                  🗺️ {t.campfireMapLabel}:
                 </span>
                 <span className="text-[11px] text-[#e6d5b8] truncate hidden sm:inline">
                   {BIOME_DESCRIPTIONS[avatarConfig.mapBiome][lang]}
                 </span>
               </div>
-              <div className="grid grid-cols-3 gap-1.5">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                 {(['forest', 'frostpeak', 'autumn'] as AgrouMapBiome[]).map((bId) => {
                   const biome = AGROU_BIOMES[bId];
                   const active = avatarConfig.mapBiome === bId;
@@ -406,18 +480,18 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                         sound.playCardFlip();
                         onChangeBiome(bId);
                       }}
-                      className={`p-1.5 rounded-xl border text-left flex items-center gap-1.5 cursor-pointer transition-colors min-w-0 ${
+                      className={`p-1.5 rounded-xl border text-left flex items-center gap-2 sm:gap-1.5 cursor-pointer transition-colors min-w-0 ${
                         active
                           ? 'bg-[#e86f24]/25 text-[#fff8ed] border-[#fbc266]'
                           : 'bg-[#2a1c12] text-[#e6d5b8] border-[#6b4a2e] hover:border-[#d9973b]'
                       }`}
                     >
                       <BiomeThumbSvg biome={bId} className="w-9 h-6 rounded border border-white/15 shrink-0" />
-                      <div className="min-w-0">
-                        <div className="text-[11px] font-extrabold truncate leading-tight">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] font-extrabold leading-snug whitespace-normal">
                           {biome.icon} {biome.name[lang]}
                         </div>
-                        <div className="text-[9px] text-[#d6bfa2] truncate hidden md:block">
+                        <div className="text-[9px] text-[#d6bfa2] truncate sm:hidden md:block">
                           {BIOME_DESCRIPTIONS[bId][lang]}
                         </div>
                       </div>
@@ -447,7 +521,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                       <option value="random">{t.randomBalancedRole}</option>
                       {Object.values(ROLES).map((r) => (
                         <option key={r.id} value={r.id}>
-                          {r.name[lang]} ({r.badge})
+                          {`${r.name[lang] || r.name.en} (${getRoleBadge(r.id, lang)})`}
                         </option>
                       ))}
                     </select>
@@ -487,19 +561,13 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                         >
                           <Minus className="w-3.5 h-3.5" />
                         </button>
-                        <input
-                          type="number"
+                        <NumericDraftInput
                           min={4}
                           max={20}
                           data-testid="custom-player-count-input"
                           aria-label="Player count"
                           value={villageSize}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            if (!Number.isNaN(val)) {
-                              onChangeVillageSize(Math.max(4, Math.min(20, val)));
-                            }
-                          }}
+                          onCommit={onChangeVillageSize}
                           className="w-9 text-center bg-[#1a110a] border border-[#6b4a2e] rounded py-1 text-xs font-mono font-extrabold text-[#f5b82e]"
                         />
                         <button
@@ -521,7 +589,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                 <div className="border-t border-[#5a3d25] pt-2.5 flex flex-wrap items-center justify-between gap-2">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#f5b82e]">
-                      ⏱️ {lang === 'vi' ? 'Thời gian mỗi pha:' : 'Phase timers:'}
+                      ⏱️ {t.phaseTimers}:
                     </span>
                     <button
                       type="button"
@@ -541,7 +609,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                           : 'bg-[#2a1c12] text-[#d6bfa2] border-[#6b4a2e]'
                       }`}
                     >
-                      {lang === 'vi' ? 'Nhanh (12s/20s)' : 'Fast'}
+                      {lang === 'vi' ? `${t.presetFast} (12s/20s)` : t.presetFast}
                     </button>
                     <button
                       type="button"
@@ -553,7 +621,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                           : 'bg-[#2a1c12] text-[#d6bfa2] border-[#6b4a2e]'
                       }`}
                     >
-                      {lang === 'vi' ? 'Chuẩn (20s/35s)' : 'Standard'}
+                      {lang === 'vi' ? `${t.presetStandard} (20s/35s)` : t.presetStandard}
                     </button>
                     <button
                       type="button"
@@ -573,58 +641,46 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                           : 'bg-[#2a1c12] text-[#d6bfa2] border-[#6b4a2e]'
                       }`}
                     >
-                      {lang === 'vi' ? 'Thư thả (35s/75s)' : 'Relaxed'}
+                      {lang === 'vi' ? `${t.presetRelaxed} (35s/75s)` : t.presetRelaxed}
                     </button>
                   </div>
 
                   <div className="flex items-center gap-1.5 text-[10px] text-[#d6bfa2]">
-                    <span>{lang === 'vi' ? 'Đêm:' : 'Night:'}</span>
-                    <input
-                      type="number"
+                    <span>{t.nightLabel}:</span>
+                    <NumericDraftInput
                       min={5}
                       max={180}
                       data-testid="title-custom-night-sec-input"
-                      aria-label={lang === 'vi' ? 'Thời gian ban đêm (giây)' : 'Night phase duration (seconds)'}
+                      aria-label={`${t.nightLabel} (s)`}
                       value={timerConfig.nightActionSec}
-                      onChange={(e) => {
-                        const v = parseInt(e.target.value, 10);
-                        if (!Number.isNaN(v)) {
-                          onUpdateTimerConfig({
-                            ...timerConfig,
-                            nightActionSec: Math.max(5, Math.min(180, v)),
-                          });
-                        }
-                      }}
+                      onCommit={(v) =>
+                        onUpdateTimerConfig({
+                          ...timerConfig,
+                          nightActionSec: v,
+                        })
+                      }
                       className="w-11 bg-[#2a1c12] border border-[#6b4a2e] rounded px-1 py-0.5 text-center font-mono font-bold text-[#f5b82e]"
                     />
-                    <span>{lang === 'vi' ? 'Thảo luận:' : 'Debate:'}</span>
-                    <input
-                      type="number"
+                    <span>{t.debateLabel}:</span>
+                    <NumericDraftInput
                       min={10}
                       max={600}
                       data-testid="title-custom-discuss-sec-input"
-                      aria-label={lang === 'vi' ? 'Thời gian thảo luận (giây)' : 'Discussion phase duration (seconds)'}
+                      aria-label={`${t.debateLabel} (s)`}
                       value={timerConfig.dayDiscussSec}
-                      onChange={(e) => {
-                        const v = parseInt(e.target.value, 10);
-                        if (!Number.isNaN(v)) {
-                          onUpdateTimerConfig({
-                            ...timerConfig,
-                            dayDiscussSec: Math.max(10, Math.min(600, v)),
-                          });
-                        }
-                      }}
+                      onCommit={(v) =>
+                        onUpdateTimerConfig({
+                          ...timerConfig,
+                          dayDiscussSec: v,
+                        })
+                      }
                       className="w-12 bg-[#2a1c12] border border-[#6b4a2e] rounded px-1 py-0.5 text-center font-mono font-bold text-[#f5b82e]"
                     />
                   </div>
                 </div>
 
                 <label className="flex items-center justify-between gap-2 pt-2 border-t border-[#5a3d25] text-[11px] text-[#d6bfa2] cursor-pointer">
-                  <span>
-                    {lang === 'vi'
-                      ? 'Chế độ Tập Chơi: Hiện số lượng Sói / Dân còn sống trên HUD'
-                      : 'Practice Helper: Show exact Wolves / Villagers alive on HUD'}
-                  </span>
+                  <span>{t.practiceHelper}</span>
                   <input
                     type="checkbox"
                     checked={showFactionHints}
@@ -646,9 +702,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                 className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-[#b84b10] hover:bg-[#9e3f0c] border border-[#fbc266] text-[#ffffff] font-extrabold text-xs sm:text-sm shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-colors"
               >
                 <Bot className="w-4 h-4 shrink-0" />
-                <span>
-                  {lang === 'vi' ? 'Vào Làng Quanh Lửa Trại (AI)' : 'Play Around Campfire (AI)'}
-                </span>
+                <span>{t.playCampfireAi}</span>
               </button>
 
               <div className="grid grid-cols-2 gap-2">
@@ -662,7 +716,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                   className="py-2 px-3 rounded-xl bg-[#9e2b25] hover:bg-[#b8362f] border border-[#e67367]/60 text-[#fff5f2] font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                 >
                   <Globe className="w-3.5 h-3.5 shrink-0" />
-                  <span>{lang === 'vi' ? 'Chơi Online' : 'Play Online'}</span>
+                  <span>{t.playOnline}</span>
                 </button>
 
                 <button
@@ -675,7 +729,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                   className="py-2 px-3 rounded-xl bg-[#362417] hover:bg-[#49311f] text-[#fde7c3] border border-[#9c7248] font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                 >
                   <Shield className="w-3.5 h-3.5 shrink-0 text-[#f5b82e]" />
-                  <span>{lang === 'vi' ? 'Trợ Lý Quản Trò' : 'GM Assistant'}</span>
+                  <span>{t.gmAssistant}</span>
                 </button>
               </div>
             </div>
@@ -683,7 +737,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
             {/* Account Strip */}
             <div className="pt-2 border-t border-[#5a3d25] flex items-center justify-between gap-2 text-[11px]">
               <span className="text-[#bfa586] font-semibold hidden sm:inline">
-                {lang === 'vi' ? 'Lưu ELO & lịch sử đấu:' : 'Save ELO & match history:'}
+                {t.saveEloHint}
               </span>
               <div className="flex items-center gap-1.5 w-full sm:w-auto justify-end">
                 <button
@@ -699,11 +753,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                       : 'bg-[#1c130c] border-[#785334] text-[#fde7c3] hover:border-[#e89c3e]'
                   }`}
                 >
-                  {isLoggedIn && currentUser.handle
-                    ? `@${currentUser.handle}`
-                    : lang === 'vi'
-                    ? 'Đăng Nhập'
-                    : 'Sign In'}
+                  {isLoggedIn && currentUser.handle ? `@${currentUser.handle}` : t.signIn}
                 </button>
                 {!isLoggedIn && (
                   <button
@@ -715,7 +765,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                     }}
                     className="px-2.5 py-1 rounded-lg border bg-[#1c3621] border-[#5cb85c]/70 hover:border-[#86efac] text-[#dcfce7] text-[11px] font-bold cursor-pointer"
                   >
-                    {lang === 'vi' ? 'Đăng Ký' : 'Create Account'}
+                    {t.createAccount}
                   </button>
                 )}
               </div>

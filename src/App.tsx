@@ -298,8 +298,8 @@ function getOrCreateTabGuestIdentity(): { id: string; defaultName: string } {
       sessionStorage.setItem('werewolf_client_uid', uid);
     }
     let guestName = sessionStorage.getItem('werewolf_guest_name');
-    if (!guestName) {
-      guestName = `Thợ Săn #${randomSuffix()}`;
+    if (!guestName || guestName === 'Thợ Săn Đêm' || /^Thợ Săn #\d+$/.test(guestName)) {
+      guestName = `Người Chơi #${randomSuffix()}`;
       sessionStorage.setItem('werewolf_guest_name', guestName);
     }
     return { id: uid, defaultName: guestName };
@@ -307,7 +307,7 @@ function getOrCreateTabGuestIdentity(): { id: string; defaultName: string } {
     const suf = randomSuffix();
     return {
       id: `usr_${Date.now().toString(36)}_${suf}`,
-      defaultName: `Thợ Săn #${suf}`,
+      defaultName: `Người Chơi #${suf}`,
     };
   }
 }
@@ -369,7 +369,12 @@ export default function App() {
   const [aimedOwnSeat, setAimedOwnSeat] = useState<boolean>(false);
   const [isUserRoaming, setIsUserRoaming] = useState<boolean>(false);
   const [returnToSeatTrigger, setReturnToSeatTrigger] = useState<number>(0);
+  const [returnToSeatSeq, setReturnToSeatSeq] = useState<number>(0);
+  const [jumpTriggerSeq, setJumpTriggerSeq] = useState<number>(0);
   const [fpvLookTurnRate, setFpvLookTurnRate] = useState<number>(0);
+  const [ghostVerticalRate, setGhostVerticalRate] = useState<-1 | 0 | 1>(0);
+  const preFreeLookCameraRef = useRef<CameraViewPreset | null>(null);
+  const isResolvingVoteRef = useRef<boolean>(false);
 
   // Room Creation / Join Lobby Modal State
   const [lobbyModalState, setLobbyModalState] = useState<{
@@ -394,12 +399,15 @@ export default function App() {
   const [notebook, setNotebook] = useState<AgrouNotebookState>(() => createInitialNotebook());
   const [emoteEvents, setEmoteEvents] = useState<AgrouEmoteEvent[]>([]);
 
-  // Role Callout Voice Toast Banner
+  // Role Callout Voice Toast Banner & Non-Blocking Action Warning Toast
   const [roleCalloutToast, setRoleCalloutToast] = useState<{
     roleId: RoleId;
     quote: string;
     sfxLabel: string;
   } | null>(null);
+  const [actionWarningToast, setActionWarningToast] = useState<string | null>(null);
+  const [isSeerInspectPending, setIsSeerInspectPending] = useState<boolean>(false);
+  const [isRoleCardInitialOpen, setIsRoleCardInitialOpen] = useState<boolean>(false);
 
   // Anti-Cheat Night Blindfold Override (allows player to close eyes after acting)
   const [hasClosedEyesTonight, setHasClosedEyesTonight] = useState<boolean>(false);
@@ -457,7 +465,9 @@ export default function App() {
             : tabGuest.id;
           const isAutoGuestName =
             typeof parsed.name === 'string' &&
-            (parsed.name.trim() === 'Thợ Săn Đêm' || /^Thợ Săn #\d+$/.test(parsed.name.trim()));
+            (parsed.name.trim() === 'Thợ Săn Đêm' ||
+              /^Thợ Săn #\d+$/.test(parsed.name.trim()) ||
+              /^Người Chơi #\d+$/.test(parsed.name.trim()));
           const resolvedName =
             typeof parsed.name === 'string' &&
             parsed.name.trim() &&
@@ -774,8 +784,47 @@ export default function App() {
   const myWakeGuidance = getHumanRoleWakeGuidance(me, round, lang);
 
   // Status Banner & End-of-Run Snapshot
-  const [eventBanner, setEventBanner] = useState<string>(() =>
-    `${UI_TEXT[lang].nightPhaseTitle(1)} · ${myRole.name[lang]}: ${myRole.instructions[lang]}`
+  const [eventBanner, setEventBanner] = useState<string>(() => {
+    if (phase === 'day_discussion') {
+      return `${UI_TEXT[lang].dayDiscussTitle(1)} · ${UI_TEXT[lang].funPropsLabel}`;
+    }
+    if (phase === 'day_voting') {
+      return UI_TEXT[lang].dayVoteTitle(1);
+    }
+    return `${UI_TEXT[lang].nightPhaseTitle(1)} · ${myRole.name[lang]}: ${myRole.instructions[lang]}`;
+  });
+  const [pauseTimerDraft, setPauseTimerDraft] = useState<{
+    nightActionSec: string;
+    dayDiscussSec: string;
+    dayVoteSec: string;
+  }>(() => ({
+    nightActionSec: String(timerConfig.nightActionSec),
+    dayDiscussSec: String(timerConfig.dayDiscussSec),
+    dayVoteSec: String(timerConfig.dayVoteSec),
+  }));
+
+  useEffect(() => {
+    if (shellState === 'paused') {
+      setPauseTimerDraft({
+        nightActionSec: String(timerConfig.nightActionSec),
+        dayDiscussSec: String(timerConfig.dayDiscussSec),
+        dayVoteSec: String(timerConfig.dayVoteSec),
+      });
+    }
+  }, [shellState, timerConfig.nightActionSec, timerConfig.dayDiscussSec, timerConfig.dayVoteSec]);
+
+  const commitPauseTimerField = useCallback(
+    (field: 'nightActionSec' | 'dayDiscussSec' | 'dayVoteSec', min: number, max: number) => {
+      const parsed = parseInt(pauseTimerDraft[field].trim(), 10);
+      const clamped = Number.isNaN(parsed)
+        ? timerConfig[field]
+        : Math.max(min, Math.min(max, parsed));
+      if (clamped !== timerConfig[field]) {
+        handleUpdateTimerConfig({ ...timerConfig, [field]: clamped });
+      }
+      setPauseTimerDraft((prev) => ({ ...prev, [field]: String(clamped) }));
+    },
+    [pauseTimerDraft, timerConfig, handleUpdateTimerConfig]
   );
   const [activeHunter, setActiveHunter] = useState<Player | null>(null);
   const [hunterOriginPhase, setHunterOriginPhase] = useState<'night' | 'day_voting'>('night');
@@ -1001,6 +1050,48 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [roleCalloutToast]);
 
+  // Auto-dismiss actionWarningToast after 3.5s
+  useEffect(() => {
+    if (!actionWarningToast) return;
+    const timer = window.setTimeout(() => {
+      setActionWarningToast(null);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [actionWarningToast]);
+
+  const showActionWarning = useCallback((msg: string) => {
+    setEventBanner(msg);
+    setActionWarningToast(msg);
+  }, []);
+
+  // Clear stale night callouts when entering daytime phases (BUG-33)
+  useEffect(() => {
+    if (phase !== 'night') {
+      setRoleCalloutToast(null);
+      setIsSeerInspectPending(false);
+    }
+  }, [phase]);
+
+  // Close tool popovers when collapsing dock or when player becomes a dead ghost (BUG-01, BUG-13)
+  useEffect(() => {
+    if (isDockCollapsed) {
+      setActiveToolPopover('none');
+    }
+  }, [isDockCollapsed]);
+
+  useEffect(() => {
+    if (!me.isAlive) {
+      setActivePropTool(null);
+      setActiveToolPopover((p) => (p === 'props' ? 'none' : p));
+    }
+  }, [me.isAlive]);
+
+  // Auto-scroll chat drawer to bottom when new messages arrive or drawer opens (BUG-24)
+  useEffect(() => {
+    if (activeDrawer !== 'chat') return;
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length, activeDrawer, chatTab]);
+
   // Extract publicly accused suspect IDs from daytime chat for fair Bot Witch targeting
   const getPublicSuspectedIds = useCallback((targetPlayers: Player[]) => {
     const signals = extractChatVoteSignals(messagesRef.current, targetPlayers);
@@ -1052,6 +1143,7 @@ export default function App() {
       }
 
       lastAutoAdvancedKeyRef.current = '';
+      isResolvingVoteRef.current = false;
       botWitchActedTonightRef.current = prepared.completedBotRoleIds.includes('witch');
       setMatchInstanceId((m) => m + 1);
       setPlayers(nextPlayers);
@@ -1066,8 +1158,10 @@ export default function App() {
       setNightStepIndex(prepared.initialStepIndex);
       setTimerSeconds(prepared.initialTimerSec);
       setHasInspectedTonight(false);
+      setIsSeerInspectPending(false);
       setHasClosedEyesTonight(false);
       setActivePropTool(null);
+      setActiveToolPopover('none');
       setSelectedTargetId(null);
       setSeerInspectResult(null);
       setIsUserRoaming(false);
@@ -1105,7 +1199,7 @@ export default function App() {
         : currentNightStep.gmNarration[lang]
     );
 
-    if (shellState === 'playing') {
+    if (shellState === 'playing' && !(awakeNow && currentNightStep.key === 'seer')) {
       triggerNightRoleCallout(currentNightStep.roleId);
     }
 
@@ -1447,6 +1541,7 @@ export default function App() {
 
       if (stepChanged) {
         setHasClosedEyesTonight(false);
+        setIsSeerInspectPending(false);
         if (view.phase !== 'night') {
           setTonightWolfVictimId(null);
           setSecondWolfTargetId(null);
@@ -1457,8 +1552,9 @@ export default function App() {
           setDoppelgangerTargetId(null);
           setRoleCalloutToast(null);
         }
-        if (view.phase === 'day_voting') {
+        if (view.phase === 'night' || view.phase === 'day_voting') {
           setActivePropTool(null);
+          setActiveToolPopover('none');
         }
       }
 
@@ -1489,6 +1585,7 @@ export default function App() {
         } else if (viewer?.roleId === 'seer') {
           if (view.mySeerInspection && view.mySeerInspection.round === view.round) {
             setHasInspectedTonight(true);
+            setIsSeerInspectPending(false);
             setSeerTargetTonightId(view.mySeerInspection.playerId);
             setSelectedTargetId(view.mySeerInspection.playerId);
           } else {
@@ -1565,7 +1662,9 @@ export default function App() {
           if (phaseChanged) {
             sound.playNightBell();
           }
-          triggerNightRoleCallout(view.currentNightStep.roleId);
+          if (!(view.isMyNightTurn && view.currentNightStep.key === 'seer')) {
+            triggerNightRoleCallout(view.currentNightStep.roleId);
+          }
           setEventBanner(
             view.isMyNightTurn
               ? `${view.currentNightStep.gmNarration[curLang]} · ${view.currentNightStep.playerInstruction[curLang]}`
@@ -1721,6 +1820,131 @@ export default function App() {
     [roomId, triggerNightRoleCallout]
   );
 
+  // Clean reset of match-scoped UI overlays, popovers, pointer lock & movement (BUG-19)
+  const resetMatchUiState = useCallback(() => {
+    setIsNotebookOpen(false);
+    setShowMyRoleModal(false);
+    setIsRoleCardInitialOpen(false);
+    setActiveDrawer('none');
+    setActiveToolPopover('none');
+    setActivePropTool(null);
+    setFreeLook360(false);
+    preFreeLookCameraRef.current = null;
+    if (document.pointerLockElement && typeof document.exitPointerLock === 'function') {
+      try {
+        document.exitPointerLock();
+      } catch {
+        // ignore
+      }
+    }
+    setGmAnnouncement(null);
+    setNightDeathCinematic(null);
+    setPendingDawnAfterDeath(null);
+    setRoleCalloutToast(null);
+    setActionWarningToast(null);
+    setIsSeerInspectPending(false);
+    isResolvingVoteRef.current = false;
+    setMoveVector({ x: 0, z: 0 });
+    setFpvLookTurnRate(0);
+    setGhostVerticalRate(0);
+  }, []);
+
+  // Reconcile Dusk vote breakdown with Mayor x2 weight and Campfire Abstain row (BUG-08)
+  const enrichDuskAnnouncementVotes = useCallback(
+    (
+      announcement: GMAnnouncementData,
+      allVotes: VoteRecord[],
+      beforePlayers: Player[],
+      currentMayorId: string | null,
+      curLang: Language
+    ): GMAnnouncementData => {
+      const tally = tallyVotesWithMayor(allVotes, currentMayorId);
+      const playerVotesOnly = allVotes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID);
+      const weightedEntries = buildVoteTallyEntries(beforePlayers, playerVotesOnly).map((entry) => ({
+        ...entry,
+        votes: tally.counts[entry.playerId] ?? entry.votes,
+      }));
+      if (tally.abstainCount > 0) {
+        const abstainVoters = tally.abstainerIds
+          .map((id) => {
+            const idx = beforePlayers.findIndex((p) => p.id === id);
+            if (idx < 0) return null;
+            return {
+              id: beforePlayers[idx].id,
+              name: beforePlayers[idx].name,
+              avatar: beforePlayers[idx].avatar,
+              seatNumber: idx + 1,
+            };
+          })
+          .filter(
+            (v): v is { id: string; name: string; avatar: string; seatNumber: number } =>
+              Boolean(v)
+          );
+        weightedEntries.push({
+          playerId: CAMPFIRE_ABSTAIN_ID,
+          name: UI_TEXT[curLang].campfireAbstain,
+          avatar: '🔥',
+          seatNumber: 0,
+          votes: tally.abstainCount,
+          voters: abstainVoters,
+        });
+      }
+      weightedEntries.sort((a, b) => b.votes - a.votes || a.seatNumber - b.seatNumber);
+      return { ...announcement, voteBreakdown: weightedEntries };
+    },
+    []
+  );
+
+  // Ensure Cupid & pre-simulated human lovers get accurate Dawn private notices (BUG-07)
+  const enrichDawnCupidNotices = useCallback(
+    (
+      announcement: GMAnnouncementData,
+      effectivePlayers: Player[],
+      humanId: string,
+      resolvedLovers: [string, string] | null,
+      curRound: number,
+      curLang: Language
+    ): GMAnnouncementData => {
+      if (curRound !== 1) return announcement;
+      const afterMe = effectivePlayers.find((p) => p.id === humanId);
+      if (!afterMe || !afterMe.isAlive) return announcement;
+      const extraNotices: string[] = [];
+      if (afterMe.roleId === 'cupid' && resolvedLovers && resolvedLovers[0] && resolvedLovers[1]) {
+        const idx1 = effectivePlayers.findIndex((p) => p.id === resolvedLovers[0]);
+        const idx2 = effectivePlayers.findIndex((p) => p.id === resolvedLovers[1]);
+        if (idx1 >= 0 && idx2 >= 0) {
+          const p1 = effectivePlayers[idx1];
+          const p2 = effectivePlayers[idx2];
+          extraNotices.push(
+            curLang === 'vi'
+              ? `💘 Mật báo Quản Trò: Bạn đã ghép đôi ${p1.name} (#${idx1 + 1}) và ${p2.name} (#${idx2 + 1}) thành Tình Nhân sinh tử!`
+              : `💘 Secret GM Tap: You linked ${p1.name} (#${idx1 + 1}) and ${p2.name} (#${idx2 + 1}) as star-crossed Lovers!`
+          );
+        }
+      } else if (
+        afterMe.roleId !== 'cupid' &&
+        afterMe.loverId &&
+        !(announcement.privateNotice || '').includes('💘')
+      ) {
+        const partnerIdx = effectivePlayers.findIndex((p) => p.id === afterMe.loverId);
+        if (partnerIdx >= 0) {
+          const partner = effectivePlayers[partnerIdx];
+          extraNotices.push(
+            curLang === 'vi'
+              ? `💘 Mật báo Quản Trò: Đêm qua mũi tên Cupid đã ghép đôi bạn với ${partner.name} (#${partnerIdx + 1}). Hai bạn cùng sống, cùng chết!`
+              : `💘 Secret GM Tap: Cupid bound you as Lovers with ${partner.name} (#${partnerIdx + 1}). You live and die together!`
+          );
+        }
+      }
+      if (extraNotices.length === 0) return announcement;
+      const merged = announcement.privateNotice
+        ? `${announcement.privateNotice}\n${extraNotices.join('\n')}`
+        : extraNotices.join('\n');
+      return { ...announcement, privateNotice: merged };
+    },
+    []
+  );
+
   // Start / Restart a 3D Match (Supports Online Room with exact participants & server-assigned roles, or AI Practice)
   const handleStartMatch = useCallback(
     (
@@ -1838,6 +2062,7 @@ export default function App() {
         isMayor: Boolean(initialMayorId && p.id === initialMayorId),
       }));
 
+      resetMatchUiState();
       setMayorId(initialMayorId);
       setKnownWolfIds([]);
       setWolfPupFrenzy(false);
@@ -1846,17 +2071,13 @@ export default function App() {
       setHasVoted(false);
       setActiveHunter(null);
       setGameResult(null);
-      setGmAnnouncement(null);
       setLastDawnAnnouncement(null);
-      setNightDeathCinematic(null);
-      setPendingDawnAfterDeath(null);
       setPendingNightTransition(null);
       setPendingDawnContext(null);
       setPendingDuskBeforePlayers(null);
       setSuspectTags({});
-      setActiveDrawer('none');
-      setIsNotebookOpen(false);
       setShowAvatarLocker(false);
+      setIsRoleCardInitialOpen(autoOpenRoleCard);
       setShowMyRoleModal(autoOpenRoleCard);
       setEmoteEvents([]);
       setIsUserRoaming(false);
@@ -1938,6 +2159,7 @@ export default function App() {
       timerConfig.nightActionSec,
       beginNewNight,
       applyOnlineMatchView,
+      resetMatchUiState,
       t,
       lang,
     ]
@@ -2187,9 +2409,13 @@ export default function App() {
     setSecondWolfTargetId(null);
     setGuardTargetTonightId(null);
     setSeerTargetTonightId(null);
+    setSeerInspectResult(null);
     setWitchHealTargetTonightId(null);
     setWitchPoisonTargetId(null);
     setRoleCalloutToast(null);
+    if (round === 1 && resolvedCupidLovers) {
+      setCupidLovers(resolvedCupidLovers);
+    }
 
     if (result.triggeredHunterIds.length > 0) {
       // Process bot hunters before pausing for any human hunter in the same simultaneous wave
@@ -2330,16 +2556,23 @@ export default function App() {
     }
 
     // Build authentic, ZERO-LEAK real-life Game Master Dawn Announcement (public text stays neutral; privateNotice tells dead Ghost why they died)
-    const dawnAnnouncement = buildDawnGMAnnouncement({
+    const dawnAnnouncement = enrichDawnCupidNotices(
+      buildDawnGMAnnouncement({
+        round,
+        beforePlayers: beforeNightPlayers,
+        afterPlayers: effectivePlayers,
+        nightKilledIds: result.killedPlayerIds,
+        hunterShotEvent,
+        humanDeathReason: humanDiedTonight ? deathRevealState?.reasonText ?? null : null,
+        humanPlayerId: me.id,
+        lang,
+      }),
+      effectivePlayers,
+      me.id,
+      resolvedCupidLovers,
       round,
-      beforePlayers: beforeNightPlayers,
-      afterPlayers: effectivePlayers,
-      nightKilledIds: result.killedPlayerIds,
-      hunterShotEvent,
-      humanDeathReason: humanDiedTonight ? deathRevealState?.reasonText ?? null : null,
-      humanPlayerId: me.id,
-      lang,
-    });
+      lang
+    );
 
     // Auto-record Dawn casualties & Mayor succession into the Agrou Deduction Notebook
     setNotebook((prevNb) => {
@@ -2475,6 +2708,7 @@ export default function App() {
     handleThrowProp,
     handleTriggerEmote,
     getPublicSuspectedIds,
+    enrichDawnCupidNotices,
     timerConfig,
     t,
     lang,
@@ -2503,6 +2737,21 @@ export default function App() {
 
   // Confirm Night Action (Server-authoritative `confirm_done` in Online mode; local resolve in AI Practice)
   const handleConfirmNightAction = useCallback(() => {
+    if (
+      phase === 'night' &&
+      me.isAlive &&
+      me.roleId === 'cupid' &&
+      currentNightStep?.key === 'cupid' &&
+      !(cupidLovers && cupidLovers[0] && cupidLovers[1] && cupidLovers[0] !== cupidLovers[1])
+    ) {
+      const picked = (cupidLovers || []).filter(Boolean).length;
+      showActionWarning(
+        lang === 'vi'
+          ? `💘 Hãy chọn đủ 2 Tình Nhân khác nhau trước khi xác nhận (${picked}/2)!`
+          : `💘 Please select 2 distinct Lovers before confirming (${picked}/2)!`
+      );
+      return;
+    }
     if (gameMode === 'online') {
       if (onlineMatchView?.hasConfirmedNightStep) return;
       sound.playCardFlip();
@@ -2515,7 +2764,19 @@ export default function App() {
       return;
     }
     handleResolveNight();
-  }, [gameMode, onlineMatchView?.hasConfirmedNightStep, roomId, lang, handleResolveNight]);
+  }, [
+    phase,
+    me.isAlive,
+    me.roleId,
+    currentNightStep?.key,
+    cupidLovers,
+    showActionWarning,
+    gameMode,
+    onlineMatchView?.hasConfirmedNightStep,
+    roomId,
+    lang,
+    handleResolveNight,
+  ]);
 
   // Jump directly to the human player's waking night step (AI Practice only — never skips other humans in Online mode!)
   const handleJumpToMyNightTurn = useCallback(() => {
@@ -2622,7 +2883,9 @@ export default function App() {
       return;
     }
     sound.playGavel();
+    isResolvingVoteRef.current = false;
     setActivePropTool(null);
+    setActiveToolPopover('none');
     setSecondWolfTargetId(null);
     setPhase('day_voting');
     setTimerSeconds(timerConfig.dayVoteSec);
@@ -2721,23 +2984,51 @@ export default function App() {
         realtimeClient.sendAdvancePhase(roomId);
         return;
       }
+      if (
+        phaseRef.current !== 'day_voting' ||
+        isResolvingVoteRef.current ||
+        Boolean(gmAnnouncement)
+      ) {
+        return;
+      }
+      isResolvingVoteRef.current = true;
+
       const beforeVotePlayers = players;
-      const activeVotes = overrideVotes || votes;
+      let activeVotes = overrideVotes || votes;
+      // Flush pending 900ms bot votes synchronously if player locked vote early (BUG-27)
+      if (botVoteTimeoutRef.current !== null) {
+        window.clearTimeout(botVoteTimeoutRef.current);
+        botVoteTimeoutRef.current = null;
+        const chatSignals = extractChatVoteSignals(messagesRef.current, beforeVotePlayers);
+        const botVotes = computeSmartBotDayVotes(beforeVotePlayers, knownWolfIds, null, chatSignals);
+        const botIdSet = new Set(beforeVotePlayers.filter((p) => p.isBot).map((p) => p.id));
+        activeVotes = [
+          ...activeVotes.filter((v) => !botIdSet.has(v.voterId)),
+          ...botVotes,
+        ];
+        setVotes(activeVotes);
+      }
       const tally = tallyVotesWithMayor(activeVotes, mayorId);
       const playerTargetVotes = activeVotes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID);
 
       if (tally.isTie || !tally.targetId) {
-        const tieAnnouncement = buildDuskGMAnnouncement({
-          round,
-          beforePlayers: beforeVotePlayers,
-          afterPlayers: beforeVotePlayers,
-          lynchedVictim: null,
-          voteCounts: tally.counts,
-          votes: playerTargetVotes,
-          isTie: true,
-          humanPlayerId: me.id,
-          lang,
-        });
+        const tieAnnouncement = enrichDuskAnnouncementVotes(
+          buildDuskGMAnnouncement({
+            round,
+            beforePlayers: beforeVotePlayers,
+            afterPlayers: beforeVotePlayers,
+            lynchedVictim: null,
+            voteCounts: tally.counts,
+            votes: playerTargetVotes,
+            isTie: true,
+            humanPlayerId: me.id,
+            lang,
+          }),
+          activeVotes,
+          beforeVotePlayers,
+          mayorId,
+          lang
+        );
         setNotebook((prevNb) =>
           appendNotebookTimelineEvent(prevNb, {
             round,
@@ -2770,7 +3061,10 @@ export default function App() {
       }
 
       const victim = beforeVotePlayers.find((p) => p.id === tally.targetId);
-      if (!victim) return;
+      if (!victim) {
+        isResolvingVoteRef.current = false;
+        return;
+      }
 
       const {
         updatedPlayers,
@@ -2880,19 +3174,25 @@ export default function App() {
         sound.playGhostWail();
       }
 
-      const duskAnnouncement = buildDuskGMAnnouncement({
-        round,
-        beforePlayers: beforeVotePlayers,
-        afterPlayers: effectivePlayers,
-        lynchedVictim: victim,
-        voteCounts: tally.counts,
-        votes: playerTargetVotes,
-        isTie: false,
-        elderLynchedPenalty,
-        hunterShotEvent,
-        humanPlayerId: me.id,
-        lang,
-      });
+      const duskAnnouncement = enrichDuskAnnouncementVotes(
+        buildDuskGMAnnouncement({
+          round,
+          beforePlayers: beforeVotePlayers,
+          afterPlayers: effectivePlayers,
+          lynchedVictim: victim,
+          voteCounts: tally.counts,
+          votes: playerTargetVotes,
+          isTie: false,
+          elderLynchedPenalty,
+          hunterShotEvent,
+          humanPlayerId: me.id,
+          lang,
+        }),
+        activeVotes,
+        beforeVotePlayers,
+        mayorId,
+        lang
+      );
 
       setNotebook((prevNb) => {
         let nextNb = appendNotebookTimelineEvent(prevNb, {
@@ -2966,6 +3266,8 @@ export default function App() {
       roomId,
       finishGame,
       triggerNightRoleCallout,
+      enrichDuskAnnouncementVotes,
+      gmAnnouncement,
       timerConfig.hunterShotSec,
       t,
       lang,
@@ -2994,6 +3296,13 @@ export default function App() {
         activePropTool &&
         (phase === 'day_discussion' || phase === 'day_voting')
       ) {
+        if (!me.isAlive) {
+          setActivePropTool(null);
+          return;
+        }
+        if (!target.isAlive || targetId === me.id) {
+          return;
+        }
         handleThrowProp(me.id, targetId, activePropTool);
         return;
       }
@@ -3175,24 +3484,31 @@ export default function App() {
         } else {
           const hunterSeat = updatedPlayers.findIndex((p) => p.id === activeHunter.id) + 1;
           const targetSeat = updatedPlayers.findIndex((p) => p.id === targetId) + 1;
-          const duskAfterShot = buildDuskGMAnnouncement({
-            round,
-            beforePlayers: pendingDuskBeforePlayers || players,
-            afterPlayers: updatedPlayers,
-            lynchedVictim: activeHunter,
-            voteCounts: tallyVotesWithMayor(votes, mayorId).counts,
-            votes: votes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID),
-            isTie: false,
-            hunterShotEvent: {
-              hunterName: activeHunter.name,
-              hunterSeat,
-              targetId,
-              targetName: victimName,
-              targetSeat,
-            },
-            humanPlayerId: me.id,
-            lang,
-          });
+          const duskBefore = pendingDuskBeforePlayers || players;
+          const duskAfterShot = enrichDuskAnnouncementVotes(
+            buildDuskGMAnnouncement({
+              round,
+              beforePlayers: duskBefore,
+              afterPlayers: updatedPlayers,
+              lynchedVictim: activeHunter,
+              voteCounts: tallyVotesWithMayor(votes, mayorId).counts,
+              votes: votes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID),
+              isTie: false,
+              hunterShotEvent: {
+                hunterName: activeHunter.name,
+                hunterSeat,
+                targetId,
+                targetName: victimName,
+                targetSeat,
+              },
+              humanPlayerId: me.id,
+              lang,
+            }),
+            votes,
+            duskBefore,
+            mayorId,
+            lang
+          );
           setPendingDuskBeforePlayers(null);
           setMessages((prev) => [
             ...prev,
@@ -3309,10 +3625,10 @@ export default function App() {
           }
         } else if (me.roleId === 'bodyguard' && currentNightStep?.key === 'bodyguard') {
           if (target.protectedLastNight) {
-            setEventBanner(
+            showActionWarning(
               lang === 'vi'
-                ? `🛡️ Không được bảo vệ ${target.name} 2 đêm liên tiếp!`
-                : `🛡️ Cannot shield ${target.name} two nights in a row!`
+                ? `🛡️ Không thể bảo vệ cùng một người 2 đêm liên tiếp (${target.name})!`
+                : `🛡️ Cannot protect the same player two nights in a row (${target.name})!`
             );
             return;
           }
@@ -3343,13 +3659,24 @@ export default function App() {
           }
         } else if (me.roleId === 'cupid' && round === 1 && currentNightStep?.key === 'cupid') {
           sound.playCupidHarp();
-          if (!cupidLovers || (cupidLovers[0] && cupidLovers[1])) {
+          if (cupidLovers && cupidLovers[0] === targetId && !cupidLovers[1]) {
+            setCupidLovers(null);
+            setSelectedTargetId(null);
+            setEventBanner(
+              lang === 'vi' ? '💘 Đã bỏ chọn — hãy chọn 2 Tình Nhân!' : '💘 Cleared — pick 2 Lovers!'
+            );
+          } else if (!cupidLovers || (cupidLovers[0] && cupidLovers[1])) {
             setCupidLovers([targetId, '']);
             setSelectedTargetId(targetId);
-            setEventBanner(`💘 1/2: ${target.name}`);
+            setEventBanner(
+              lang === 'vi'
+                ? `💘 Đã chọn 1/2: ${target.name} — Hãy chọn thêm 1 người nữa!`
+                : `💘 Selected 1/2: ${target.name} — Pick 1 more player!`
+            );
           } else if (cupidLovers[0] && !cupidLovers[1] && cupidLovers[0] !== targetId) {
             const pair: [string, string] = [cupidLovers[0], targetId];
             setCupidLovers(pair);
+            setSelectedTargetId(pair[0]);
             setEventBanner(`💘 2/2: ${target.name}!`);
             if (gameMode === 'online') {
               realtimeClient.sendNightAction(roomId, {
@@ -3420,6 +3747,8 @@ export default function App() {
       knownWolfIds,
       finishGame,
       handleThrowProp,
+      showActionWarning,
+      enrichDuskAnnouncementVotes,
       timerConfig.dayDiscussSec,
       timerConfig.hunterShotSec,
       mayorId,
@@ -3428,7 +3757,7 @@ export default function App() {
     ]
   );
 
-  // Confirm 2-step Seer inspection after selecting a target (BUG-25)
+  // Confirm 2-step Seer inspection after selecting a target (BUG-25, BUG-27, BUG-38)
   const handleConfirmSeerInspect = useCallback(() => {
     if (
       phase !== 'night' ||
@@ -3436,7 +3765,8 @@ export default function App() {
       me.roleId !== 'seer' ||
       me.hasUsedPower ||
       currentNightStep?.key !== 'seer' ||
-      hasInspectedTonight
+      hasInspectedTonight ||
+      isSeerInspectPending
     ) {
       return;
     }
@@ -3446,7 +3776,9 @@ export default function App() {
     if (!target) return;
 
     if (gameMode === 'online') {
+      setIsSeerInspectPending(true);
       sound.playMysticChime();
+      triggerNightRoleCallout('seer');
       setSeerTargetTonightId(targetId);
       setSelectedTargetId(targetId);
       setEventBanner(
@@ -3465,6 +3797,7 @@ export default function App() {
     setSeerTargetTonightId(targetId);
     setSelectedTargetId(targetId);
     sound.playMysticChime();
+    triggerNightRoleCallout('seer');
     const isWolf = target.roleId === 'werewolf' || target.roleId === 'wolf_pup';
     setSuspectTags((prev) => ({
       ...prev,
@@ -3487,7 +3820,21 @@ export default function App() {
     });
     setSeerInspectResult(resText);
     setEventBanner(`🔮 ${resText}`);
-  }, [phase, me, currentNightStep, hasInspectedTonight, seerTargetTonightId, selectedTargetId, players, round, lang, gameMode, roomId]);
+  }, [
+    phase,
+    me,
+    currentNightStep,
+    hasInspectedTonight,
+    isSeerInspectPending,
+    seerTargetTonightId,
+    selectedTargetId,
+    players,
+    round,
+    lang,
+    gameMode,
+    roomId,
+    triggerNightRoleCallout,
+  ]);
 
   // Hunter Hold-Fire ("Giữ súng") option — skip revenge shot cleanly (BUG-24)
   const handleSkipHunterShot = useCallback(() => {
@@ -3571,18 +3918,25 @@ export default function App() {
       setGmAnnouncement(dawnAfterSkip);
       sound.playGMAnnouncement('dawn', dawnAfterSkip.victims.length > 0, dawnAfterSkip.spokenNarration, lang);
     } else {
-      const duskAfterSkip = buildDuskGMAnnouncement({
-        round,
-        beforePlayers: pendingDuskBeforePlayers || updatedAfterSkip,
-        afterPlayers: updatedAfterSkip,
-        lynchedVictim: skippedHunter,
-        voteCounts: tallyVotesWithMayor(votes, mayorId).counts,
-        votes: votes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID),
-        isTie: false,
-        hunterShotEvent: null,
-        humanPlayerId: me.id,
-        lang,
-      });
+      const duskBefore = pendingDuskBeforePlayers || updatedAfterSkip;
+      const duskAfterSkip = enrichDuskAnnouncementVotes(
+        buildDuskGMAnnouncement({
+          round,
+          beforePlayers: duskBefore,
+          afterPlayers: updatedAfterSkip,
+          lynchedVictim: skippedHunter,
+          voteCounts: tallyVotesWithMayor(votes, mayorId).counts,
+          votes: votes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID),
+          isTie: false,
+          hunterShotEvent: null,
+          humanPlayerId: me.id,
+          lang,
+        }),
+        votes,
+        duskBefore,
+        mayorId,
+        lang
+      );
       setPendingDuskBeforePlayers(null);
       setMessages((prev) => [
         ...prev,
@@ -3622,6 +3976,7 @@ export default function App() {
     gameMode,
     roomId,
     onlineMatchView?.isMyHunterTurn,
+    enrichDuskAnnouncementVotes,
   ]);
 
   // Fast-Forward / Advance Phase Handler (Host-only server advance in Online mode; jumps to human turn in AI Practice)
@@ -4004,8 +4359,57 @@ export default function App() {
   const handleReturnToSeat = useCallback(() => {
     sound.playCardFlip();
     setReturnToSeatTrigger((n) => n + 1);
+    setReturnToSeatSeq((n) => n + 1);
     setIsUserRoaming(false);
     setAimedOwnSeat(false);
+  }, []);
+
+  // Mutually exclusive panel/drawer/popover controls (BUG-11)
+  const toggleNotebookPanel = useCallback(() => {
+    setIsNotebookOpen((open) => {
+      const next = !open;
+      if (next) {
+        setActiveDrawer('none');
+        setActiveToolPopover('none');
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleDrawerPanel = useCallback((drawer: DrawerTool) => {
+    setActiveDrawer((cur) => {
+      const next = cur === drawer ? 'none' : drawer;
+      if (next !== 'none') {
+        setIsNotebookOpen(false);
+        setActiveToolPopover('none');
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleToolPopoverPanel = useCallback((popover: 'props' | 'voice') => {
+    setActiveToolPopover((cur) => {
+      const next = cur === popover ? 'none' : popover;
+      if (next !== 'none') {
+        setIsNotebookOpen(false);
+        setActiveDrawer('none');
+      }
+      return next;
+    });
+  }, []);
+
+  const openRoleCardModal = useCallback(() => {
+    sound.playCardFlip();
+    setActiveToolPopover('none');
+    setIsNotebookOpen(false);
+    setIsRoleCardInitialOpen(false);
+    setShowMyRoleModal(true);
+  }, []);
+
+  const openPauseModal = useCallback(() => {
+    setActiveToolPopover('none');
+    setIsNotebookOpen(false);
+    setShellState('paused');
   }, []);
 
   const handleDismissNightDeathCinematic = useCallback(() => {
@@ -4027,6 +4431,7 @@ export default function App() {
   // Keyboard Shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const targetEl = e.target as HTMLElement | null;
       const tag = targetEl?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || targetEl?.isContentEditable) return;
@@ -4041,7 +4446,23 @@ export default function App() {
       }
 
       if (shellState === 'title' && (e.code === 'Enter' || e.code === 'Space')) {
-        if (!lobbyModalState.isOpen) {
+        const activeEl = document.activeElement as HTMLElement | null;
+        const activeTag = activeEl?.tagName;
+        const isInteractiveFocused =
+          activeTag === 'BUTTON' ||
+          activeTag === 'A' ||
+          activeTag === 'INPUT' ||
+          activeTag === 'TEXTAREA' ||
+          activeTag === 'SELECT' ||
+          Boolean(activeEl?.closest('[role="dialog"], [role="menu"]'));
+        const isTitleModalOrMenuOpen =
+          lobbyModalState.isOpen ||
+          showAvatarLocker ||
+          showProfileModal ||
+          activeDrawer !== 'none' ||
+          showOnboardingTour ||
+          Boolean(document.querySelector('[role="dialog"], [data-testid="guide-options-menu"]'));
+        if (!isInteractiveFocused && !isTitleModalOrMenuOpen) {
           e.preventDefault();
           handleStartMatch(
             villageSize,
@@ -4069,12 +4490,16 @@ export default function App() {
         return;
       }
 
-      if (e.code === 'Escape' || e.code === 'KeyP') {
+      if (e.code === 'Escape') {
         e.preventDefault();
-        if (e.code === 'Escape' && (freeLook360 || document.pointerLockElement)) {
+        if (freeLook360 || document.pointerLockElement) {
           setFreeLook360(false);
           if (document.pointerLockElement && typeof document.exitPointerLock === 'function') {
             document.exitPointerLock();
+          }
+          if (preFreeLookCameraRef.current) {
+            setCameraPreset(preFreeLookCameraRef.current);
+            preFreeLookCameraRef.current = null;
           }
           return;
         }
@@ -4096,31 +4521,75 @@ export default function App() {
           setActiveDrawer('none');
         } else if (activeToolPopover !== 'none') {
           setActiveToolPopover('none');
+        } else if (activePropTool !== null) {
+          setActivePropTool(null);
         } else if (shellState === 'playing') {
-          setShellState('paused');
+          openPauseModal();
         } else if (shellState === 'paused') {
           setShellState('playing');
         }
-      } else if (e.code === 'KeyH' && shellState === 'playing') {
-        setIsDockCollapsed((c) => !c);
-      } else if (e.code === 'KeyN' && shellState === 'playing') {
-        setIsNotebookOpen((o) => !o);
-      } else if (e.code === 'KeyT' && shellState === 'playing' && phase !== 'night') {
-        setActiveToolPopover((p) => (p === 'props' ? 'none' : 'props'));
-      } else if (e.code === 'KeyM') {
+        return;
+      }
+
+      if (e.code === 'KeyP') {
+        if (
+          showOnboardingTour ||
+          showAvatarLocker ||
+          showProfileModal ||
+          lobbyModalState.isOpen ||
+          Boolean(gmAnnouncement) ||
+          Boolean(nightDeathCinematic)
+        ) {
+          return;
+        }
+        e.preventDefault();
+        if (shellState === 'playing') {
+          setShowMyRoleModal(false);
+          setActiveDrawer('none');
+          openPauseModal();
+        } else if (shellState === 'paused') {
+          setShellState('playing');
+        }
+        return;
+      }
+
+      const hasBlockingModal =
+        shellState !== 'playing' ||
+        showOnboardingTour ||
+        showAvatarLocker ||
+        showProfileModal ||
+        lobbyModalState.isOpen ||
+        Boolean(gmAnnouncement) ||
+        Boolean(nightDeathCinematic);
+
+      if (e.code === 'KeyM') {
         const m = sound.toggleMute();
         setIsMuted(m);
-      } else if (e.code === 'KeyC' && shellState === 'playing') {
-        setShowMyRoleModal((s) => !s);
-      } else if (e.code === 'KeyV' && shellState === 'playing') {
+        return;
+      }
+
+      if (hasBlockingModal) return;
+
+      if (e.code === 'KeyC') {
+        if (showMyRoleModal) {
+          setShowMyRoleModal(false);
+        } else {
+          openRoleCardModal();
+        }
+      } else if (e.code === 'KeyN' && !showMyRoleModal) {
+        toggleNotebookPanel();
+      } else if (showMyRoleModal || isNotebookOpen || activeDrawer !== 'none') {
+        return;
+      } else if (e.code === 'KeyH') {
+        setIsDockCollapsed((c) => !c);
+      } else if (e.code === 'KeyT' && phase !== 'night' && me.isAlive) {
+        toggleToolPopoverPanel('props');
+      } else if (e.code === 'KeyV') {
         handleToggleFirstPerson();
-      } else if (e.code === 'KeyB' && shellState === 'playing') {
+      } else if (e.code === 'KeyB') {
         handleToggleThirdPerson();
-      } else if (
-        e.code === 'KeyE' &&
-        shellState === 'playing' &&
-        isDirectLookCameraPreset(cameraPreset)
-      ) {
+      } else if (e.code === 'KeyE' && isDirectLookCameraPreset(cameraPreset)) {
+        if (e.repeat) return;
         if (aimedOwnSeat && isUserRoaming) {
           e.preventDefault();
           handleReturnToSeat();
@@ -4139,8 +4608,10 @@ export default function App() {
   }, [
     shellState,
     phase,
+    me.isAlive,
     activeDrawer,
     activeToolPopover,
+    activePropTool,
     lobbyModalState,
     showOnboardingTour,
     showAvatarLocker,
@@ -4158,6 +4629,10 @@ export default function App() {
     handleToggleFirstPerson,
     handleToggleThirdPerson,
     handleReturnToSeat,
+    toggleNotebookPanel,
+    toggleToolPopoverPanel,
+    openRoleCardModal,
+    openPauseModal,
     cameraPreset,
     aimedOwnSeat,
     isUserRoaming,
@@ -4233,6 +4708,7 @@ export default function App() {
       ) {
         activeOnlineRoomCodeRef.current = null;
         setOnlineMatchView(null);
+        resetMatchUiState();
         setShellState('title');
       } else if (evt.type === 'error' && isOnlineSessionActive) {
         setEventBanner(`⚠️ ${evt.message}`);
@@ -4247,6 +4723,7 @@ export default function App() {
     applyOnlineMatchView,
     mergeOnlineChatMessages,
     handleThrowProp,
+    resetMatchUiState,
   ]);
 
   // Send Chat Message (Strict Dead Ghost Isolation: Main Chat locked when dead; Ghost tab isolated to dead players only!)
@@ -4335,27 +4812,65 @@ export default function App() {
     showMyRoleModal ||
     lobbyModalState.isOpen ||
     activeDrawer !== 'none' ||
-    activeToolPopover !== 'none' ||
     Boolean(gmAnnouncement);
 
-  const handleToggleFreeLook = () => {
-    if (freeLook360) {
-      setFreeLook360(false);
-      if (document.pointerLockElement && typeof document.exitPointerLock === 'function') {
-        document.exitPointerLock();
+  const handlePointerLockChange = useCallback((locked: boolean) => {
+    setFreeLook360(locked);
+    if (locked) {
+      if (preFreeLookCameraRef.current && !isDirectLookCameraPreset(preFreeLookCameraRef.current)) {
+        setCameraPreset('first_person');
       }
+    } else if (preFreeLookCameraRef.current) {
+      setCameraPreset(preFreeLookCameraRef.current);
+      preFreeLookCameraRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    const syncLock = () => {
+      const locked = Boolean(document.pointerLockElement);
+      handlePointerLockChange(locked);
+    };
+    const onLockError = () => {
+      handlePointerLockChange(false);
+    };
+    document.addEventListener('pointerlockchange', syncLock);
+    document.addEventListener('pointerlockerror', onLockError);
+    return () => {
+      document.removeEventListener('pointerlockchange', syncLock);
+      document.removeEventListener('pointerlockerror', onLockError);
+    };
+  }, [handlePointerLockChange]);
+
+  const handleToggleFreeLook = () => {
+    if (freeLook360 || document.pointerLockElement) {
+      if (document.pointerLockElement && typeof document.exitPointerLock === 'function') {
+        try {
+          document.exitPointerLock();
+        } catch {
+          // ignore
+        }
+      }
+      handlePointerLockChange(false);
       return;
     }
     if (isUiOverlayOpen || isNightBlindfolded || Boolean(nightDeathCinematic)) return;
-    setFreeLook360(true);
     const canvas = document.querySelector<HTMLCanvasElement>('[data-testid="village-3d-canvas"] canvas');
-    if (canvas && typeof canvas.requestPointerLock === 'function') {
-      try {
-        const p = canvas.requestPointerLock() as unknown as Promise<void> | undefined;
-        if (p && typeof p.catch === 'function') p.catch(() => {});
-      } catch {
-        // Fallback: hold-drag + viewport edge-pan remains seamlessly available
+    if (!canvas || typeof canvas.requestPointerLock !== 'function') {
+      return;
+    }
+    preFreeLookCameraRef.current = cameraPreset;
+    try {
+      const p = canvas.requestPointerLock() as unknown as Promise<void> | undefined;
+      if (p && typeof p.catch === 'function') {
+        p.catch(() => {
+          preFreeLookCameraRef.current = null;
+          setFreeLook360(false);
+        });
       }
+    } catch {
+      preFreeLookCameraRef.current = null;
+      setFreeLook360(false);
     }
   };
 
@@ -4364,6 +4879,13 @@ export default function App() {
     !isNightBlindfolded &&
     !nightDeathCinematic &&
     ((phase === 'night' && isPlayerAwakeAtNight) || !me.isAlive || isDirectLookCam);
+
+  // Reset mobile D-Pad / turn / ghost vertical rates whenever controls disable or phase changes (BUG-06)
+  useEffect(() => {
+    setMoveVector({ x: 0, z: 0 });
+    setFpvLookTurnRate(0);
+    setGhostVerticalRate(0);
+  }, [canUseVirtualDpad, isDockCollapsed, phase, shellState]);
 
   const aimedPlayer = aimedPlayerId ? players.find((p) => p.id === aimedPlayerId) || null : null;
 
@@ -4403,22 +4925,10 @@ export default function App() {
             </span>
             <div className="min-w-0">
               <div className="text-xs sm:text-sm font-black text-amber-200 truncate">
-                {isHostShell
-                  ? lang === 'vi'
-                    ? 'Chế Độ Quản Trò Ngoài Đời'
-                    : 'Real-Life Game Master Mode'
-                  : lang === 'vi'
-                  ? 'Thẻ Bài Cá Nhân — Phòng Quản Trò'
-                  : 'Personal Role Card — GM Room'}
+                {isHostShell ? t.gmHostShellTitle : t.gmPlayerShellTitle}
               </div>
               <div className="text-[10px] text-slate-400 truncate">
-                {isHostShell
-                  ? lang === 'vi'
-                    ? 'Công cụ hỗ trợ ván đấu ngoài đời · Không liên quan chế độ Bot/Online'
-                    : 'Offline table companion · Isolated from Bot/Online matches'
-                  : lang === 'vi'
-                  ? 'Chỉ hiển thị duy nhất vai trò của bạn'
-                  : 'Shows ONLY your own secret role'}
+                {isHostShell ? t.gmHostShellSubtitle : t.gmPlayerShellSubtitle}
               </div>
             </div>
           </div>
@@ -4426,6 +4936,8 @@ export default function App() {
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
+              aria-label={t.drawerRulesTitle}
+              title={t.drawerRulesTitle}
               onClick={() =>
                 setActiveDrawer(activeDrawer === 'encyclopedia' ? 'none' : 'encyclopedia')
               }
@@ -4484,7 +4996,7 @@ export default function App() {
               className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-bold text-slate-100 flex items-center gap-1 cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />
-              <span>{lang === 'vi' ? 'Trang Chủ' : 'Home'}</span>
+              <span>{t.homeBtn}</span>
             </button>
           </div>
         </header>
@@ -4523,10 +5035,14 @@ export default function App() {
             role="dialog"
             aria-modal="true"
             aria-label={t.drawerRulesTitle}
+            onClick={() => setActiveDrawer('none')}
             className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5"
             style={{ backgroundColor: 'rgba(5, 8, 17, 0.88)' }}
           >
-            <div className="relative w-full max-w-4xl max-h-[86vh] bg-[#0b101e] border-2 border-amber-600/50 rounded-2xl p-4 sm:p-5 overflow-y-auto shadow-2xl">
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="relative w-full max-w-4xl max-h-[86vh] bg-[#0b101e] border-2 border-amber-600/50 rounded-2xl p-4 sm:p-5 overflow-y-auto shadow-2xl"
+            >
               <div className="sticky top-0 z-20 bg-[#0b101e]/95 -mx-4 sm:-mx-5 px-4 sm:px-5 pt-1 flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
                 <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold">
                   {t.drawerRulesTitle}
@@ -4557,6 +5073,7 @@ export default function App() {
         phase={phase}
         lang={lang}
         isTitleScreen={shellState === 'title'}
+        allowTitleOrbit={shellState === 'title' && isTitleMenuMinimized}
         isUiOverlayOpen={isUiOverlayOpen}
         isPlayerAwakeAtNight={isPlayerAwakeAtNight || showOnboardingTour}
         freeLook360={freeLook360}
@@ -4586,18 +5103,22 @@ export default function App() {
         cameraPreset={cameraPreset}
         activePropTool={activePropTool}
         fpvLookTurnRate={fpvLookTurnRate}
+        ghostVerticalRate={ghostVerticalRate}
+        jumpTriggerSeq={jumpTriggerSeq}
+        returnToSeatSeq={returnToSeatSeq}
         mapBiome={avatarConfig.mapBiome}
         mayorId={mayorId}
         emoteEvents={emoteEvents}
         deathCinematic={nightDeathCinematic}
         returnToSeatTrigger={returnToSeatTrigger}
-        onPointerLockChange={setFreeLook360}
+        onPointerLockChange={handlePointerLockChange}
         onAimedPlayerChange={setAimedPlayerId}
         onAimedCampfireChange={setAimedCampfire}
         onAimedOwnSeatChange={setAimedOwnSeat}
         onRoamingStateChange={setIsUserRoaming}
         onReturnToSeat={handleReturnToSeat}
         onSelectPlayer={handleSelect3DPlayer}
+        onSelectCampfire={handleVoteCampfireAbstain}
         onVoteCampfireAbstain={handleVoteCampfireAbstain}
       />
 
@@ -4693,19 +5214,14 @@ export default function App() {
                     data-testid="blindfold-wake-guidance"
                     className="text-[10px] sm:text-[11px] text-[#d6be9c] leading-snug"
                   >
-                    {myWakeGuidance.headline} ·{' '}
-                    {lang === 'vi'
-                      ? 'Màn đêm bao trùm, chỉ còn ánh lửa trại le lói...'
-                      : 'Darkness falls, leaving only the campfire embers glowing...'}
+                    {myWakeGuidance.headline} · {t.blindfoldEmbersSub}
                   </div>
                 </div>
               </div>
 
               {currentNightStep && (
                 <span className="px-2 py-0.5 rounded-lg bg-indigo-950/85 border border-indigo-500/50 text-[10px] font-extrabold text-amber-300 whitespace-nowrap">
-                  {lang === 'vi'
-                    ? `Đang gọi (${currentNightStep.stepIndex + 1}/${currentNightStep.totalSteps}): ${ROLES[currentNightStep.roleId].name.vi}`
-                    : `Calling (${currentNightStep.stepIndex + 1}/${currentNightStep.totalSteps}): ${ROLES[currentNightStep.roleId].name[lang]}`}
+                  {`${t.callingProgress} (${currentNightStep.stepIndex + 1}/${currentNightStep.totalSteps}): ${ROLES[currentNightStep.roleId].name[lang]}`}
                 </span>
               )}
             </div>
@@ -4730,7 +5246,7 @@ export default function App() {
                       }`}
                     >
                       {ROLES[st.roleId].name[lang]}
-                      {st.isHumanTurn ? (lang === 'vi' ? ' (Bạn)' : ' (You)') : ''}
+                      {st.isHumanTurn ? ` ${t.youSuffix}` : ''}
                     </span>
                   ))}
                 </div>
@@ -4738,21 +5254,6 @@ export default function App() {
             )}
 
             <div className="flex flex-wrap items-center justify-center sm:justify-end gap-1.5">
-              {gameMode !== 'online' && myNightStepIdx !== -1 && myNightStepIdx !== nightStepIndex && (
-                <button
-                  type="button"
-                  data-testid="blindfold-jump-my-turn-btn"
-                  onClick={handleJumpToMyNightTurn}
-                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
-                >
-                  <FastForward className="w-3.5 h-3.5 fill-white" />
-                  <span>
-                    {lang === 'vi'
-                      ? `⚡ Tua Tới Lượt Tôi (${myRole.name.vi})`
-                      : `⚡ Jump to My Turn (${myRole.name[lang]})`}
-                  </span>
-                </button>
-              )}
               {!myWakeGuidance.wakesTonight && gameMode === 'ai_practice' && preferredRole === 'random' && (
                 <button
                   type="button"
@@ -4761,9 +5262,7 @@ export default function App() {
                   className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
                 >
                   <span>🔮</span>
-                  <span>
-                    {lang === 'vi' ? 'Đổi Vai Có Kỹ Năng Đêm' : 'Switch to Night Role'}
-                  </span>
+                  <span>{t.switchToNightRole}</span>
                 </button>
               )}
               {gameMode === 'online' ? (
@@ -4776,40 +5275,34 @@ export default function App() {
                   >
                     <Play className="w-3.5 h-3.5 fill-white" />
                     <span>
-                      {lang === 'vi' ? 'Bước tiếp (Chủ phòng)' : 'Next Step (Host)'} ({Math.round(timerSeconds)}s)
+                      {t.nextStep} ({Math.round(timerSeconds)}s)
                     </span>
                   </button>
                 ) : (
                   <span className="px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 text-slate-300 font-bold text-[11px]">
-                    ⏳{' '}
-                    {lang === 'vi'
-                      ? `Đang chờ lượt đêm (${Math.round(timerSeconds)}s)...`
-                      : `Waiting for night turn (${Math.round(timerSeconds)}s)...`}
+                    ⏳ {`${t.waitingNightTurn} (${Math.round(timerSeconds)}s)...`}
                   </span>
                 )
+              ) : myNightStepIdx !== -1 && myNightStepIdx !== nightStepIndex ? (
+                <button
+                  type="button"
+                  data-testid="blindfold-jump-my-turn-btn"
+                  onClick={handleJumpToMyNightTurn}
+                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
+                >
+                  <FastForward className="w-3.5 h-3.5 fill-white" />
+                  <span>{t.jumpToMyTurn(myRole.name[lang])}</span>
+                </button>
               ) : (
-                <>
-                  <button
-                    type="button"
-                    data-testid="blindfold-next-step-btn"
-                    onClick={handleAdvanceNightStep}
-                    className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
-                  >
-                    <Play className="w-3.5 h-3.5 fill-white" />
-                    <span>
-                      {lang === 'vi' ? 'Bước tiếp' : 'Next Step'} ({Math.round(timerSeconds)}s)
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="blindfold-skip-night-btn"
-                    onClick={handleAdvancePhaseFast}
-                    className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
-                  >
-                    <FastForward className="w-3.5 h-3.5 fill-slate-950" />
-                    <span>{t.skipNightLongBtn}</span>
-                  </button>
-                </>
+                <button
+                  type="button"
+                  data-testid="blindfold-skip-night-btn"
+                  onClick={handleAdvancePhaseFast}
+                  className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
+                >
+                  <FastForward className="w-3.5 h-3.5 fill-slate-950" />
+                  <span>{t.skipNightLongBtn}</span>
+                </button>
               )}
             </div>
           </div>
@@ -4831,6 +5324,7 @@ export default function App() {
           onChangeBiome={handleChangeBiome}
           onOpenAvatarLocker={() => setShowAvatarLocker(true)}
           onToggleMinimize={() => setIsTitleMenuMinimized((m) => !m)}
+          onMinimizedChange={setIsTitleMenuMinimized}
           onToggleMute={() => {
             const m = sound.toggleMute();
             setIsMuted(m);
@@ -4900,9 +5394,7 @@ export default function App() {
           className="fixed top-14 left-1/2 -translate-x-1/2 z-40 pointer-events-auto flex flex-wrap items-center justify-center gap-2 px-3.5 py-2 rounded-2xl agrou-wood-panel border-2 border-[#f4c062]/80 shadow-2xl max-w-[94vw]"
         >
           <span className="text-xs font-bold text-[#ffebc2]">
-            {lang === 'vi'
-              ? `💾 Có ván đấu đang dở (Vòng ${savedMatchSnapshot.round} · ${savedMatchSnapshot.players.filter((p) => p.isAlive).length}/${savedMatchSnapshot.players.length} sống)`
-              : `💾 Unfinished match found (Round ${savedMatchSnapshot.round} · ${savedMatchSnapshot.players.filter((p) => p.isAlive).length}/${savedMatchSnapshot.players.length} alive)`}
+            {`💾 ${t.roundStat} ${savedMatchSnapshot.round} · ${savedMatchSnapshot.players.filter((p) => p.isAlive).length}/${savedMatchSnapshot.players.length} ${t.aliveStatus}`}
           </span>
           <button
             type="button"
@@ -4910,7 +5402,7 @@ export default function App() {
             onClick={handleResumeSavedMatch}
             className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold cursor-pointer shadow"
           >
-            {lang === 'vi' ? '▶️ Tiếp tục ván đang dở' : '▶️ Resume Match'}
+            {t.resumeMatchBtn}
           </button>
           <button
             type="button"
@@ -4918,7 +5410,7 @@ export default function App() {
             onClick={handleDismissSavedMatch}
             className="px-2.5 py-1 rounded-xl bg-[#2a1d14] hover:bg-[#3d2a1c] border border-[#6a4c32] text-[#d6be9c] text-xs font-bold cursor-pointer"
           >
-            {lang === 'vi' ? 'Bỏ qua' : 'Dismiss'}
+            {t.dismissBtn}
           </button>
         </div>
       )}
@@ -4943,11 +5435,7 @@ export default function App() {
             showFactionHints={showFactionHints}
             showFastForwardBtn={
               (gameMode !== 'online' || Boolean(me.isHost)) &&
-              !(
-                (phase === 'night' && isPlayerAwakeAtNight && me.isAlive) ||
-                phase === 'day_discussion' ||
-                phase === 'day_voting'
-              )
+              phase === 'hunter_revenge'
             }
             myRole={myRole}
             mayorName={players.find((p) => p.id === mayorId && p.isAlive)?.name || null}
@@ -4960,10 +5448,7 @@ export default function App() {
               setTimerSeconds((s) => Math.max(0, Math.min(600, s + delta)))
             }
             onAdvancePhaseFast={handleAdvancePhaseFast}
-            onOpenRoleCard={() => {
-              sound.playCardFlip();
-              setShowMyRoleModal(true);
-            }}
+            onOpenRoleCard={openRoleCardModal}
             onToggleFirstPerson={handleToggleFirstPerson}
             onToggleThirdPerson={handleToggleThirdPerson}
             onToggleFreeLook={handleToggleFreeLook}
@@ -4976,7 +5461,7 @@ export default function App() {
               const m = sound.toggleMute();
               setIsMuted(m);
             }}
-            onPause={() => setShellState('paused')}
+            onPause={openPauseModal}
           />
 
           {/* TOP-CENTER SINGLE-FOCUS ACTION CONSOLE (Never stacks 4 bars over villagers!) */}
@@ -5003,6 +5488,7 @@ export default function App() {
                 isOnlineWaitingConfirm={Boolean(
                   gameMode === 'online' && onlineMatchView?.hasConfirmedNightStep
                 )}
+                isSeerInspectPending={isSeerInspectPending}
                 canAdvanceBotStep={gameMode !== 'online' || Boolean(me.isHost)}
                 wolfPackPicks={gameMode === 'online' ? onlineMatchView?.wolfPackPicks ?? null : null}
                 onSelectWitchHealTarget={(victimId) => {
@@ -5037,6 +5523,7 @@ export default function App() {
                 hasVoted={hasVoted}
                 selectedTargetId={selectedTargetId}
                 timerSeconds={timerSeconds}
+                canAdvancePhase={gameMode !== 'online' || Boolean(me.isHost)}
                 canUserShootHunter={
                   gameMode === 'online'
                     ? Boolean(onlineMatchView?.isMyHunterTurn)
@@ -5055,8 +5542,46 @@ export default function App() {
               />
             )}
 
+            {/* Non-blocking Action Warning Toast (e.g. Bodyguard repeat target / Cupid incomplete) */}
+            {actionWarningToast && !nightDeathCinematic && !gmAnnouncement && (
+              <div
+                data-testid="action-warning-toast"
+                role="alert"
+                className="pointer-events-none px-3 py-1 rounded-full bg-[#4a1814]/95 border border-[#f87171] text-[10px] sm:text-[11px] font-extrabold text-[#fee2e2] shadow-xl max-w-[92vw] text-center"
+              >
+                {actionWarningToast}
+              </div>
+            )}
+
+            {/* Non-blocking Floating Armed Prop Pill (BUG-01) */}
+            {activePropTool &&
+              me.isAlive &&
+              phase !== 'night' &&
+              !nightDeathCinematic &&
+              !gmAnnouncement && (
+                <div
+                  data-testid="armed-prop-pill"
+                  className="pointer-events-none flex items-center justify-center max-w-[94vw]"
+                >
+                  <div className="px-2.5 py-1 rounded-full bg-[#381d0c]/95 border border-[#f59e0b] text-[10px] sm:text-[11px] font-extrabold text-[#fef3c7] shadow-xl flex items-center gap-2">
+                    <span className="truncate">
+                      {t.holdingPropBanner(t.propButtons[activePropTool])}
+                    </span>
+                    <button
+                      type="button"
+                      data-testid="cancel-armed-prop-btn"
+                      onClick={() => setActivePropTool(null)}
+                      className="pointer-events-auto px-2 py-0.5 rounded-full bg-[#7c2d12] hover:bg-[#9a3412] border border-[#fdba74]/70 text-[#ffedd5] text-[10px] font-black cursor-pointer shrink-0"
+                    >
+                      × {t.dropPropBtn}
+                      <span className="hidden sm:inline"> / Esc</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
             {/* Non-blocking Role Callout Audio/Quote Toast Pill */}
-            {roleCalloutToast && !nightDeathCinematic && !gmAnnouncement && (
+            {roleCalloutToast && !nightDeathCinematic && !gmAnnouncement && !showMyRoleModal && (
               <div
                 data-testid="role-callout-toast"
                 aria-live="polite"
@@ -5073,14 +5598,11 @@ export default function App() {
             {!me.isAlive && !isDirectLookCam && !nightDeathCinematic && (
               <div
                 data-testid="ghost-locked-banner"
-                className="pointer-events-auto px-2.5 py-0.5 rounded-full bg-cyan-950/95 border border-cyan-400/60 text-[10px] font-bold text-cyan-200 flex items-center gap-1.5 shadow-lg max-w-[94vw]"
+                className="pointer-events-none px-2.5 py-0.5 rounded-full bg-cyan-950/95 border border-cyan-400/60 text-[10px] font-bold text-cyan-200 flex items-center gap-1.5 shadow-lg max-w-[94vw]"
               >
                 <Ghost className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                <span className="truncate">
-                  {lang === 'vi'
-                    ? '👻 Chế độ Hồn Ma · Bay tự do WASD · Space Lên / Ctrl Xuống · Giữ chuột kéo xoay 360° · 🔒 Chat & Mic đã khóa'
-                    : '👻 Ghost Mode · Free Flight WASD · Space Up / Ctrl Down · Drag to Look 360° · 🔒 Chat & Mic Locked'}
-                </span>
+                <span className="sm:hidden truncate">{t.ghostFloatingBadge}</span>
+                <span className="hidden sm:inline truncate">{t.ghostFlightBanner}</span>
               </div>
             )}
 
@@ -5088,7 +5610,7 @@ export default function App() {
             {isDirectLookCam && !isNightBlindfolded && !nightDeathCinematic && (
               <div
                 data-testid="fpv-active-banner"
-                className={`pointer-events-auto px-2.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1.5 shadow-lg max-w-[94vw] whitespace-nowrap border ${
+                className={`pointer-events-none px-2.5 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1.5 shadow-lg max-w-[94vw] whitespace-nowrap border ${
                   !me.isAlive
                     ? 'bg-cyan-950/95 border-cyan-400/60 text-cyan-200'
                     : 'bg-emerald-950/95 border-emerald-400/60 text-emerald-200'
@@ -5099,18 +5621,19 @@ export default function App() {
                 ) : (
                   <View className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                 )}
-                <span className="truncate">
+                <span className="sm:hidden truncate">
                   {!me.isAlive
-                    ? lang === 'vi'
-                      ? `👻 Hồn Ma (${cameraPreset === 'third_person' ? 'Sau lưng [B]' : 'Góc 1 [V]'}) · Bay tự do WASD · Space Lên / Ctrl Xuống · Giữ chuột kéo xoay 360°`
-                      : `👻 Ghost (${cameraPreset === 'third_person' ? 'Behind [B]' : 'FPV [V]'}) · Free Flight WASD · Space Up / Ctrl Down · Drag to Look 360°`
+                    ? t.ghostFloatingBadge
                     : cameraPreset === 'third_person'
-                    ? lang === 'vi'
-                      ? 'Góc nhìn sau lưng [B] · Giữ chuột kéo để xoay 360° (bấm 360° khóa chuột) · WASD Đi · Space Nhảy · E/Click Tương tác'
-                      : 'Behind View [B] · Hold-Drag to Look 360° (360° Locks Cursor) · WASD Move · Space Jump · E/Click Interact'
-                    : lang === 'vi'
-                    ? 'Góc nhìn 1 [V] · Giữ chuột kéo để xoay 360° (bấm 360° khóa chuột) · WASD Đi · Space Nhảy · E/Click Tương tác'
-                    : 'FPV [V] · Hold-Drag to Look 360° (360° Locks Cursor) · WASD Move · Space Jump · E/Click Interact'}
+                    ? t.behindCamShort
+                    : t.fpvShort}
+                </span>
+                <span className="hidden sm:inline truncate">
+                  {!me.isAlive
+                    ? t.ghostFlightBanner
+                    : cameraPreset === 'third_person'
+                    ? t.behindViewBanner
+                    : t.firstPersonBanner}
                 </span>
               </div>
             )}
@@ -5130,180 +5653,247 @@ export default function App() {
                   className="px-4 py-2 rounded-2xl bg-[#382313]/95 hover:bg-[#b84b10] border-2 border-[#f5b82e] text-white font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow-2xl transition-all active:scale-95 cursor-pointer"
                 >
                   <span>🪑</span>
-                  <span>
-                    {lang === 'vi' ? 'Ngồi lại vào ghế của bạn [X]' : 'Sit Back on Your Stool [X]'}
-                  </span>
+                  <span>{t.sitBackBtn}</span>
                 </button>
               </div>
             )}
 
           {/* MOBILE & OPEN-WORLD VIRTUAL D-PAD (Hidden on < lg when bottom dock is expanded so seats are never occluded) */}
-          {canUseVirtualDpad && isDockCollapsed && (
-            <div
-              data-testid="virtual-dpad"
-              className="lg:hidden fixed bottom-16 right-2 sm:right-auto sm:bottom-20 sm:left-3 z-30 pointer-events-auto flex flex-col items-center gap-1 agrou-wood-panel p-1.5 rounded-xl shadow-lg"
-            >
-              <span className="text-[10px] font-mono uppercase text-[#f2be6b] font-bold leading-tight">
-                {isDirectLookCam && me.isAlive
-                  ? cameraPreset === 'third_person'
-                    ? lang === 'vi'
-                      ? 'Đi Bộ Sau Lưng'
-                      : 'Behind Walk'
-                    : t.dpadWalkFpv
-                  : me.isAlive
-                  ? t.dpadWalkNight
-                  : t.dpadFlyGhost}
-              </span>
-              <div className="flex items-center gap-1">
-                {isDirectLookCam && (
+          {canUseVirtualDpad && isDockCollapsed && (() => {
+            const holdProps = (onStart: () => void, onEnd: () => void) => ({
+              onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
+                e.preventDefault();
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {
+                  // ignore synthetic events
+                }
+                onStart();
+              },
+              onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => {
+                try {
+                  if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+                    e.currentTarget.releasePointerCapture(e.pointerId);
+                  }
+                } catch {
+                  // ignore
+                }
+                onEnd();
+              },
+              onPointerCancel: onEnd,
+              onLostPointerCapture: onEnd,
+              onPointerLeave: onEnd,
+            });
+            const showTurnBtns = isDirectLookCam || !me.isAlive;
+            return (
+              <div
+                data-testid="virtual-dpad"
+                className="lg:hidden fixed bottom-16 right-2 sm:right-auto sm:bottom-20 sm:left-3 z-30 pointer-events-auto touch-none select-none flex flex-col items-center gap-1 agrou-wood-panel p-1.5 rounded-xl shadow-lg"
+              >
+                <span className="text-[10px] font-mono uppercase text-[#f2be6b] font-bold leading-tight">
+                  {isDirectLookCam && me.isAlive
+                    ? cameraPreset === 'third_person'
+                      ? t.behindCamShort
+                      : t.dpadWalkFpv
+                    : me.isAlive
+                    ? t.dpadWalkNight
+                    : t.dpadFlyGhost}
+                </span>
+                <div className="flex items-center gap-1">
+                  {showTurnBtns && (
+                    <button
+                      type="button"
+                      data-testid="fpv-turn-left-btn"
+                      {...holdProps(
+                        () => setFpvLookTurnRate(-1),
+                        () => setFpvLookTurnRate(0)
+                      )}
+                      className="w-10 h-10 touch-none select-none rounded-lg bg-[#1d3a27] border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
+                      aria-label="Turn Look Left"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
                     type="button"
-                    data-testid="fpv-turn-left-btn"
-                    onPointerDown={() => setFpvLookTurnRate(-1)}
-                    onPointerUp={() => setFpvLookTurnRate(0)}
-                    onPointerLeave={() => setFpvLookTurnRate(0)}
-                    className="w-10 h-10 rounded-lg bg-[#1d3a27] border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
-                    aria-label="Turn Look Left"
+                    data-testid="dpad-up-btn"
+                    {...holdProps(
+                      () => setMoveVector({ x: 0, z: -1 }),
+                      () => setMoveVector({ x: 0, z: 0 })
+                    )}
+                    className="w-10 h-10 touch-none select-none rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
+                    aria-label="Move Up"
                   >
-                    <RotateCcw className="w-4 h-4" />
+                    <ArrowUp className="w-4 h-4" />
                   </button>
-                )}
-                <button
-                  type="button"
-                  data-testid="dpad-up-btn"
-                  onPointerDown={() => setMoveVector({ x: 0, z: -1 })}
-                  onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
-                  onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-10 h-10 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
-                  aria-label="Move Up"
-                >
-                  <ArrowUp className="w-4 h-4" />
-                </button>
-                {isDirectLookCam && (
+                  {showTurnBtns && (
+                    <button
+                      type="button"
+                      data-testid="fpv-turn-right-btn"
+                      {...holdProps(
+                        () => setFpvLookTurnRate(1),
+                        () => setFpvLookTurnRate(0)
+                      )}
+                      className="w-10 h-10 touch-none select-none rounded-lg bg-[#1d3a27] border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
+                      aria-label="Turn Look Right"
+                    >
+                      <RotateCw className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    data-testid="fpv-turn-right-btn"
-                    onPointerDown={() => setFpvLookTurnRate(1)}
-                    onPointerUp={() => setFpvLookTurnRate(0)}
-                    onPointerLeave={() => setFpvLookTurnRate(0)}
-                    className="w-10 h-10 rounded-lg bg-[#1d3a27] border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
-                    aria-label="Turn Look Right"
+                    data-testid="dpad-left-btn"
+                    {...holdProps(
+                      () => setMoveVector({ x: -1, z: 0 }),
+                      () => setMoveVector({ x: 0, z: 0 })
+                    )}
+                    className="w-10 h-10 touch-none select-none rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
+                    aria-label="Move Left"
                   >
-                    <RotateCw className="w-4 h-4" />
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="dpad-down-btn"
+                    {...holdProps(
+                      () => setMoveVector({ x: 0, z: 1 }),
+                      () => setMoveVector({ x: 0, z: 0 })
+                    )}
+                    className="w-10 h-10 touch-none select-none rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
+                    aria-label="Move Down"
+                  >
+                    <ArrowDown className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="dpad-right-btn"
+                    {...holdProps(
+                      () => setMoveVector({ x: 1, z: 0 }),
+                      () => setMoveVector({ x: 0, z: 0 })
+                    )}
+                    className="w-10 h-10 touch-none select-none rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
+                    aria-label="Move Right"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Living FPV/TPV: Jump + Return to Seat */}
+                {me.isAlive && isDirectLookCam && (
+                  <div className="mt-0.5 flex items-center gap-1 w-full">
+                    <button
+                      type="button"
+                      data-testid="dpad-jump-btn"
+                      onClick={() => setJumpTriggerSeq((n) => n + 1)}
+                      aria-label={lang === 'vi' ? 'Nhảy' : 'Jump'}
+                      className="flex-1 min-h-[36px] touch-none select-none px-2 py-1 rounded-md bg-[#1d3a27] active:bg-emerald-500 active:text-slate-950 border border-emerald-400/60 text-[10px] font-extrabold text-emerald-200 cursor-pointer"
+                    >
+                      ⬆ {lang === 'vi' ? 'Nhảy' : 'Jump'}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="dpad-return-seat-btn"
+                      onClick={handleReturnToSeat}
+                      aria-label={t.sitBackBtn}
+                      className="flex-1 min-h-[36px] touch-none select-none px-2 py-1 rounded-md bg-[#4a2d17] active:bg-[#b84b10] border border-[#f5b82e]/70 text-[10px] font-extrabold text-white cursor-pointer"
+                    >
+                      🪑 {t.sitShort}
+                    </button>
+                  </div>
+                )}
+
+                {me.isAlive && !isDirectLookCam && isUserRoaming && (
+                  <button
+                    type="button"
+                    data-testid="dpad-return-seat-btn"
+                    onClick={handleReturnToSeat}
+                    className="mt-0.5 w-full min-h-[36px] touch-none select-none px-2 py-1 rounded-md bg-[#4a2d17] hover:bg-[#b84b10] border border-[#f5b82e]/70 text-[10px] font-extrabold text-white cursor-pointer"
+                  >
+                    🪑 {t.sitShort}
                   </button>
                 )}
+
+                {/* Ghost Flight Controls: Fly Up, Fly Down, Return to Grave */}
+                {!me.isAlive && (
+                  <div className="mt-0.5 flex flex-col gap-1 w-full">
+                    <div className="flex items-center gap-1 w-full">
+                      <button
+                        type="button"
+                        data-testid="dpad-fly-up-btn"
+                        {...holdProps(
+                          () => setGhostVerticalRate(1),
+                          () => setGhostVerticalRate(0)
+                        )}
+                        aria-label={lang === 'vi' ? 'Bay Lên' : 'Fly Up'}
+                        className="flex-1 min-h-[36px] touch-none select-none px-1.5 py-1 rounded-md bg-cyan-950/90 active:bg-cyan-500 active:text-slate-950 border border-cyan-400/60 text-[10px] font-extrabold text-cyan-200 cursor-pointer"
+                      >
+                        ↑ {lang === 'vi' ? 'Lên' : 'Up'}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="dpad-fly-down-btn"
+                        {...holdProps(
+                          () => setGhostVerticalRate(-1),
+                          () => setGhostVerticalRate(0)
+                        )}
+                        aria-label={lang === 'vi' ? 'Bay Xuống' : 'Fly Down'}
+                        className="flex-1 min-h-[36px] touch-none select-none px-1.5 py-1 rounded-md bg-cyan-950/90 active:bg-cyan-500 active:text-slate-950 border border-cyan-400/60 text-[10px] font-extrabold text-cyan-200 cursor-pointer"
+                      >
+                        ↓ {lang === 'vi' ? 'Xuống' : 'Down'}
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="dpad-return-grave-btn"
+                      onClick={handleReturnToSeat}
+                      aria-label={lang === 'vi' ? 'Về Mộ' : 'Return to Grave'}
+                      className="w-full min-h-[36px] touch-none select-none px-2 py-1 rounded-md bg-[#2a1d36] active:bg-purple-600 border border-purple-400/60 text-[10px] font-extrabold text-purple-100 cursor-pointer"
+                    >
+                      🪦 {lang === 'vi' ? 'Về Mộ' : 'Grave'}
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  data-testid="dpad-left-btn"
-                  onPointerDown={() => setMoveVector({ x: -1, z: 0 })}
-                  onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
-                  onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-10 h-10 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
-                  aria-label="Move Left"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  data-testid="dpad-down-btn"
-                  onPointerDown={() => setMoveVector({ x: 0, z: 1 })}
-                  onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
-                  onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-10 h-10 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
-                  aria-label="Move Down"
-                >
-                  <ArrowDown className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  data-testid="dpad-right-btn"
-                  onPointerDown={() => setMoveVector({ x: 1, z: 0 })}
-                  onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
-                  onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-10 h-10 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
-                  aria-label="Move Right"
-                >
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </div>
-              {isUserRoaming && me.isAlive && (
-                <button
-                  type="button"
-                  data-testid="dpad-return-seat-btn"
-                  onClick={handleReturnToSeat}
-                  className="mt-0.5 w-full px-2 py-1 rounded-md bg-[#4a2d17] hover:bg-[#b84b10] border border-[#f5b82e]/70 text-[10px] font-extrabold text-white cursor-pointer"
-                >
-                  🪑 {lang === 'vi' ? 'Về ghế' : 'Sit'}
-                </button>
-              )}
-            </div>
-          )}
+            );
+          })()}
 
           {/* UNIFIED COLLAPSIBLE BOTTOM CONTROL DOCK (Hidden while Night Blindfolded or Night Death Cinematic active) */}
           {!isNightBlindfolded && !nightDeathCinematic && (
-          <div className="mx-auto w-full max-w-[1060px] pointer-events-auto flex flex-col items-center">
-            {/* Subtle Desktop Movement Controls Legend */}
-            {!isDirectLookCam && !showOnboardingTour && (
+          <div className="mx-auto w-full max-w-[1220px] pointer-events-auto flex flex-col items-center">
+            {/* Subtle Desktop Movement Controls Legend (Living players only — Ghost has single top banner, BUG-14/BUG-40) */}
+            {!isDirectLookCam && !showOnboardingTour && me.isAlive && (
               <div
                 data-testid="movement-controls-legend"
                 className="hidden md:flex items-center gap-2 mb-1 px-2.5 py-0.5 rounded-full bg-[#19110b]/88 border border-[#5e4128]/70 text-[10px] text-[#e4cda9] font-semibold shadow"
               >
-                {me.isAlive ? (
-                  <>
-                    <span>
-                      <strong className="text-[#f5b82e]">WASD</strong>{' '}
-                      {lang === 'vi' ? 'Đứng dậy & Đi' : 'Stand & Walk'}
-                    </span>
-                    <span className="opacity-40">·</span>
-                    <span>
-                      <strong className="text-[#f5b82e]">
-                        {lang === 'vi' ? 'Kéo chuột' : 'Drag'}
-                      </strong>{' '}
-                      {lang === 'vi' ? 'Xoay 360°' : 'Look 360°'}
-                    </span>
-                    <span className="opacity-40">·</span>
-                    <span>
-                      <strong className="text-[#f5b82e]">Shift</strong>{' '}
-                      {lang === 'vi' ? 'Chạy nhanh' : 'Sprint'}
-                    </span>
-                    <span className="opacity-40">·</span>
-                    <span>
-                      <strong className="text-[#f5b82e]">Space</strong>{' '}
-                      {lang === 'vi' ? 'Nhảy' : 'Jump'}
-                    </span>
-                    <span className="opacity-40">·</span>
-                    <span>
-                      <strong className="text-[#f5b82e]">X</strong>{' '}
-                      {lang === 'vi' ? 'Về ghế' : 'Sit'}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span>
-                      <strong className="text-cyan-300">WASD</strong>{' '}
-                      {lang === 'vi' ? 'Bay tự do' : 'Free Flight'}
-                    </span>
-                    <span className="opacity-40">·</span>
-                    <span>
-                      <strong className="text-cyan-300">Space / Ctrl</strong>{' '}
-                      {lang === 'vi' ? 'Bay lên / Hạ xuống' : 'Ascend / Descend'}
-                    </span>
-                    <span className="opacity-40">·</span>
-                    <span>
-                      <strong className="text-cyan-300">
-                        {lang === 'vi' ? 'Kéo chuột' : 'Drag'}
-                      </strong>{' '}
-                      {lang === 'vi' ? 'Xoay 360°' : 'Look 360°'}
-                    </span>
-                    <span className="opacity-40">·</span>
-                    <span>
-                      <strong className="text-cyan-300">X</strong>{' '}
-                      {lang === 'vi' ? 'Về bia mộ' : 'Home Grave'}
-                    </span>
-                  </>
-                )}
+                <span>
+                  <strong className="text-[#f5b82e]">WASD</strong>{' '}
+                  {lang === 'vi' ? 'Đứng dậy & Đi' : 'Stand & Walk'}
+                </span>
+                <span className="opacity-40">·</span>
+                <span>
+                  <strong className="text-[#f5b82e]">
+                    {lang === 'vi' ? 'Kéo chuột' : 'Drag'}
+                  </strong>{' '}
+                  {lang === 'vi' ? 'Xoay 360°' : 'Look 360°'}
+                </span>
+                <span className="opacity-40">·</span>
+                <span>
+                  <strong className="text-[#f5b82e]">Shift</strong>{' '}
+                  {lang === 'vi' ? 'Chạy nhanh' : 'Sprint'}
+                </span>
+                <span className="opacity-40">·</span>
+                <span>
+                  <strong className="text-[#f5b82e]">Space</strong>{' '}
+                  {lang === 'vi' ? 'Nhảy' : 'Jump'}
+                </span>
+                <span className="opacity-40">·</span>
+                <span>
+                  <strong className="text-[#f5b82e]">X</strong>{' '}
+                  {lang === 'vi' ? 'Về ghế' : 'Sit'}
+                </span>
               </div>
             )}
             <button
@@ -5333,9 +5923,11 @@ export default function App() {
                   <AgrouEmoteWheel
                     lang={lang}
                     isDayPhase={phase !== 'night'}
+                    isAlive={me.isAlive}
                     activePropTool={activePropTool}
                     onTriggerEmote={(emote) => handleTriggerEmote(emote, me.id)}
                     onSelectPropTool={setActivePropTool}
+                    onClose={() => setActiveToolPopover('none')}
                   />
                 )}
 
@@ -5370,6 +5962,7 @@ export default function App() {
                       }}
                       lang={lang}
                       compact={true}
+                      onClose={() => setActiveToolPopover('none')}
                     />
                   </div>
                 )}
@@ -5381,16 +5974,24 @@ export default function App() {
                 {/* Contextual Role Power & Action Strip */}
                 <div className="flex items-center justify-between gap-1 border-b border-[#5e422b]/80 pb-1">
                   <div className="flex flex-wrap items-center gap-1 text-xs min-w-0">
-                    <span className="px-1.5 py-0.5 rounded-lg bg-[#3c2717] border border-[#8e6338] text-[#f5c879] font-bold text-[10px] sm:text-[11px] whitespace-nowrap">
+                    <span className="hidden sm:inline-flex px-1.5 py-0.5 rounded-lg bg-[#3c2717] border border-[#8e6338] text-[#f5c879] font-bold text-[10px] sm:text-[11px] whitespace-nowrap">
                       {t.yourRolePrefix} {myRole.name[lang]}
                     </span>
 
-                    {/* Cupid Lover Partner Badge */}
-                    {me.loverId && (
+                    {/* Cupid Lover Partner Badge (for Lovers OR Cupid's linked pair) */}
+                    {me.loverId ? (
                       <span className="px-1.5 py-0.5 rounded-lg bg-pink-950 border border-pink-500/60 text-pink-200 font-bold text-[10px] whitespace-nowrap">
-                        💘 {players.find((p) => p.id === me.loverId)?.name || 'Lover'}
+                        💘 {players.find((p) => p.id === me.loverId)?.name || t.loverLabel}
                       </span>
-                    )}
+                    ) : me.roleId === 'cupid' && cupidLovers?.[0] && cupidLovers?.[1] ? (
+                      <span
+                        data-testid="cupid-linked-pair-badge"
+                        className="px-1.5 py-0.5 rounded-lg bg-pink-950 border border-pink-500/60 text-pink-200 font-bold text-[10px] whitespace-nowrap"
+                      >
+                        💘 {players.find((p) => p.id === cupidLovers[0])?.name || '?'} &amp;{' '}
+                        {players.find((p) => p.id === cupidLovers[1])?.name || '?'}
+                      </span>
+                    ) : null}
 
                     {/* Werewolf Self-Kill / Mindgame Hint */}
                     {phase === 'night' &&
@@ -5415,49 +6016,44 @@ export default function App() {
                     <button
                       type="button"
                       data-testid="toggle-notebook-btn"
+                      aria-label={t.notebookBtn}
                       onClick={() => {
                         sound.playCardFlip();
-                        setIsNotebookOpen((o) => !o);
+                        toggleNotebookPanel();
                       }}
-                      className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
+                      className={`min-h-[36px] min-w-[36px] sm:min-h-0 sm:min-w-0 px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center justify-center gap-1 cursor-pointer shrink-0 ${
                         isNotebookOpen
                           ? 'bg-[#e8c682] border-[#f6e2b4] text-[#2c1a0d]'
                           : 'bg-[#362417] border-[#785334] text-[#f2d08f] hover:bg-[#493120]'
                       }`}
                     >
-                      <BookMarked className="w-3 h-3" />
-                      <span className="hidden sm:inline">
-                        {lang === 'vi' ? 'Sổ Tay' : 'Notebook'}
-                      </span>
+                      <BookMarked className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
+                      <span className="hidden sm:inline">{t.notebookBtn}</span>
                     </button>
 
-                    {phase !== 'night' && (
+                    {phase !== 'night' && me.isAlive && (
                       <button
                         type="button"
                         data-testid="toggle-props-popover-btn"
-                        onClick={() =>
-                          setActiveToolPopover((p) => (p === 'props' ? 'none' : 'props'))
-                        }
-                        className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
+                        aria-label={t.emotesAndProps}
+                        onClick={() => toggleToolPopoverPanel('props')}
+                        className={`min-h-[36px] min-w-[36px] sm:min-h-0 sm:min-w-0 px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center justify-center gap-1 cursor-pointer shrink-0 ${
                           activeToolPopover === 'props' || activePropTool
                             ? 'bg-[#b84b10] hover:bg-[#9e3f0c] border-[#ffc389] text-white'
                             : 'bg-[#362417] border-[#69482e] text-[#f3ca82] hover:bg-[#493120]'
                         }`}
                       >
                         <span>🎭</span>
-                        <span className="hidden sm:inline">
-                          {lang === 'vi' ? 'Biểu cảm & Đạo cụ' : 'Emotes & Props'}
-                        </span>
+                        <span className="hidden sm:inline">{t.emotesAndProps}</span>
                       </button>
                     )}
 
                     <button
                       type="button"
                       data-testid="toggle-voice-popover-btn"
-                      onClick={() =>
-                        setActiveToolPopover((p) => (p === 'voice' ? 'none' : 'voice'))
-                      }
-                      className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
+                      aria-label={!me.isAlive ? t.micLockedShort : t.voiceBtn}
+                      onClick={() => toggleToolPopoverPanel('voice')}
+                      className={`min-h-[36px] min-w-[36px] sm:min-h-0 sm:min-w-0 px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center justify-center gap-1 cursor-pointer shrink-0 ${
                         !me.isAlive
                           ? 'bg-[#2a1518] border-rose-500/50 text-rose-300'
                           : activeToolPopover === 'voice' || isMicOn
@@ -5465,24 +6061,23 @@ export default function App() {
                           : 'bg-[#302016] border-[#61422a] text-emerald-300 hover:bg-[#422c1e]'
                       }`}
                     >
-                      {!me.isAlive ? <Lock className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
+                      {!me.isAlive ? <Lock className="w-3.5 h-3.5 sm:w-3 sm:h-3" /> : <Mic className="w-3.5 h-3.5 sm:w-3 sm:h-3" />}
                       <span className="hidden sm:inline">
-                        {!me.isAlive ? (lang === 'vi' ? 'Mic Khóa' : 'Mic Locked') : 'Voice'}
+                        {!me.isAlive ? t.micLockedShort : t.voiceBtn}
                       </span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() =>
-                        setActiveDrawer(activeDrawer === 'chat' ? 'none' : 'chat')
-                      }
-                      className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
+                      aria-label={t.drawerChatTitle}
+                      onClick={() => toggleDrawerPanel('chat')}
+                      className={`min-h-[36px] sm:min-h-0 px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center justify-center gap-1 cursor-pointer shrink-0 ${
                         activeDrawer === 'chat'
                           ? 'bg-[#b33228] border-[#f4a296] text-white'
                           : 'bg-[#302016] border-[#61422a] text-[#efe0c4] hover:bg-[#422c1e]'
                       }`}
                     >
-                      <MessageSquare className="w-3 h-3 text-[#f2955e]" />
+                      <MessageSquare className="w-3.5 h-3.5 sm:w-3 sm:h-3 text-[#f2955e]" />
                       <span>
                         {t.chatBtn} ({messages.length})
                       </span>
@@ -5492,10 +6087,9 @@ export default function App() {
                       <>
                         <button
                           type="button"
-                          onClick={() =>
-                            setActiveDrawer(activeDrawer === 'gm' ? 'none' : 'gm')
-                          }
-                          className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
+                          aria-label={t.drawerGMTitle}
+                          onClick={() => toggleDrawerPanel('gm')}
+                          className={`min-h-[36px] sm:min-h-0 px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center justify-center gap-1 cursor-pointer shrink-0 ${
                             activeDrawer === 'gm'
                               ? 'bg-[#d9842c] border-[#f7cf86] text-[#211308]'
                               : 'bg-[#302016] border-[#61422a] text-[#f2be6b] hover:bg-[#422c1e]'
@@ -5507,10 +6101,9 @@ export default function App() {
 
                         <button
                           type="button"
-                          onClick={() =>
-                            setActiveDrawer(activeDrawer === 'cards' ? 'none' : 'cards')
-                          }
-                          className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
+                          aria-label={t.drawerCardsTitle}
+                          onClick={() => toggleDrawerPanel('cards')}
+                          className={`min-h-[36px] sm:min-h-0 px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center justify-center gap-1 cursor-pointer shrink-0 ${
                             activeDrawer === 'cards'
                               ? 'bg-purple-700 border-purple-400 text-white'
                               : 'bg-[#302016] border-[#61422a] text-purple-300 hover:bg-[#422c1e]'
@@ -5524,63 +6117,67 @@ export default function App() {
 
                     <button
                       type="button"
-                      onClick={() =>
-                        setActiveDrawer(
-                          activeDrawer === 'leaderboard' ? 'none' : 'leaderboard'
-                        )
-                      }
-                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-[#302016] border border-[#61422a] text-[10px] font-bold text-[#f4cb74] hover:bg-[#422c1e] flex items-center gap-1 cursor-pointer shrink-0"
+                      aria-label={t.drawerLeaderboardTitle}
+                      onClick={() => toggleDrawerPanel('leaderboard')}
+                      className="min-h-[36px] min-w-[36px] sm:min-h-0 sm:min-w-0 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-[#302016] border border-[#61422a] text-[10px] font-bold text-[#f4cb74] hover:bg-[#422c1e] flex items-center justify-center gap-1 cursor-pointer shrink-0"
                     >
-                      <Trophy className="w-3 h-3" />
+                      <Trophy className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
                       <span className="hidden sm:inline">{t.leaderboardShort}</span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() =>
-                        setActiveDrawer(
-                          activeDrawer === 'history' ? 'none' : 'history'
-                        )
-                      }
-                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-[#302016] border border-[#61422a] text-[10px] font-bold text-[#95cbf0] hover:bg-[#422c1e] flex items-center gap-1 cursor-pointer shrink-0"
+                      aria-label={t.drawerHistoryTitle}
+                      onClick={() => toggleDrawerPanel('history')}
+                      className="min-h-[36px] min-w-[36px] sm:min-h-0 sm:min-w-0 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-[#302016] border border-[#61422a] text-[10px] font-bold text-[#95cbf0] hover:bg-[#422c1e] flex items-center justify-center gap-1 cursor-pointer shrink-0"
                     >
-                      <History className="w-3 h-3" />
+                      <History className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
                       <span className="hidden sm:inline">{t.historyShort}</span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={() =>
-                        setActiveDrawer(
-                          activeDrawer === 'encyclopedia' ? 'none' : 'encyclopedia'
-                        )
-                      }
-                      className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-[#302016] border border-[#61422a] text-[10px] font-bold text-[#8cd8a8] hover:bg-[#422c1e] flex items-center gap-1 cursor-pointer shrink-0"
+                      aria-label={t.drawerRulesTitle}
+                      onClick={() => toggleDrawerPanel('encyclopedia')}
+                      className="min-h-[36px] min-w-[36px] sm:min-h-0 sm:min-w-0 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg bg-[#302016] border border-[#61422a] text-[10px] font-bold text-[#8cd8a8] hover:bg-[#422c1e] flex items-center justify-center gap-1 cursor-pointer shrink-0"
                     >
-                      <BookOpen className="w-3 h-3" />
+                      <BookOpen className="w-3.5 h-3.5 sm:w-3 sm:h-3" />
                       <span className="hidden sm:inline">{t.rulesShort}</span>
                     </button>
                   </div>
                 </div>
 
-                {/* Player Seat Strip (2-row responsive grid for 10+ players, capped & scrollable on mobile) */}
+                {/* Player Seat Strip (Compact side-by-side <=8 on desktop so #1-#8 never clip at 1280x800) */}
                 <div
                   className={
                     players.length >= 10
                       ? 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-1 sm:gap-1.5 pb-0.5 max-h-[116px] sm:max-h-none overflow-y-auto'
-                      : 'flex items-center gap-1 sm:gap-1.5 overflow-x-auto pb-0.5'
+                      : 'flex items-center gap-1 sm:gap-1.5 overflow-x-auto md:overflow-x-visible pb-0.5'
                   }
                 >
                   {players.map((p, idx) => {
                     const isDayVoting = phase === 'day_voting';
+                    const cupidSelectedIds =
+                      me.roleId === 'cupid' ? (cupidLovers || []).filter(Boolean) : [];
+                    const isCupidSelectingNight1 =
+                      phase === 'night' && me.roleId === 'cupid' && round === 1;
                     const isSelected = isDayVoting
                       ? selectedTargetId === p.id
-                      : phase === 'night' && me.roleId === 'cupid' && round === 1
-                      ? Boolean(cupidLovers?.includes(p.id))
+                      : isCupidSelectingNight1
+                      ? cupidSelectedIds.includes(p.id)
                       : selectedTargetId === p.id || secondWolfTargetId === p.id;
                     const vCount = votesMap[p.id] || 0;
                     const voterLabels = votersByTargetLabels[p.id] || [];
                     const isMyLover = me.loverId === p.id;
+                    const isCupidPairedSeat =
+                      me.roleId === 'cupid' &&
+                      Boolean(
+                        cupidLovers &&
+                          cupidLovers[0] &&
+                          cupidLovers[1] &&
+                          (cupidLovers[0] === p.id || cupidLovers[1] === p.id)
+                      );
+                    const isLoverIndicator = isMyLover || isCupidPairedSeat;
                     const isMyDoppelModel =
                       me.roleId === 'doppelganger' &&
                       (doppelgangerTargetId === p.id || me.targetPlayerId === p.id);
@@ -5589,16 +6186,42 @@ export default function App() {
                       p.id !== me.id &&
                       (me.roleId === 'werewolf' || me.roleId === 'wolf_pup') &&
                       (p.roleId === 'werewolf' || p.roleId === 'wolf_pup');
+                    const isBodyguardRepeatTarget =
+                      phase === 'night' &&
+                      me.isAlive &&
+                      me.roleId === 'bodyguard' &&
+                      currentNightStep?.key === 'bodyguard' &&
+                      Boolean(p.protectedLastNight);
                     const suspectTag = suspectTags[p.id];
-                    const isVoteLockedOut =
-                      isDayVoting &&
-                      !activePropTool &&
+                    const nbTrust = notebook.playerNotes[p.id]?.trust;
+                    const effectiveTrust: 'trusted' | 'suspicious' | 'wolf_lock' | undefined =
+                      nbTrust && nbTrust !== 'unknown'
+                        ? nbTrust
+                        : suspectTag === 'trusted'
+                        ? 'trusted'
+                        : suspectTag === 'wolf_suspect'
+                        ? 'wolf_lock'
+                        : undefined;
+                    const isPropInvalidTarget =
+                      Boolean(activePropTool) &&
+                      (phase === 'day_discussion' || phase === 'day_voting') &&
                       (!me.isAlive || !p.isAlive || p.id === me.id);
+                    const isVoteLockedOut =
+                      (isDayVoting && (!me.isAlive || !p.isAlive || p.id === me.id)) ||
+                      isPropInvalidTarget;
 
-                    const seatTooltip =
-                      vCount > 0
-                        ? `${p.name} — ${vCount} ${t.votesUnit}: ${voterLabels.join(', ')}`
-                        : p.name;
+                    const seatTooltip = [
+                      p.name,
+                      isBodyguardRepeatTarget
+                        ? lang === 'vi'
+                          ? '🛡️ Đã bảo vệ đêm qua (không thể chọn liên tiếp)'
+                          : '🛡️ Protected last night (no consecutive repeat)'
+                        : '',
+                      isLoverIndicator ? `💘 ${t.loverLabel}` : '',
+                      vCount > 0 ? `${vCount} ${t.votesUnit}: ${voterLabels.join(', ')}` : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' — ');
 
                     return (
                       <button
@@ -5606,6 +6229,7 @@ export default function App() {
                         type="button"
                         data-testid={`dock-player-${p.id}`}
                         aria-pressed={isSelected}
+                        aria-disabled={isVoteLockedOut || isBodyguardRepeatTarget}
                         disabled={isVoteLockedOut}
                         title={seatTooltip}
                         onClick={() => handleSelect3DPlayer(p.id)}
@@ -5613,28 +6237,36 @@ export default function App() {
                           e.preventDefault();
                           handleTogglePlayerSuspectTag(p.id);
                         }}
-                        className={`shrink-0 px-2 py-1.5 sm:px-2 sm:py-1 rounded-lg sm:rounded-xl border text-left transition-all flex items-center gap-1 sm:gap-1.5 min-w-0 ${
-                          isVoteLockedOut
+                        className={`${
+                          players.length < 10 ? 'shrink-0 md:shrink md:flex-1 md:min-w-0' : 'min-w-0'
+                        } px-2 py-1.5 md:px-1.5 md:py-1 rounded-lg sm:rounded-xl border text-left transition-all flex items-center gap-1 sm:gap-1.5 ${
+                          isVoteLockedOut || isBodyguardRepeatTarget
                             ? 'opacity-45 cursor-not-allowed'
                             : 'cursor-pointer'
                         } ${
                           !p.isAlive
                             ? 'bg-[#1a1512]/70 border-cyan-900/50 text-cyan-300/75'
+                            : isBodyguardRepeatTarget
+                            ? 'bg-[#1e1a18] border-slate-600/70 text-slate-400'
                             : isSelected
-                            ? isDayVoting
+                            ? isCupidSelectingNight1
+                              ? 'bg-[#7d1f4b] border-[#f472b6] ring-2 ring-pink-400/80 text-pink-50 shadow-lg'
+                              : isDayVoting
                               ? 'bg-[#8f261e] border-[#f4c062] ring-2 ring-[#f4c062]/80 text-white shadow-lg'
                               : 'bg-[#73231d] border-[#e6786b] text-rose-100 shadow-md'
                             : isDayVoting
                             ? 'bg-[#2a1d14] border-[#5f432b] text-[#f4e7cf] hover:border-[#f2be6b]'
-                            : suspectTag === 'wolf_suspect'
+                            : effectiveTrust === 'wolf_lock'
                             ? 'bg-[#5a1e1a] border-[#d9534f] text-rose-100'
-                            : suspectTag === 'trusted'
+                            : effectiveTrust === 'suspicious'
+                            ? 'bg-[#4d3012] border-[#d9912b] text-amber-100'
+                            : effectiveTrust === 'trusted'
                             ? 'bg-[#19402b] border-[#42a870] text-emerald-100'
                             : p.id === me.id
                             ? 'bg-[#3b2919] border-[#e8a346] text-[#fff1d4]'
                             : isMyDoppelModel
                             ? 'bg-fuchsia-950/80 border-fuchsia-400/70 text-fuchsia-100'
-                            : isMyLover
+                            : isLoverIndicator
                             ? 'bg-pink-950/80 border-pink-500/60 text-pink-100'
                             : isMyWolfPackmate
                             ? 'bg-[#4f1c19] border-[#c4453d] text-rose-100'
@@ -5642,79 +6274,91 @@ export default function App() {
                         }`}
                       >
                         <span className="text-xs sm:text-sm shrink-0">{p.isAlive ? p.avatar : '👻'}</span>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[9px] sm:text-[11px] font-bold whitespace-nowrap flex items-center gap-0.5 sm:gap-1">
-                            <span className="text-[#f2be6b] font-mono">#{idx + 1}</span>
-                            <span className="max-w-[68px] sm:max-w-[92px] truncate">{p.name}</span>
+                        <div className="min-w-0 flex-1 overflow-hidden">
+                          <div className="text-[9px] sm:text-[11px] font-bold flex items-center gap-0.5 sm:gap-1 min-w-0">
+                            <span className="text-[#f2be6b] font-mono shrink-0">#{idx + 1}</span>
+                            <span className="truncate min-w-0 flex-1">{p.name}</span>
                             {isMayorSeat && (
                               <span
-                                className="inline-flex items-center text-[#f7cb66]"
-                                title={lang === 'vi' ? 'Thị Trưởng (Phiếu x2)' : 'Mayor (x2 Vote)'}
+                                className="inline-flex items-center text-[#f7cb66] shrink-0"
+                                title={t.mayorBadge}
                               >
                                 <Crown className="w-2.5 h-2.5" />
                               </span>
                             )}
                             {isDayVoting && isSelected && (
-                              <span className="px-1 rounded bg-[#f4c062] text-[#221409] text-[8px] font-black uppercase">
-                                {lang === 'vi' ? '✓ Bạn bầu' : '✓ Voted'}
+                              <span className="px-1 rounded bg-[#f4c062] text-[#221409] text-[8px] font-black uppercase shrink-0">
+                                ✓<span className="hidden xl:inline"> {t.voteAction}</span>
                               </span>
                             )}
-                            {isMyDoppelModel && <span title={lang === 'vi' ? 'Hình mẫu Nhân Bản' : 'Doppelgänger Model'}>🪞</span>}
-                            {isMyLover && <span title="Tình nhân">💘</span>}
-                            {isMyWolfPackmate && <span title="Đồng đội Sói">🐺</span>}
-                            {suspectTag === 'wolf_suspect' && (
+                            {isBodyguardRepeatTarget && (
                               <span
-                                className="px-1 rounded bg-rose-700 text-white text-[8px] font-extrabold"
-                                title="Đánh dấu Nghi Sói"
+                                data-testid={`guard-repeat-badge-${p.id}`}
+                                className="px-1 rounded bg-slate-700 text-slate-200 text-[8px] font-extrabold shrink-0 whitespace-nowrap"
                               >
-                                🐺?
+                                🛡️ {t.nightLabel}
                               </span>
                             )}
-                            {suspectTag === 'trusted' && (
+                            {isMyDoppelModel && <span className="shrink-0" title={t.doppelModelLabel}>🪞</span>}
+                            {(isLoverIndicator || (isCupidSelectingNight1 && isSelected)) && (
+                              <span className="shrink-0" title={t.loverLabel}>💘</span>
+                            )}
+                            {isMyWolfPackmate && <span className="shrink-0" title={t.wolfAllyLabel}>🐺</span>}
+                            {effectiveTrust === 'wolf_lock' && (
                               <span
-                                className="px-1 rounded bg-emerald-700 text-white text-[8px] font-extrabold"
-                                title="Đánh dấu Đáng Tin"
+                                className="px-1 rounded bg-rose-700 text-white text-[8px] font-extrabold shrink-0"
+                                title={t.suspectLabel}
+                              >
+                                🐺!
+                              </span>
+                            )}
+                            {effectiveTrust === 'suspicious' && (
+                              <span
+                                className="px-1 rounded bg-amber-600 text-white text-[8px] font-extrabold shrink-0"
+                                title={t.suspectLabel}
+                              >
+                                🤔?
+                              </span>
+                            )}
+                            {effectiveTrust === 'trusted' && (
+                              <span
+                                className="px-1 rounded bg-emerald-700 text-white text-[8px] font-extrabold shrink-0"
+                                title={t.trustedLabel}
                               >
                                 🛡️✓
                               </span>
                             )}
                             {vCount > 0 && (
-                              <span className="sm:hidden px-1 rounded bg-[#b92e25] text-white text-[8px] font-mono">
+                              <span className="sm:hidden px-1 rounded bg-[#b92e25] text-white text-[8px] font-mono shrink-0">
                                 {vCount}
                               </span>
                             )}
                           </div>
-                          <div className="hidden sm:block text-[9px] font-mono text-[#d4bea1] leading-tight max-w-[165px] truncate">
+                          <div className="hidden sm:block text-[9px] font-mono text-[#d4bea1] leading-tight w-full truncate">
                             {!me.isAlive
                               ? `${!p.isAlive ? '👻 ' : ''}${ROLES[p.roleId].name[lang]}${
                                   vCount > 0 ? ` · ${vCount} ${t.votesUnit}` : ''
                                 }`
                               : !p.isAlive
                               ? t.ghostStatus
+                              : isBodyguardRepeatTarget
+                              ? `🛡️ ${t.nightLabel}`
                               : vCount > 0
                               ? `${vCount} ${t.votesUnit} · ${voterLabels.join(', ')}`
-                              : suspectTag === 'wolf_suspect'
-                              ? lang === 'vi'
-                                ? '🐺 Nghi Sói'
-                                : '🐺 Suspect'
-                              : suspectTag === 'trusted'
-                              ? lang === 'vi'
-                                ? '🛡️ Đáng tin'
-                                : '🛡️ Trusted'
+                              : effectiveTrust === 'wolf_lock'
+                              ? `🐺 ${t.suspectLabel}`
+                              : effectiveTrust === 'suspicious'
+                              ? `🤔 ${t.suspectLabel}`
+                              : effectiveTrust === 'trusted'
+                              ? `🛡️ ${t.trustedLabel}`
                               : p.id === me.id
                               ? ROLES[p.roleId].name[lang]
                               : isMyDoppelModel
-                              ? lang === 'vi'
-                                ? '🪞 Hình mẫu'
-                                : '🪞 Model'
-                              : isMyLover
-                              ? lang === 'vi'
-                                ? '💘 Tình nhân'
-                                : '💘 Lover'
+                              ? t.doppelModelLabel
+                              : isLoverIndicator
+                              ? t.loverLabel
                               : isMyWolfPackmate
-                              ? lang === 'vi'
-                                ? '🐺 Đồng đội'
-                                : '🐺 Packmate'
+                              ? t.wolfAllyLabel
                               : t.aliveStatus}
                           </div>
                         </div>
@@ -5748,10 +6392,21 @@ export default function App() {
               ? t.drawerHistoryTitle
               : t.drawerRulesTitle
           }
+          onClick={() => {
+            if (gameMode === 'gm' && (activeDrawer === 'gm' || activeDrawer === 'cards')) {
+              setActiveDrawer('none');
+              setShellState('title');
+            } else {
+              setActiveDrawer('none');
+            }
+          }}
           className="fixed inset-0 z-40 flex items-center justify-center p-2.5 sm:p-4 pointer-events-auto"
           style={{ backgroundColor: 'rgba(12, 8, 5, 0.84)' }}
         >
-          <div className="relative w-full max-w-5xl max-h-[88vh] agrou-wood-panel rounded-2xl p-3.5 sm:p-5 overflow-y-auto shadow-2xl">
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative w-full max-w-5xl max-h-[88vh] agrou-wood-panel rounded-2xl p-3.5 sm:p-5 overflow-y-auto shadow-2xl"
+          >
             <div className="sticky top-0 z-20 bg-[#231810]/95 -mx-3.5 sm:-mx-5 px-3.5 sm:px-5 pt-1 flex items-center justify-between border-b border-slate-800 pb-3 mb-4 gap-2">
               <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold truncate">
                 {activeDrawer === 'chat'
@@ -5895,18 +6550,14 @@ export default function App() {
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <Lock className="w-4 h-4 text-rose-400 shrink-0" />
-                      <span>
-                        {lang === 'vi'
-                          ? '👻 Bạn đã thành Hồn Ma — Phòng Chính bị khóa để chống gian lận!'
-                          : '👻 You are a Ghost — Main Chat is locked to prevent cheating!'}
-                      </span>
+                      <span>{t.deadChatLockedBanner}</span>
                     </div>
                     <button
                       type="button"
                       onClick={() => setChatTab('ghost')}
                       className="px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-600 text-white text-[11px] font-extrabold cursor-pointer shrink-0"
                     >
-                      👻 {lang === 'vi' ? 'Sang Khu Vực Ma' : 'Open Ghost Realm'}
+                      👻 {t.openGhostRealmBtn}
                     </button>
                   </div>
                 ) : !me.isAlive && chatTab === 'ghost' ? (
@@ -5915,11 +6566,7 @@ export default function App() {
                     className="mt-3 rounded-xl bg-purple-950/75 border border-purple-500/60 px-3 py-2 flex items-center gap-2 text-xs text-purple-200 font-bold"
                   >
                     <Ghost className="w-4 h-4 text-purple-300 shrink-0" />
-                    <span>
-                      {lang === 'vi'
-                        ? '👻 Kênh Hồn Ma cách ly — Chỉ người đã chết mới đọc được tin nhắn tại đây.'
-                        : '👻 Isolated Ghost Realm — Only eliminated players can read messages here.'}
-                    </span>
+                    <span>{t.ghostChatIsolatedBanner}</span>
                   </div>
                 ) : null}
 
@@ -5941,13 +6588,9 @@ export default function App() {
                         }}
                         placeholder={
                           isChatInputLocked
-                            ? lang === 'vi'
-                              ? '🔒 Hồn Ma không thể chat ở Phòng Chính...'
-                              : '🔒 Ghosts cannot chat in Main Room...'
+                            ? t.deadChatLockedBanner
                             : !me.isAlive
-                            ? lang === 'vi'
-                              ? '👻 Nhắn tin trong Khu Vực Ma (ẩn với người sống)...'
-                              : '👻 Chat in Ghost Realm (hidden from living)...'
+                            ? t.ghostChatIsolatedBanner
                             : t.chatPlaceholder
                         }
                         className={`flex-1 bg-[#070a14] border rounded-xl px-3 py-2 text-xs focus:outline-none ${
@@ -5976,13 +6619,7 @@ export default function App() {
                         ) : (
                           <Send className="w-3.5 h-3.5" />
                         )}
-                        <span>
-                          {isChatInputLocked
-                            ? lang === 'vi'
-                              ? 'Đã khóa'
-                              : 'Locked'
-                            : t.sendBtn}
-                        </span>
+                        <span>{isChatInputLocked ? t.lockedBtn : t.sendBtn}</span>
                       </button>
                     </div>
                   );
@@ -6031,10 +6668,14 @@ export default function App() {
           role="dialog"
           aria-modal="true"
           aria-label={t.pauseTitle}
+          onClick={() => setShellState('playing')}
           className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-auto"
           style={{ backgroundColor: 'rgba(5, 8, 17, 0.88)' }}
         >
-          <div className="w-full max-w-md bg-[#0d1322] border-2 border-amber-600/50 rounded-2xl p-5 sm:p-6 text-center space-y-4 shadow-2xl">
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-[#0d1322] border-2 border-amber-600/50 rounded-2xl p-5 sm:p-6 text-center space-y-4 shadow-2xl"
+          >
             <h3 className="text-xl sm:text-2xl font-black text-amber-200 tracking-wide">
               {t.pauseTitle}
             </h3>
@@ -6114,7 +6755,7 @@ export default function App() {
                       : 'bg-slate-900 border-slate-700 text-amber-300'
                   }`}
                 >
-                  <span>{lang === 'vi' ? 'Sau lưng [B]' : 'Behind [B]'}</span>
+                  <span>{t.behindCamBtn}</span>
                 </button>
                 <button
                   type="button"
@@ -6163,9 +6804,7 @@ export default function App() {
               >
                 <span>🎵</span>
                 <span className="truncate">
-                  {lang === 'vi'
-                    ? `Nhạc nền & Không gian: ${isBgmMuted ? 'Tắt' : 'Bật'}`
-                    : `BGM & Ambience: ${isBgmMuted ? 'Off' : 'On'}`}
+                  {`${t.bgmToggleLabel}: ${isBgmMuted ? t.offLabel : t.onLabel}`}
                 </span>
               </button>
               <button
@@ -6184,9 +6823,7 @@ export default function App() {
               >
                 <span>🔊</span>
                 <span className="truncate">
-                  {lang === 'vi'
-                    ? `Hiệu ứng & Giọng đọc: ${isSfxMuted ? 'Tắt' : 'Bật'}`
-                    : `SFX & Voice: ${isSfxMuted ? 'Off' : 'On'}`}
+                  {`${t.sfxToggleLabel}: ${isSfxMuted ? t.offLabel : t.onLabel}`}
                 </span>
               </button>
             </div>
@@ -6195,25 +6832,26 @@ export default function App() {
             {gameMode !== 'online' && (
             <div className="bg-[#070a14] border border-slate-800 rounded-xl p-3 text-left space-y-2">
               <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-400">
-                ⏱️ {lang === 'vi' ? 'Thời Gian Đợi Mỗi Pha (Giây)' : 'Phase Wait Timers (Seconds)'}
+                ⏱️ {t.phaseWaitTimersSec}
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <div>
                   <label className="text-[10px] text-slate-400 block mb-0.5">
-                    {lang === 'vi' ? 'Đêm (Vai bạn)' : 'Night Turn'}
+                    {t.nightLabel}
                   </label>
                   <input
                     type="number"
                     min={5}
                     max={180}
-                    value={timerConfig.nightActionSec}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      if (!Number.isNaN(v)) {
-                        handleUpdateTimerConfig({
-                          ...timerConfig,
-                          nightActionSec: Math.max(5, Math.min(180, v)),
-                        });
+                    value={pauseTimerDraft.nightActionSec}
+                    onChange={(e) =>
+                      setPauseTimerDraft((prev) => ({ ...prev, nightActionSec: e.target.value }))
+                    }
+                    onBlur={() => commitPauseTimerField('nightActionSec', 5, 180)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        commitPauseTimerField('nightActionSec', 5, 180);
+                        e.currentTarget.blur();
                       }
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono font-bold text-amber-300 text-center"
@@ -6221,20 +6859,21 @@ export default function App() {
                 </div>
                 <div>
                   <label className="text-[10px] text-slate-400 block mb-0.5">
-                    {lang === 'vi' ? 'Thảo luận' : 'Discussion'}
+                    {t.debateLabel}
                   </label>
                   <input
                     type="number"
                     min={10}
                     max={600}
-                    value={timerConfig.dayDiscussSec}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      if (!Number.isNaN(v)) {
-                        handleUpdateTimerConfig({
-                          ...timerConfig,
-                          dayDiscussSec: Math.max(10, Math.min(600, v)),
-                        });
+                    value={pauseTimerDraft.dayDiscussSec}
+                    onChange={(e) =>
+                      setPauseTimerDraft((prev) => ({ ...prev, dayDiscussSec: e.target.value }))
+                    }
+                    onBlur={() => commitPauseTimerField('dayDiscussSec', 10, 600)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        commitPauseTimerField('dayDiscussSec', 10, 600);
+                        e.currentTarget.blur();
                       }
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono font-bold text-amber-300 text-center"
@@ -6242,20 +6881,21 @@ export default function App() {
                 </div>
                 <div>
                   <label className="text-[10px] text-slate-400 block mb-0.5">
-                    {lang === 'vi' ? 'Bỏ phiếu' : 'Voting'}
+                    {t.voteLabel}
                   </label>
                   <input
                     type="number"
                     min={10}
                     max={300}
-                    value={timerConfig.dayVoteSec}
-                    onChange={(e) => {
-                      const v = parseInt(e.target.value, 10);
-                      if (!Number.isNaN(v)) {
-                        handleUpdateTimerConfig({
-                          ...timerConfig,
-                          dayVoteSec: Math.max(10, Math.min(300, v)),
-                        });
+                    value={pauseTimerDraft.dayVoteSec}
+                    onChange={(e) =>
+                      setPauseTimerDraft((prev) => ({ ...prev, dayVoteSec: e.target.value }))
+                    }
+                    onBlur={() => commitPauseTimerField('dayVoteSec', 10, 300)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        commitPauseTimerField('dayVoteSec', 10, 300);
+                        e.currentTarget.blur();
                       }
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs font-mono font-bold text-amber-300 text-center"
@@ -6290,6 +6930,7 @@ export default function App() {
                     activeOnlineRoomCodeRef.current = null;
                     setOnlineMatchView(null);
                   }
+                  resetMatchUiState();
                   setShellState('title');
                 }}
                 className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs cursor-pointer"
@@ -6335,9 +6976,7 @@ export default function App() {
                   : gameResult.winner === 'tanner'
                   ? t.winTanner
                   : gameResult.winner === 'draw'
-                  ? lang === 'vi'
-                    ? 'HÒA — KHÔNG CÒN AI SỐNG SÓT!'
-                    : 'DRAW — NO SURVIVORS!'
+                  ? t.winDraw
                   : t.winVillagers}
               </h3>
               <p className="text-xs text-slate-300 mt-2 leading-relaxed">
@@ -6403,9 +7042,7 @@ export default function App() {
                     data-testid="gameover-online-waiting-host"
                     className="flex-1 py-3 px-4 rounded-xl bg-slate-900 border border-slate-700 text-slate-300 font-bold text-xs flex items-center justify-center"
                   >
-                    {lang === 'vi'
-                      ? '⏳ Đang chờ Chủ phòng bắt đầu ván mới...'
-                      : '⏳ Waiting for Room Host to start a new match...'}
+                    {t.waitingHostRematch}
                   </div>
                 )
               ) : (
@@ -6426,6 +7063,7 @@ export default function App() {
                     activeOnlineRoomCodeRef.current = null;
                     setOnlineMatchView(null);
                   }
+                  resetMatchUiState();
                   setShellState('title');
                 }}
                 className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs cursor-pointer"
@@ -6526,10 +7164,15 @@ export default function App() {
           roleId={me.roleId}
           playerName={me.name}
           isAlive={me.isAlive}
+          isMidMatch={!isRoleCardInitialOpen}
           lang={lang}
-          onClose={() => setShowMyRoleModal(false)}
+          onClose={() => {
+            setShowMyRoleModal(false);
+            setIsRoleCardInitialOpen(false);
+          }}
           onStartTour={() => {
             setShowMyRoleModal(false);
+            setIsRoleCardInitialOpen(false);
             setShowOnboardingTour(true);
           }}
         />
@@ -6550,6 +7193,7 @@ export default function App() {
           announcement={gmAnnouncement}
           lang={lang}
           isMuted={isMuted}
+          mayorId={mayorId}
           onReplayVoice={() =>
             sound.speakLocalized(gmAnnouncement.spokenNarration, lang, {
               pitch: gmAnnouncement.kind === 'dawn' ? 0.96 : 0.88,
@@ -6639,6 +7283,7 @@ export default function App() {
         lang={lang}
         players={players}
         meId={me.id}
+        isAlive={me.isAlive}
         mayorId={mayorId}
         notebook={notebook}
         onUpdatePlayerNote={handleUpdateNotebookPlayer}

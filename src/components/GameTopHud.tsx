@@ -91,58 +91,49 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
   onPause,
 }) => {
   const t = UI_TEXT[lang];
-  const cleanFpvShort = lang === 'vi' ? 'Góc 1' : 'FPV';
-  const tpvLabel =
-    lang === 'vi'
-      ? 'Sau lưng [B]'
-      : lang === 'fr'
-      ? 'Dos [B]'
-      : lang === 'es'
-      ? 'Espalda [B]'
-      : lang === 'ja'
-      ? '背面 [B]'
-      : 'Behind [B]';
-  const tpvShort = lang === 'vi' ? 'Sau lưng' : '3rd';
+  const cleanFpvShort = t.fpvShort;
+  const tpvLabel = t.behindCamBtn;
+  const tpvShort = t.behindCamShort;
   const compactPhaseLabel =
     phase === 'night'
-      ? lang === 'vi'
-        ? `Đêm ${round}`
-        : `Night ${round}`
+      ? `${t.nightLabel} ${round}`
       : phase === 'day_discussion'
       ? lang === 'vi'
         ? `Ngày ${round}`
+        : lang === 'fr'
+        ? `Jour ${round}`
+        : lang === 'es'
+        ? `Día ${round}`
+        : lang === 'ja'
+        ? `${round}日目`
         : `Day ${round}`
       : phase === 'day_voting'
       ? lang === 'vi'
         ? `Phiếu ${round}`
-        : `Vote ${round}`
+        : `${t.voteAction} ${round}`
       : phase === 'game_over'
-      ? lang === 'vi'
-        ? 'Xong'
-        : 'End'
-      : lang === 'vi'
-      ? 'Thợ Săn'
-      : 'Hunter';
+      ? t.gameOverShort
+      : t.hunterPhaseTitle;
 
   return (
-    <div className="flex items-center justify-between gap-1.5 sm:gap-2">
+    <div className="flex items-center justify-between gap-1 sm:gap-2">
       {/* Top-Left Carved-Wood Phase Dial, Timer, Mayor & Neutral Alive Counter */}
       <div
         data-tour-id="top-left"
-        className="pointer-events-auto flex items-center gap-1.5 sm:gap-2.5 agrou-wood-panel rounded-xl sm:rounded-2xl px-2 py-1 sm:px-3 sm:py-1.5 min-w-0"
+        className="pointer-events-auto flex items-center gap-1 sm:gap-2.5 agrou-wood-panel rounded-xl sm:rounded-2xl px-1.5 py-1 sm:px-3 sm:py-1.5 min-w-0 shrink"
       >
         {/* Agrou-Style Circular Sun / Moon Dial */}
         <div
-          className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center border-2 shrink-0 shadow-inner ${
+          className={`w-6 h-6 sm:w-10 sm:h-10 rounded-full flex items-center justify-center border-2 shrink-0 shadow-inner ${
             phase === 'night'
               ? 'bg-[#1f1936] border-[#9b7ce8] text-[#ddd6fe]'
               : 'bg-[#4f2c12] border-[#f5b82e] text-[#fde047]'
           }`}
         >
           {phase === 'night' ? (
-            <Moon className="w-4 h-4 sm:w-5 sm:h-5" />
+            <Moon className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
           ) : (
-            <Sun className="w-4 h-4 sm:w-5 sm:h-5" />
+            <Sun className="w-3.5 h-3.5 sm:w-5 sm:h-5" />
           )}
         </div>
 
@@ -158,9 +149,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
                   : phase === 'day_voting'
                   ? t.dayVoteTitle(round)
                   : phase === 'game_over'
-                  ? lang === 'vi'
-                    ? 'KẾT THÚC'
-                    : 'GAME OVER'
+                  ? t.gameOverShort
                   : t.hunterPhaseTitle}
               </span>
             </span>
@@ -168,7 +157,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
               data-testid="hud-mobile-alive-pill"
               className="inline-flex md:hidden items-center gap-0.5 px-1 py-0.2 rounded bg-[#1b120b] border border-[#6b4a2e] text-[9px] font-mono font-bold text-[#d1fae5] shrink-0"
               style={{ fontVariantNumeric: 'tabular-nums' }}
-              title={lang === 'vi' ? 'Còn sống' : 'Alive'}
+              title={t.aliveStatus}
             >
               <Users className="w-2.5 h-2.5 text-[#6ee7b7]" />
               <span>{aliveTotal}/{totalPlayers}</span>
@@ -198,7 +187,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
                     onAdjustTimer(-10);
                   }}
                   className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-[#1b120b] hover:bg-[#312115] border border-[#785334] text-[9px] font-mono font-bold text-[#e6d5b8] cursor-pointer"
-                  title={lang === 'vi' ? 'Giảm 10 giây' : 'Subtract 10s'}
+                  title={`${t.phaseTimers} -10s`}
                 >
                   -10s
                 </button>
@@ -210,7 +199,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
                     onAdjustTimer(15);
                   }}
                   className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-[#312115] hover:bg-[#452e1e] border border-[#b58148] text-[9px] font-mono font-bold text-[#fde7c3] cursor-pointer"
-                  title={lang === 'vi' ? 'Thêm 15 giây' : 'Add 15s'}
+                  title={`${t.phaseTimers} +15s`}
                 >
                   +15s
                 </button>
@@ -225,7 +214,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
                   e.currentTarget.blur();
                   onAdvancePhaseFast();
                 }}
-                className="px-2 py-0.5 rounded-lg bg-[#b84b10] hover:bg-[#9e3f0c] border border-[#fbc266] text-white font-extrabold text-[10px] sm:text-[11px] flex items-center gap-1 shadow cursor-pointer whitespace-nowrap"
+                className="hidden sm:flex px-2 py-0.5 rounded-lg bg-[#b84b10] hover:bg-[#9e3f0c] border border-[#fbc266] text-white font-extrabold text-[10px] sm:text-[11px] items-center gap-1 shadow cursor-pointer whitespace-nowrap"
               >
                 <FastForward className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-white shrink-0" />
                 <span>
@@ -272,7 +261,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
               {hasThirdPartyInMatch && (
                 <div data-testid="hud-third-party-count">
                   <span className="text-[10px] font-bold uppercase text-[#fcd34d] block">
-                    {lang === 'vi' ? 'PHE THỨ 3' : '3RD PARTY'}
+                    {t.thirdPartyAlive}
                   </span>
                   <span
                     className="text-sm font-black text-[#fef3c7] font-mono"
@@ -288,7 +277,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
               <Users className="w-3.5 h-3.5 text-[#6ee7b7]" />
               <div>
                 <span className="text-[10px] font-bold uppercase text-[#e6d5b8] block">
-                  {lang === 'vi' ? 'Còn sống' : 'Alive'}
+                  {t.aliveStatus}
                 </span>
                 <span
                   className="text-sm font-black text-[#d1fae5] font-mono leading-none"
@@ -304,16 +293,12 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
             <div
               data-testid="hud-mayor-chip"
               className="hidden lg:flex items-center gap-1.5 pl-2.5 border-l border-[#634329]"
-              title={
-                lang === 'vi'
-                  ? 'Thị Trưởng có phiếu bầu x2 để phá thế hòa'
-                  : 'Village Mayor has a 2x tie-breaking vote'
-              }
+              title={t.mayorTooltip}
             >
               <Crown className="w-3.5 h-3.5 text-[#f5b82e] shrink-0" />
               <div className="leading-tight">
                 <span className="text-[8px] font-bold uppercase text-[#d9a65d] block">
-                  {lang === 'vi' ? 'Thị Trưởng (x2)' : 'Mayor (x2)'}
+                  {t.mayorBadge}
                 </span>
                 <span className="text-[11px] font-extrabold text-[#fef3c7] max-w-[90px] truncate block">
                   {mayorName}
@@ -327,7 +312,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
       {/* Top-Right Compact Carved-Wood Utility Bar */}
       <div
         data-tour-id="top-right"
-        className="pointer-events-auto flex items-center gap-1 agrou-wood-panel rounded-xl sm:rounded-2xl p-1 shrink-0"
+        className="pointer-events-auto flex items-center gap-0.5 sm:gap-1 agrou-wood-panel rounded-xl sm:rounded-2xl p-1 shrink-0"
       >
         <button
           type="button"
@@ -335,11 +320,11 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
             e.currentTarget.blur();
             onOpenRoleCard();
           }}
-          className="px-1.5 sm:px-2 py-1.5 rounded-xl bg-[#4f2c12] hover:bg-[#663a19] border border-[#e89c3e] text-[#fef3c7] text-[10px] sm:text-xs font-extrabold flex items-center gap-1 cursor-pointer max-w-[92px] sm:max-w-none"
+          className="px-1.5 sm:px-2 py-1.5 rounded-xl bg-[#4f2c12] hover:bg-[#663a19] border border-[#e89c3e] text-[#fef3c7] text-[10px] sm:text-xs font-extrabold flex items-center gap-1 cursor-pointer max-w-[92px] sm:max-w-none overflow-hidden"
           title={myRole.name[lang]}
         >
           <Eye className="w-3.5 h-3.5 text-[#f5b82e] shrink-0" />
-          <span className="truncate">{myRole.name[lang]}</span>
+          <span className="max-w-[92px] sm:max-w-none truncate">{myRole.name[lang]}</span>
         </button>
 
         <button
@@ -397,11 +382,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
               ? 'bg-[#2d68a8] border-[#93c5fd] text-white'
               : 'bg-[#1c130c] border-[#6b4a2e] text-[#93c5fd] hover:bg-[#312115]'
           }`}
-          title={
-            lang === 'vi'
-              ? 'Khóa chuột xoay 360° không giới hạn (bấm Esc để mở khóa chuột)'
-              : 'Lock cursor for unlimited 360° look (press Esc to unlock)'
-          }
+          title={t.freeLookTooltip}
           aria-label={t.freeLook360}
         >
           <Compass className="w-3.5 h-3.5" />
@@ -452,14 +433,8 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
               ? 'bg-[#9e2b25] border-[#fca5a5] text-white cursor-pointer'
               : 'bg-[#1c130c] border-[#6b4a2e] text-[#d6bfa2] hover:bg-[#312115] cursor-pointer'
           }`}
-          title={
-            isDead
-              ? lang === 'vi'
-                ? '👻 Đã chết (Hồn Ma) — Micro đã bị khóa'
-                : '👻 Dead (Ghost) — Microphone Locked'
-              : t.toggleMic
-          }
-          aria-label={isDead ? 'Mic locked while dead' : t.toggleMic}
+          title={isDead ? t.micLockedDead : t.toggleMic}
+          aria-label={isDead ? t.micLockedDead : t.toggleMic}
         >
           {isDead ? (
             <span className="relative flex items-center">

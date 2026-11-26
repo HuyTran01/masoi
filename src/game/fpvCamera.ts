@@ -69,6 +69,33 @@ export function computeDefaultFpvYawFromSeatAngle(seatAngle: number): number {
 }
 
 /**
+ * Computes yaw facing inward from an arbitrary XZ position toward the campfire origin (0, 0),
+ * falling back to `fallbackSeatAngle` if standing directly on the origin.
+ */
+export function computeFpvYawTowardOrigin(
+  pos: { x: number; z: number },
+  fallbackSeatAngle = Math.PI / 2
+): number {
+  if (Math.hypot(pos.x, pos.z) < 0.25) {
+    return computeDefaultFpvYawFromSeatAngle(fallbackSeatAngle);
+  }
+  return Math.atan2(-pos.x, -pos.z);
+}
+
+/**
+ * Computes the normalized 3D view ray from `eyePos` to `lookTarget`.
+ * Matches actual rendered center-screen aim in both FPV and over-the-shoulder TPV.
+ */
+export function computeCameraViewRay(eyePos: Vec3Like, lookTarget: Vec3Like): Vec3Like {
+  const dx = lookTarget.x - eyePos.x;
+  const dy = lookTarget.y - eyePos.y;
+  const dz = lookTarget.z - eyePos.z;
+  const len = Math.hypot(dx, dy, dz);
+  if (len < 1e-6) return { x: 0, y: 0, z: -1 };
+  return { x: dx / len, y: dy / len, z: dz / len };
+}
+
+/**
  * Clamps vertical pitch in First-Person view to prevent neck-flipping.
  */
 export function clampFpvPitch(pitch: number, minPitch = -0.68, maxPitch = 0.68): number {
@@ -353,6 +380,71 @@ export function computeThirdPersonCameraPose(params: {
 }
 
 /**
+ * Resolves central campfire collision with smooth tangential deflection so walking
+ * straight into the fire pit slides cleanly around it instead of stalling dead,
+ * while also clamping outer clearing radius.
+ */
+export function clampAndSlideCampfireCollision(params: {
+  currentX: number;
+  currentZ: number;
+  moveWorldX: number;
+  moveWorldZ: number;
+  stepDist: number;
+  minRadius?: number;
+  maxRadius?: number;
+}): { nextX: number; nextZ: number } {
+  const {
+    currentX,
+    currentZ,
+    moveWorldX,
+    moveWorldZ,
+    stepDist,
+    minRadius = 1.85,
+    maxRadius = 24.0,
+  } = params;
+
+  let nextX = currentX + moveWorldX * stepDist;
+  let nextZ = currentZ + moveWorldZ * stepDist;
+
+  const distFromCenter = Math.hypot(nextX, nextZ);
+  if (distFromCenter < minRadius) {
+    const currR = Math.hypot(currentX, currentZ);
+    const radX = currR > 1e-4 ? currentX / currR : 0;
+    const radZ = currR > 1e-4 ? currentZ / currR : 1;
+    // Right-hand tangent around the fire when facing inward
+    const tanX = radZ;
+    const tanZ = -radX;
+    const dotRad = moveWorldX * radX + moveWorldZ * radZ;
+    const dotTan = moveWorldX * tanX + moveWorldZ * tanZ;
+
+    if (dotRad < 0 && stepDist > 1e-5) {
+      const side = Math.abs(dotTan) > 0.08 ? Math.sign(dotTan) : 1;
+      const penetration = Math.max(0, minRadius - distFromCenter);
+      const slideDist = Math.max(Math.abs(dotTan) * stepDist, penetration * 0.78);
+      const surfX = radX * minRadius + tanX * side * slideDist;
+      const surfZ = radZ * minRadius + tanZ * side * slideDist;
+      const surfR = Math.hypot(surfX, surfZ);
+      const scale = surfR > 1e-4 ? minRadius / surfR : 1;
+      nextX = surfX * scale;
+      nextZ = surfZ * scale;
+    } else if (distFromCenter > 1e-4) {
+      const scale = minRadius / distFromCenter;
+      nextX *= scale;
+      nextZ *= scale;
+    } else {
+      nextX = radX * minRadius;
+      nextZ = radZ * minRadius;
+    }
+  } else if (distFromCenter > maxRadius) {
+    const scale = maxRadius / distFromCenter;
+    nextX *= scale;
+    nextZ *= scale;
+  }
+
+  return { nextX, nextZ };
+}
+
+/**
  * Computes world-space XZ movement delta in First-Person mode from local input
  * (inputZ < 0 = W/Forward, inputZ > 0 = S/Backward, inputX > 0 = D/Right, inputX < 0 = A/Left).
  * Expanded default maxRadius (24m) supports open clearing + tent/forest perimeter exploration.
@@ -396,20 +488,15 @@ export function computeFpvMovementStep(params: {
     moveWorldZ /= mag;
   }
 
-  let nextX = currentX + moveWorldX * speed * dt;
-  let nextZ = currentZ + moveWorldZ * speed * dt;
-
-  // Keep player outside the central fire pit (r >= minRadius) and within the expanded camp clearing (r <= maxRadius)
-  const distFromCenter = Math.hypot(nextX, nextZ);
-  if (distFromCenter < minRadius && distFromCenter > 1e-4) {
-    const scale = minRadius / distFromCenter;
-    nextX *= scale;
-    nextZ *= scale;
-  } else if (distFromCenter > maxRadius) {
-    const scale = maxRadius / distFromCenter;
-    nextX *= scale;
-    nextZ *= scale;
-  }
+  const { nextX, nextZ } = clampAndSlideCampfireCollision({
+    currentX,
+    currentZ,
+    moveWorldX,
+    moveWorldZ,
+    stepDist: speed * dt,
+    minRadius,
+    maxRadius,
+  });
 
   return { nextX, nextZ, moveWorldX, moveWorldZ };
 }
@@ -754,7 +841,7 @@ export function stepGhostFreeFlight(params: {
   isDirectLook: boolean;
   inputX: number;
   inputZ: number;
-  verticalInput: number; // +1 ascend (Space), -1 descend (Ctrl), 0 maintain altitude
+  verticalInput: number; // +1 ascend (Space), -1 descend (Shift/Q), 0 maintain altitude
   isSprinting: boolean;
   dashTargetPos: { x: number; z: number } | null;
   groundY: number;
@@ -858,7 +945,7 @@ export function stepGhostFreeFlight(params: {
     nextZ *= scale;
   }
 
-  // Smooth vertical altitude control (Space = ascend, Ctrl = descend)
+  // Smooth vertical altitude control (Space = ascend, Shift/Q = descend)
   const climbSpeed = 3.8;
   const nextHoverHeight = Math.max(
     minHoverAboveGround,
@@ -1002,6 +1089,7 @@ export function computeDragEdgePanRate(params: {
  */
 export function shouldApplyCameraLook(params: {
   isTitleScreen: boolean;
+  allowTitleOrbit?: boolean;
   isNightBlindfolded: boolean;
   hasDeathCinematic: boolean;
   isUiOverlayOpen: boolean;
@@ -1010,6 +1098,7 @@ export function shouldApplyCameraLook(params: {
 }): boolean {
   const {
     isTitleScreen,
+    allowTitleOrbit = false,
     isNightBlindfolded,
     hasDeathCinematic,
     isUiOverlayOpen,
@@ -1017,7 +1106,10 @@ export function shouldApplyCameraLook(params: {
     isDraggingCanvas,
   } = params;
 
-  if (isTitleScreen || isNightBlindfolded || hasDeathCinematic || isUiOverlayOpen) {
+  if (isTitleScreen) {
+    return allowTitleOrbit && isDraggingCanvas;
+  }
+  if (isNightBlindfolded || hasDeathCinematic || isUiOverlayOpen) {
     return false;
   }
   return isPointerLocked || isDraggingCanvas;

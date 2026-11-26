@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {
   computeCampfireCircleRadius,
   computeDefaultFpvYawFromSeatAngle,
+  computeFpvYawTowardOrigin,
+  computeCameraViewRay,
+  clampAndSlideCampfireCollision,
   clampFpvPitch,
   computeFpvCameraPose,
   computeThirdPersonCameraPose,
@@ -551,5 +554,179 @@ test('shouldApplyCameraLook blocks rotation during menus/overlays and passive cu
     }),
     true
   );
+
+  // BUG-22: Title Screen allows drag orbit ONLY when allowTitleOrbit is enabled
+  assert.equal(
+    shouldApplyCameraLook({
+      isTitleScreen: true,
+      allowTitleOrbit: false,
+      isNightBlindfolded: false,
+      hasDeathCinematic: false,
+      isUiOverlayOpen: true,
+      isPointerLocked: false,
+      isDraggingCanvas: true,
+    }),
+    false
+  );
+  assert.equal(
+    shouldApplyCameraLook({
+      isTitleScreen: true,
+      allowTitleOrbit: true,
+      isNightBlindfolded: false,
+      hasDeathCinematic: false,
+      isUiOverlayOpen: true,
+      isPointerLocked: false,
+      isDraggingCanvas: true,
+    }),
+    true
+  );
+  assert.equal(
+    shouldApplyCameraLook({
+      isTitleScreen: true,
+      allowTitleOrbit: true,
+      isNightBlindfolded: false,
+      hasDeathCinematic: false,
+      isUiOverlayOpen: true,
+      isPointerLocked: false,
+      isDraggingCanvas: false,
+    }),
+    false
+  );
+});
+
+test('BUG-10: initial FPV & TPV yaw faces inward toward campfire (0, 0) from seat #1 and every circle angle', () => {
+  for (const playerCount of [6, 8, 12, 20]) {
+    const radius = computeCampfireCircleRadius(playerCount);
+    for (let seatIdx = 0; seatIdx < playerCount; seatIdx++) {
+      const seatAngle = Math.PI / 2 + (seatIdx / playerCount) * Math.PI * 2;
+      const seatPos = {
+        x: Math.cos(seatAngle) * radius,
+        y: 0,
+        z: Math.sin(seatAngle) * radius,
+      };
+      const toCampfire = {
+        x: -seatPos.x / radius,
+        z: -seatPos.z / radius,
+      };
+
+      for (const yaw of [
+        computeDefaultFpvYawFromSeatAngle(seatAngle),
+        computeFpvYawTowardOrigin(seatPos, seatAngle),
+      ]) {
+        const fpv = computeFpvCameraPose({
+          charPos: seatPos,
+          isGhost: false,
+          yaw,
+          pitch: 0,
+          elapsedSec: 0,
+          isMoving: false,
+          stance: 'standing',
+        });
+        const fpvDot = fpv.forward.x * toCampfire.x + fpv.forward.z * toCampfire.z;
+        assert.ok(
+          fpvDot > 0.99,
+          `seat #${seatIdx + 1}/${playerCount}: expected FPV forward toward campfire (dot > 0.99), got ${fpvDot}`
+        );
+
+        const tpv = computeThirdPersonCameraPose({
+          charPos: seatPos,
+          isGhost: false,
+          yaw,
+          pitch: 0,
+          elapsedSec: 0,
+          isMoving: false,
+          stance: 'standing',
+        });
+        const tpvRay = computeCameraViewRay(tpv.eyePos, tpv.lookTarget);
+        const tpvHorizLen = Math.hypot(tpvRay.x, tpvRay.z);
+        const tpvDot = (tpvRay.x * toCampfire.x + tpvRay.z * toCampfire.z) / tpvHorizLen;
+        assert.ok(
+          tpvDot > 0.99,
+          `seat #${seatIdx + 1}/${playerCount}: expected TPV view ray toward campfire (dot > 0.99), got ${tpvDot}`
+        );
+      }
+    }
+  }
+
+  // Fallback when standing directly on origin (0, 0) never produces NaN or random flip
+  const fallbackYaw = computeFpvYawTowardOrigin({ x: 0, z: 0 }, Math.PI / 2);
+  assert.ok(Math.abs(Math.cos(fallbackYaw) - -1) < 1e-6);
+});
+
+test('BUG-29: computeCameraViewRay aligns TPV center crosshair with rendered over-the-shoulder lookAt vector', () => {
+  const tpv = computeThirdPersonCameraPose({
+    charPos: { x: 0, y: 0, z: 6 },
+    isGhost: false,
+    yaw: Math.PI,
+    pitch: 0.45,
+    elapsedSec: 0,
+    isMoving: false,
+    stance: 'standing',
+    minCameraY: 2.2, // forces vertical parallax clamp between eyePos and lookTarget
+  });
+
+  const viewRay = computeCameraViewRay(tpv.eyePos, tpv.lookTarget);
+  const len = Math.hypot(viewRay.x, viewRay.y, viewRay.z);
+  assert.ok(Math.abs(len - 1) < 1e-6, 'view ray must be unit length');
+  // Camera is elevated/clamped above pivot - forward*dist, so actual rendered ray tilts lower than raw forward
+  assert.ok(
+    viewRay.y < tpv.forward.y - 0.05,
+    `expected clamped TPV view ray Y (${viewRay.y}) significantly below un-tilted forward Y (${tpv.forward.y})`
+  );
+
+  // Target sitting directly on the rendered TPV center screen ray must be locked by crosshair
+  const dist = 10;
+  const centerScreenTarget = {
+    x: tpv.eyePos.x + viewRay.x * dist,
+    y: tpv.eyePos.y + viewRay.y * dist,
+    z: tpv.eyePos.z + viewRay.z * dist,
+  };
+  const hit = findFpvCrosshairTarget({
+    eyePos: tpv.eyePos,
+    forward: viewRay,
+    candidates: [{ playerId: 'villager_center', pos: centerScreenTarget, visible: true }],
+    selfPlayerId: 'me',
+    minCosineThreshold: 0.995,
+  });
+  assert.equal(hit, 'villager_center');
+});
+
+test('BUG-41: walking straight into campfire radius deflects smoothly tangentially without stalling', () => {
+  // Start right on the campfire perimeter facing straight into (0, 0)
+  let x = 0;
+  let z = 1.85;
+  for (let i = 0; i < 6; i++) {
+    const step = computeFpvMovementStep({
+      yaw: Math.PI,
+      inputX: 0,
+      inputZ: -1, // W straight at center
+      speed: 5.4,
+      dt: 0.05,
+      currentX: x,
+      currentZ: z,
+      minRadius: 1.85,
+    });
+    x = step.nextX;
+    z = step.nextZ;
+    const r = Math.hypot(x, z);
+    assert.ok(r >= 1.85 - 1e-4, `player must stay outside campfire radius, got r=${r}`);
+  }
+  const displaced = Math.hypot(x - 0, z - 1.85);
+  assert.ok(
+    displaced > 0.5,
+    `expected smooth tangential slide around campfire instead of stalling dead, displaced=${displaced}`
+  );
+
+  // Direct helper also slides smoothly to the angled side when slightly left of center
+  const leftSlide = clampAndSlideCampfireCollision({
+    currentX: -0.4,
+    currentZ: 1.81,
+    moveWorldX: 0,
+    moveWorldZ: -1,
+    stepDist: 0.3,
+    minRadius: 1.85,
+  });
+  assert.ok(leftSlide.nextX < -0.4, `expected left-angled approach to slide left, got x=${leftSlide.nextX}`);
+  assert.ok(Math.abs(Math.hypot(leftSlide.nextX, leftSlide.nextZ) - 1.85) < 1e-4);
 });
 

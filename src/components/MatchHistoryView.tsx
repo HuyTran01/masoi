@@ -7,28 +7,46 @@ import { TRANSLATIONS } from '../utils/i18n';
 
 interface MatchHistoryViewProps {
   lang: Language;
+  history?: GameHistoryRecord[];
 }
 
-export const MatchHistoryView: React.FC<MatchHistoryViewProps> = ({ lang }) => {
+const DEMO_HISTORY_IDS = new Set(['match_1092', 'match_1091']);
+
+export const MatchHistoryView: React.FC<MatchHistoryViewProps> = ({ lang, history: historyProp }) => {
   const t = TRANSLATIONS[lang];
   const isVi = lang === 'vi';
-  const history: GameHistoryRecord[] = loadHistory();
+  const allRecords: GameHistoryRecord[] = historyProp ?? loadHistory();
+  const realRecords = allRecords.filter((r) => !DEMO_HISTORY_IDS.has(r.id));
+  const showingDemoFallback = realRecords.length === 0;
+  const visibleHistory = showingDemoFallback ? allRecords : realRecords;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Banner */}
-      <div className="bg-gradient-to-r from-sky-950/70 via-slate-900 to-indigo-950/60 border border-sky-800/40 rounded-2xl p-6 shadow-xl flex items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-sky-950/70 via-slate-900 to-indigo-950/60 border border-sky-800/40 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="p-2 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/30">
               <History className="w-5 h-5" />
             </span>
             <h2 className="text-xl sm:text-2xl font-bold font-display text-sky-200">
               {t.matchHistory}
             </h2>
+            {showingDemoFallback && (
+              <span
+                data-testid="match-history-demo-badge"
+                className="px-2.5 py-0.5 rounded-full bg-amber-950/80 border border-amber-500/50 text-[11px] font-bold text-amber-200"
+              >
+                {isVi ? 'Mẫu minh họa' : 'Sample Data'}
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-300 mt-1 max-w-lg">
-            {isVi
+            {showingDemoFallback
+              ? isVi
+                ? 'Bạn chưa hoàn thành ván đấu nào trên thiết bị này. Dưới đây là các trận mẫu minh họa — lịch sử thật của bạn sẽ tự động hiển thị sau ván đầu tiên.'
+                : 'No local matches completed yet. Showing sample matches below — your real match history will appear automatically after your first match.'
+              : isVi
               ? 'Nhật ký lưu lại kết quả từng ván đấu, phe chiến thắng, danh sách vai trò bí mật và nhân tố xuất sắc nhất (MVP).'
               : 'Log of past match outcomes, winning factions, final role reveals, and match MVPs.'}
           </p>
@@ -37,7 +55,8 @@ export const MatchHistoryView: React.FC<MatchHistoryViewProps> = ({ lang }) => {
 
       {/* Match Cards List */}
       <div className="space-y-4">
-        {history.map((record) => {
+        {visibleHistory.map((record) => {
+          const isDemoRecord = DEMO_HISTORY_IDS.has(record.id);
           const isWolfWin = record.winner === 'werewolves';
           const isTannerWin = record.winner === 'tanner';
           const isLoversWin = record.winner === 'lovers';
@@ -82,6 +101,11 @@ export const MatchHistoryView: React.FC<MatchHistoryViewProps> = ({ lang }) => {
                   <span className="text-xs font-mono text-slate-400">
                     {isVi ? 'Phòng:' : 'Room:'} {record.roomId}
                   </span>
+                  {isDemoRecord && (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-950/70 border border-amber-600/50 text-[10px] font-bold text-amber-200">
+                      {isVi ? 'Mẫu minh họa' : 'Sample'}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-4 text-xs text-slate-400">

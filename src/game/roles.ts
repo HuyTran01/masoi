@@ -1,4 +1,4 @@
-import type { RoleDefinition, RoleId } from '../types/game.ts';
+import type { Language, RoleDefinition, RoleId } from '../types/game.ts';
 
 export const ROLES: Record<RoleId, RoleDefinition> = {
   villager: {
@@ -470,3 +470,125 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
     badge: '🗡️ Gián điệp',
   },
 };
+
+export const ROLE_BADGES: Record<RoleId, Record<Language, string>> = {
+  villager: {
+    vi: '🛡️ Phổ thông',
+    en: '🛡️ Classic',
+    fr: '🛡️ Classique',
+    es: '🛡️ Clásico',
+    ja: '🛡️ 基本',
+  },
+  werewolf: {
+    vi: '🐺 Hung bạo',
+    en: '🐺 Predator',
+    fr: '🐺 Prédateur',
+    es: '🐺 Depredador',
+    ja: '🐺 凶暴',
+  },
+  seer: {
+    vi: '🔮 Thần thánh',
+    en: '🔮 Mystic',
+    fr: '🔮 Mystique',
+    es: '🔮 Místico',
+    ja: '🔮 神秘',
+  },
+  bodyguard: {
+    vi: '🛡️ Hộ vệ',
+    en: '🛡️ Guardian',
+    fr: '🛡️ Gardien',
+    es: '🛡️ Guardián',
+    ja: '🛡️ 守護',
+  },
+  witch: {
+    vi: '🧪 Dược sư',
+    en: '🧪 Alchemist',
+    fr: '🧪 Alchimiste',
+    es: '🧪 Alquimista',
+    ja: '🧪 錬金術',
+  },
+  hunter: {
+    vi: '🎯 Thiện xạ',
+    en: '🎯 Marksman',
+    fr: '🎯 Tireur',
+    es: '🎯 Tirador',
+    ja: '🎯 狙撃手',
+  },
+  cupid: {
+    vi: '💘 Se duyên',
+    en: '💘 Matchmaker',
+    fr: '💘 Entremetteur',
+    es: '💘 Enlazador',
+    ja: '💘 縁結び',
+  },
+  wolf_pup: {
+    vi: '🔥 Cuồng nộ',
+    en: '🔥 Frenzy',
+    fr: '🔥 Frénésie',
+    es: '🔥 Frenesí',
+    ja: '🔥 狂乱',
+  },
+  tanner: {
+    vi: '🎭 Đơn độc',
+    en: '🎭 Solo Trickster',
+    fr: '🎭 Solitaire',
+    es: '🎭 Solitario',
+    ja: '🎭 単独',
+  },
+  elder: {
+    vi: '👑 Kiên cường',
+    en: '👑 Resilient',
+    fr: '👑 Résistant',
+    es: '👑 Resistente',
+    ja: '👑 不屈',
+  },
+  doppelganger: {
+    vi: '🪞 Sao chép',
+    en: '🪞 Shapeshifter',
+    fr: '🪞 Métamorphe',
+    es: '🪞 Cambiaformas',
+    ja: '🪞 変身',
+  },
+  cursed: {
+    vi: '🌓 Biến hình',
+    en: '🌓 Turned',
+    fr: '🌓 Maudit',
+    es: '🌓 Transformable',
+    ja: '🌓 変異',
+  },
+  traitor: {
+    vi: '🗡️ Gián điệp',
+    en: '🗡️ Spy',
+    fr: '🗡️ Espion',
+    es: '🗡️ Espía',
+    ja: '🗡️ 内通者',
+  },
+};
+
+const STRIP_LEADING_EMOJI_RE = /^[\p{Extended_Pictographic}\uFE0F\u200D]+\s*/u;
+
+export function getRoleBadge(roleId: RoleId, lang: Language): string {
+  return ROLE_BADGES[roleId]?.[lang] ?? ROLES[roleId]?.badge ?? roleId;
+}
+
+export function localizeRoleArchetype(tag: string, lang: Language): string {
+  const trimmed = tag.trim();
+  if (!trimmed) return tag;
+  if (trimmed in ROLE_BADGES) {
+    return ROLE_BADGES[trimmed as RoleId][lang];
+  }
+  const strippedInput = trimmed.replace(STRIP_LEADING_EMOJI_RE, '');
+  const hasLeadingEmoji = strippedInput !== trimmed;
+  for (const badges of Object.values(ROLE_BADGES)) {
+    for (const candidate of Object.values(badges)) {
+      if (
+        trimmed === candidate ||
+        strippedInput === candidate.replace(STRIP_LEADING_EMOJI_RE, '')
+      ) {
+        const target = badges[lang];
+        return hasLeadingEmoji ? target : target.replace(STRIP_LEADING_EMOJI_RE, '');
+      }
+    }
+  }
+  return tag;
+}

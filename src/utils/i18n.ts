@@ -177,6 +177,121 @@ export interface UITranslationSchema {
   nextStepBtn: (cur: number, total: number) => string;
   finishTourBtn: string;
   tourSteps: TourStepI18n[];
+
+  // Title Screen & Match Settings
+  lockerAndMaps: string;
+  matchSettings: string;
+  view3dBtn: string;
+  expandMenuBtn: string;
+  randomRoleShort: string;
+  quickRulesTitle: string;
+  quickRulesDesc: string;
+  playTutorialTitle: string;
+  playTutorialDesc: string;
+  campfireMapLabel: string;
+  phaseTimers: string;
+  presetFast: string;
+  presetStandard: string;
+  presetRelaxed: string;
+  nightLabel: string;
+  debateLabel: string;
+  voteLabel: string;
+  practiceHelper: string;
+  playCampfireAi: string;
+  playOnline: string;
+  gmAssistant: string;
+  saveEloHint: string;
+  signIn: string;
+  createAccount: string;
+  resumeMatchBtn: string;
+  dismissBtn: string;
+
+  // In-Game HUD, Role Card, Briefing, Night/Day Consoles & Pause Modal
+  yourRoleIs: string;
+  callingProgress: string;
+  nextStep: string;
+  mayorBadge: string;
+  mayorTooltip: string;
+  briefing: string;
+  voteAction: string;
+  notebookBtn: string;
+  emotesAndProps: string;
+  emotes3dLabel: string;
+  voiceBtn: string;
+  loverLabel: string;
+  wolfAllyLabel: string;
+  campfireGm: string;
+  nightCasualties: string;
+  eliminatedLabel: string;
+  survivors: string;
+  replayMatch: string;
+  replayVoice: string;
+  privateGmNotice: string;
+  behindCamBtn: string;
+  behindCamShort: string;
+  fpvShort: string;
+  thirdPartyAlive: string;
+  gameOverShort: string;
+  freeLookTooltip: string;
+  micLockedDead: string;
+  micLockedShort: string;
+  ghostMicChatLocked: string;
+  ghostChannelSilent: string;
+  loneWolfTonight: string;
+  bgmToggleLabel: string;
+  sfxToggleLabel: string;
+  onLabel: string;
+  offLabel: string;
+  phaseWaitTimersSec: string;
+  guestPlayerPrefix: string;
+  campfireAbstain: string;
+  abstainShort: string;
+  dayDiscussHint: string;
+  youVotedAbstain: string;
+  yourVotePrefix: string;
+  selectSuspectHint: string;
+  changeVoteBtn: string;
+  finishBtn: string;
+  holdFireBtn: string;
+  nextShort: string;
+  yourTurnBadge: string;
+  confirmedWaiting: string;
+  confirmAndEndNight: string;
+  timeUpConfirmCue: string;
+  packmatesPicked: string;
+  tapTargetHint: string;
+  witchHealDepletedDesc: string;
+  witchNoFatalVictim: string;
+  bittenPrefix: string;
+  noVictimToHeal: string;
+  poisonSealed: string;
+  poisonReady: string;
+  seerTargetPending: string;
+  seerConfirmBtn: string;
+  selectedPrefix: string;
+  homeBtn: string;
+  jumpToMyTurn: (roleName: string) => string;
+  switchToNightRole: string;
+  waitingNightTurn: string;
+  blindfoldEmbersSub: string;
+  sitBackBtn: string;
+  sitShort: string;
+  doppelModelLabel: string;
+  suspectLabel: string;
+  trustedLabel: string;
+  votedBadge: string;
+  behindViewBanner: string;
+  ghostFlightBanner: string;
+  winDraw: string;
+  waitingHostRematch: string;
+  deadChatLockedBanner: string;
+  openGhostRealmBtn: string;
+  ghostChatIsolatedBanner: string;
+  lockedBtn: string;
+  gmHostShellTitle: string;
+  gmHostShellSubtitle: string;
+  gmPlayerShellTitle: string;
+  gmPlayerShellSubtitle: string;
 }
 
 export const UI_TEXT: Record<Language, UITranslationSchema> = {
@@ -245,7 +360,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     firstPersonBtn: 'Góc Nhìn Thứ Nhất [V]',
     firstPersonShort: 'Góc Nhìn 1 [V]',
     firstPersonBanner:
-      '👁️ GÓC NHÌN THỨ NHẤT [V]: Giữ chuột kéo để xoay 360° (hoặc bấm 360° khóa chuột), WASD/D-Pad để đi bộ, phím [E]/Click chọn mục tiêu!',
+      '👁️ GÓC NHÌN THỨ NHẤT [V]: Giữ chuột kéo xoay 360° (bấm 360° khóa chuột) · WASD Đi · Space Nhảy · E/Click Tương tác',
     fpvTargetPrompt: (name) => `🎯 Đang ngắm: ${name} — Bấm [E] hoặc Click để tương tác`,
     dpadWalkFpv: 'Đi Bộ Góc Nhìn 1',
     switchCamera: 'Đổi góc máy 3D',
@@ -419,6 +534,120 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
         ],
       },
     ],
+    lockerAndMaps: 'Tủ Đồ & Bản Đồ',
+    matchSettings: 'Cài đặt ván đấu',
+    view3dBtn: 'Ngắm 3D',
+    expandMenuBtn: 'Mở Menu',
+    randomRoleShort: 'Vai ngẫu nhiên',
+    quickRulesTitle: 'Xem nhanh Luật & 13 Vai Trò',
+    quickRulesDesc: 'Đọc kỹ năng từng vai, không cần vào trận',
+    playTutorialTitle: 'Chơi Tutorial hướng dẫn 5 bước',
+    playTutorialDesc: 'Vào bàn tập thực hành trực tiếp cùng AI',
+    campfireMapLabel: 'Bản đồ lửa trại 3D',
+    phaseTimers: 'Thời lượng các pha',
+    presetFast: 'Nhanh',
+    presetStandard: 'Chuẩn',
+    presetRelaxed: 'Thư thả',
+    nightLabel: 'Đêm',
+    debateLabel: 'Thảo luận',
+    voteLabel: 'Bỏ phiếu',
+    practiceHelper: 'Chế độ Tập Chơi: Hiện số Sói / Dân còn sống trên HUD',
+    playCampfireAi: 'Vào Làng Quanh Lửa Trại (AI)',
+    playOnline: 'Chơi Online',
+    gmAssistant: 'Trợ Lý Quản Trò',
+    saveEloHint: 'Lưu ELO & lịch sử đấu:',
+    signIn: 'Đăng Nhập',
+    createAccount: 'Đăng Ký',
+    resumeMatchBtn: '▶️ Tiếp tục ván đang dở',
+    dismissBtn: 'Bỏ qua',
+    yourRoleIs: 'Vai trò của bạn là',
+    callingProgress: 'Đang gọi',
+    nextStep: 'Bước tiếp',
+    mayorBadge: 'Thị Trưởng (x2)',
+    mayorTooltip: 'Thị Trưởng có phiếu bầu x2 để phá thế hòa',
+    briefing: 'Tin sáng',
+    voteAction: 'Bỏ Phiếu',
+    notebookBtn: 'Sổ Tay',
+    emotesAndProps: 'Biểu cảm & Đạo cụ',
+    emotes3dLabel: 'Biểu cảm 3D:',
+    voiceBtn: 'Voice',
+    loverLabel: 'Tình nhân',
+    wolfAllyLabel: 'Đồng đội Sói',
+    campfireGm: 'Quản Trò Lửa Trại',
+    nightCasualties: 'Thương vong đêm qua',
+    eliminatedLabel: 'Người chơi bị loại',
+    survivors: 'Người sống sót',
+    replayMatch: 'Chơi lại',
+    replayVoice: 'Đọc lại',
+    privateGmNotice: 'Thông báo mật dành riêng cho bạn',
+    behindCamBtn: 'Sau lưng [B]',
+    behindCamShort: 'Sau lưng',
+    fpvShort: 'Góc 1',
+    thirdPartyAlive: 'PHE THỨ 3',
+    gameOverShort: 'KẾT THÚC',
+    freeLookTooltip: 'Khóa chuột xoay 360° không giới hạn (bấm Esc để mở khóa chuột)',
+    micLockedDead: '👻 Đã chết (Hồn Ma) — Micro đã bị khóa',
+    micLockedShort: 'Mic Khóa',
+    ghostMicChatLocked: '👻 Hồn Ma — Mic & Chat Đã Khóa',
+    ghostChannelSilent: 'Kênh Hồn Ma đang im lặng — quan sát ván đấu...',
+    loneWolfTonight: 'Bạn là Sói duy nhất đêm nay — hãy tự chọn mục tiêu.',
+    bgmToggleLabel: 'Nhạc nền & Không khí',
+    sfxToggleLabel: 'Hiệu ứng & Giọng đọc',
+    onLabel: 'Bật',
+    offLabel: 'Tắt',
+    phaseWaitTimersSec: 'Thời gian chờ các pha (Giây)',
+    guestPlayerPrefix: 'Người Chơi',
+    campfireAbstain: 'Lửa Trại (Phiếu Trắng)',
+    abstainShort: 'Lửa Trại',
+    dayDiscussHint: 'Chia sẻ manh mối quanh lửa trại trước khi bỏ phiếu',
+    youVotedAbstain: '🔥 Bạn chọn Phiếu Trắng (Lửa Trại)',
+    yourVotePrefix: 'Bạn bầu:',
+    selectSuspectHint: 'Chọn 1 nghi phạm hoặc bấm Lửa Trại để bỏ phiếu trắng!',
+    changeVoteBtn: 'Đổi phiếu',
+    finishBtn: 'Kết Thúc',
+    holdFireBtn: 'Giữ súng (Không bắn)',
+    nextShort: 'Tiếp',
+    yourTurnBadge: 'Lượt bạn',
+    confirmedWaiting: '✓ Đã xác nhận — chờ người khác...',
+    confirmAndEndNight: 'Xác Nhận & Kết Thúc Đêm',
+    timeUpConfirmCue: '⏳ Hết giờ — bấm Xác Nhận để tiếp tục',
+    packmatesPicked: 'Đồng đội Sói chọn:',
+    tapTargetHint: '(Bấm vào nhân vật 3D hoặc thanh bên dưới)',
+    witchHealDepletedDesc: '🧪 Bình Cứu đã dùng hết — Không thể thấy nạn nhân bị Sói cắn đêm nay',
+    witchNoFatalVictim: '🐺 Đêm nay không có nạn nhân nào nguy kịch vì vết cắn Sói',
+    bittenPrefix: 'Bị Sói cắn:',
+    noVictimToHeal: 'Không có ai để cứu',
+    poisonSealed: '🧪 Bình độc đã bị phong ấn',
+    poisonReady: '🧪 Còn bình độc',
+    seerTargetPending: 'Đang ngắm soi:',
+    seerConfirmBtn: 'Xác Nhận Soi',
+    selectedPrefix: 'Đã chọn:',
+    homeBtn: 'Trang Chủ',
+    jumpToMyTurn: (roleName) => `⚡ Tua Tới Lượt Tôi (${roleName})`,
+    switchToNightRole: 'Đổi Vai Có Kỹ Năng Đêm',
+    waitingNightTurn: 'Đang chờ lượt đêm',
+    blindfoldEmbersSub: 'Màn đêm bao trùm, chỉ còn ánh lửa trại le lói...',
+    sitBackBtn: 'Ngồi lại vào ghế của bạn [X]',
+    sitShort: 'Về ghế',
+    doppelModelLabel: 'Hình mẫu',
+    suspectLabel: 'Nghi Sói',
+    trustedLabel: 'Đáng tin',
+    votedBadge: '✓ Bạn bầu',
+    behindViewBanner:
+      '👁️ GÓC NHÌN SAU LƯNG [B]: Giữ chuột kéo xoay 360° (bấm 360° khóa chuột) · WASD Đi · Space Nhảy · E/Click Tương tác',
+    ghostFlightBanner:
+      '👻 Chế độ Hồn Ma · Bay tự do WASD · Space Lên / Shift Xuống · Giữ chuột kéo xoay 360° · 🔒 Chat Làng & Mic đã khóa · Mở Khu Vực Ma',
+    winDraw: 'HÒA — KHÔNG CÒN AI SỐNG SÓT!',
+    waitingHostRematch: '⏳ Đang chờ Chủ phòng bắt đầu ván mới...',
+    deadChatLockedBanner: '👻 Bạn đã thành Hồn Ma — Phòng Chính bị khóa để chống gian lận!',
+    openGhostRealmBtn: 'Sang Khu Vực Ma',
+    ghostChatIsolatedBanner:
+      '👻 Kênh Hồn Ma cách ly — Chỉ người đã chết mới đọc được tin nhắn tại đây.',
+    lockedBtn: 'Đã khóa',
+    gmHostShellTitle: 'Chế Độ Quản Trò Ngoài Đời',
+    gmHostShellSubtitle: 'Công cụ hỗ trợ ván đấu ngoài đời · Không liên quan chế độ Bot/Online',
+    gmPlayerShellTitle: 'Thẻ Bài Cá Nhân — Phòng Quản Trò',
+    gmPlayerShellSubtitle: 'Chỉ hiển thị duy nhất vai trò của bạn',
   },
   en: {
     appTitle: 'WEREWOLF 3D',
@@ -481,7 +710,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     firstPersonBtn: 'First-Person View [V]',
     firstPersonShort: '1st Person [V]',
     firstPersonBanner:
-      '👁️ FIRST-PERSON VIEW [V]: Move mouse to look around, WASD/D-Pad to walk, press [E]/Click to target!',
+      '👁️ FIRST-PERSON VIEW [V]: Drag mouse to look 360° (click 360° for pointer lock) · WASD Move · Space Jump · E/Click Interact',
     fpvTargetPrompt: (name) => `🎯 Aiming at: ${name} — Press [E] or Click to interact`,
     dpadWalkFpv: '1st-Person Walk',
     switchCamera: 'Switch 3D Camera',
@@ -655,6 +884,120 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
         ],
       },
     ],
+    lockerAndMaps: 'Locker & Maps',
+    matchSettings: 'Match Settings',
+    view3dBtn: '3D View',
+    expandMenuBtn: 'Expand',
+    randomRoleShort: 'Random role',
+    quickRulesTitle: 'Quick Rules & 13 Roles',
+    quickRulesDesc: 'Read role abilities without starting a match',
+    playTutorialTitle: 'Play 5-Step Interactive Tutorial',
+    playTutorialDesc: 'Jump into a guided live practice table',
+    campfireMapLabel: '3D Campfire Map',
+    phaseTimers: 'Phase Timers',
+    presetFast: 'Fast',
+    presetStandard: 'Standard',
+    presetRelaxed: 'Relaxed',
+    nightLabel: 'Night',
+    debateLabel: 'Debate',
+    voteLabel: 'Vote',
+    practiceHelper: 'Practice Helper: Show exact Wolves / Villagers alive on HUD',
+    playCampfireAi: 'Play Around Campfire (AI)',
+    playOnline: 'Play Online',
+    gmAssistant: 'GM Assistant',
+    saveEloHint: 'Save ELO & match history:',
+    signIn: 'Sign In',
+    createAccount: 'Create Account',
+    resumeMatchBtn: '▶️ Resume Match',
+    dismissBtn: 'Dismiss',
+    yourRoleIs: 'Your role is',
+    callingProgress: 'Calling',
+    nextStep: 'Next Step',
+    mayorBadge: 'Mayor (x2)',
+    mayorTooltip: 'Village Mayor has a 2x tie-breaking vote',
+    briefing: 'Briefing',
+    voteAction: 'Vote',
+    notebookBtn: 'Notebook',
+    emotesAndProps: 'Emotes & Props',
+    emotes3dLabel: '3D Emotes:',
+    voiceBtn: 'Voice',
+    loverLabel: 'Lover',
+    wolfAllyLabel: 'Wolf Ally',
+    campfireGm: 'Campfire Game Master',
+    nightCasualties: 'Night Casualties',
+    eliminatedLabel: 'Eliminated',
+    survivors: 'Survivors',
+    replayMatch: 'Replay',
+    replayVoice: 'Replay',
+    privateGmNotice: 'Private GM Notice (Only You Can See)',
+    behindCamBtn: 'Behind [B]',
+    behindCamShort: '3rd',
+    fpvShort: 'FPV',
+    thirdPartyAlive: '3RD PARTY',
+    gameOverShort: 'GAME OVER',
+    freeLookTooltip: 'Lock cursor for unlimited 360° look (press Esc to unlock)',
+    micLockedDead: '👻 Dead (Ghost) — Microphone Locked',
+    micLockedShort: 'Mic Locked',
+    ghostMicChatLocked: '👻 Ghost — Mic & Chat Locked',
+    ghostChannelSilent: 'Ghost channel silent — spectating the match...',
+    loneWolfTonight: 'You are the lone Wolf tonight — choose your target.',
+    bgmToggleLabel: 'BGM & Ambience',
+    sfxToggleLabel: 'SFX & Voice',
+    onLabel: 'On',
+    offLabel: 'Off',
+    phaseWaitTimersSec: 'Phase Wait Timers (Seconds)',
+    guestPlayerPrefix: 'Player',
+    campfireAbstain: 'Campfire (Abstain)',
+    abstainShort: 'Abstain',
+    dayDiscussHint: 'Share campfire clues before voting',
+    youVotedAbstain: '🔥 You voted Campfire Abstain',
+    yourVotePrefix: 'Your vote:',
+    selectSuspectHint: 'Select 1 suspect or click the Campfire to abstain!',
+    changeVoteBtn: 'Change',
+    finishBtn: 'Finish',
+    holdFireBtn: 'Hold Fire (No Shot)',
+    nextShort: 'Next',
+    yourTurnBadge: 'Your Turn',
+    confirmedWaiting: '✓ Confirmed — waiting for others...',
+    confirmAndEndNight: 'Confirm & End Night',
+    timeUpConfirmCue: '⏳ Time is up — press Confirm to continue',
+    packmatesPicked: 'Packmates picked:',
+    tapTargetHint: '(Tap a 3D villager or bottom dock)',
+    witchHealDepletedDesc: '🧪 Heal potion depleted — Tonight’s wolf victim is hidden',
+    witchNoFatalVictim: '🐺 No fatal werewolf victim tonight',
+    bittenPrefix: 'Bitten:',
+    noVictimToHeal: 'No victim to heal',
+    poisonSealed: '🧪 Poison potion sealed',
+    poisonReady: '🧪 Poison Ready',
+    seerTargetPending: 'Target selected:',
+    seerConfirmBtn: 'Confirm Inspect',
+    selectedPrefix: 'Selected:',
+    homeBtn: 'Home',
+    jumpToMyTurn: (roleName) => `⚡ Jump to My Turn (${roleName})`,
+    switchToNightRole: 'Switch to Night Role',
+    waitingNightTurn: 'Waiting for night turn',
+    blindfoldEmbersSub: 'Darkness falls, leaving only the campfire embers glowing...',
+    sitBackBtn: 'Sit Back on Your Stool [X]',
+    sitShort: 'Sit',
+    doppelModelLabel: 'Model',
+    suspectLabel: 'Suspect',
+    trustedLabel: 'Trusted',
+    votedBadge: '✓ Voted',
+    behindViewBanner:
+      '👁️ BEHIND VIEW [B]: Drag mouse to look 360° (click 360° for pointer lock) · WASD Move · Space Jump · E/Click Interact',
+    ghostFlightBanner:
+      '👻 Ghost Mode · Free Flight WASD · Space Up / Shift Down · Drag to Look 360° · 🔒 Village Chat & Mic Locked · Ghost Realm Open',
+    winDraw: 'DRAW — NO SURVIVORS!',
+    waitingHostRematch: '⏳ Waiting for Room Host to start a new match...',
+    deadChatLockedBanner: '👻 You are a Ghost — Main Chat is locked to prevent cheating!',
+    openGhostRealmBtn: 'Open Ghost Realm',
+    ghostChatIsolatedBanner:
+      '👻 Isolated Ghost Realm — Only eliminated players can read messages here.',
+    lockedBtn: 'Locked',
+    gmHostShellTitle: 'Real-Life Game Master Mode',
+    gmHostShellSubtitle: 'Offline table companion · Isolated from Bot/Online matches',
+    gmPlayerShellTitle: 'Personal Role Card — GM Room',
+    gmPlayerShellSubtitle: 'Shows ONLY your own secret role',
   },
   fr: {
     appTitle: 'LOUP-GAROU 3D',
@@ -717,7 +1060,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     firstPersonBtn: 'Vue 1re Personne [V]',
     firstPersonShort: '1re Pers. [V]',
     firstPersonBanner:
-      '👁️ VUE 1RE PERSONNE [V] : Bougez la souris pour regarder, WASD/D-Pad pour marcher, [E]/Clic pour cibler !',
+      '👁️ VUE 1RE PERSONNE [V] : Glissez la souris pour regarder à 360° (cliquez 360° pour verrouiller le curseur) · WASD Bouger · Espace Sauter · E/Clic Interagir',
     fpvTargetPrompt: (name) => `🎯 Cible : ${name} — Appuyez sur [E] ou Cliquez`,
     dpadWalkFpv: 'Marche 1re Pers.',
     switchCamera: 'Caméra 3D',
@@ -889,6 +1232,120 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
         ],
       },
     ],
+    lockerAndMaps: 'Vestiaire & Cartes',
+    matchSettings: 'Paramètres',
+    view3dBtn: 'Vue 3D',
+    expandMenuBtn: 'Ouvrir Menu',
+    randomRoleShort: 'Rôle aléatoire',
+    quickRulesTitle: 'Règles & 13 Rôles',
+    quickRulesDesc: 'Consultez les pouvoirs sans lancer de partie',
+    playTutorialTitle: 'Tutoriel interactif en 5 étapes',
+    playTutorialDesc: 'Rejoignez une table d’entraînement guidée avec l’IA',
+    campfireMapLabel: 'Carte Feu de Camp 3D',
+    phaseTimers: 'Durée des Phases',
+    presetFast: 'Rapide',
+    presetStandard: 'Standard',
+    presetRelaxed: 'Détendu',
+    nightLabel: 'Nuit',
+    debateLabel: 'Débat',
+    voteLabel: 'Vote',
+    practiceHelper: 'Aide Entraînement : Afficher Loups / Villageois vivants sur le HUD',
+    playCampfireAi: 'Jouer autour du Feu (IA)',
+    playOnline: 'Jouer en Ligne',
+    gmAssistant: 'Assistant MJ',
+    saveEloHint: 'Sauvegarder ELO & historique :',
+    signIn: 'Connexion',
+    createAccount: 'Créer un Compte',
+    resumeMatchBtn: '▶️ Reprendre la partie',
+    dismissBtn: 'Ignorer',
+    yourRoleIs: 'Votre rôle est',
+    callingProgress: 'Appel en cours',
+    nextStep: 'Étape suivante',
+    mayorBadge: 'Maire (x2)',
+    mayorTooltip: 'Le Maire possède un vote x2 pour départager',
+    briefing: 'Bilan',
+    voteAction: 'Voter',
+    notebookBtn: 'Carnet',
+    emotesAndProps: 'Émotes & Objets',
+    emotes3dLabel: 'Émotes 3D :',
+    voiceBtn: 'Vocal',
+    loverLabel: 'Amoureux',
+    wolfAllyLabel: 'Allié Loup',
+    campfireGm: 'Maître du Feu de Camp',
+    nightCasualties: 'Victimes de la nuit',
+    eliminatedLabel: 'Éliminés',
+    survivors: 'Survivants',
+    replayMatch: 'Rejouer',
+    replayVoice: 'Réécouter',
+    privateGmNotice: 'Message secret du MJ (Visible par vous seul)',
+    behindCamBtn: 'Dos [B]',
+    behindCamShort: 'Dos',
+    fpvShort: '1re',
+    thirdPartyAlive: 'NEUTRES',
+    gameOverShort: 'FIN',
+    freeLookTooltip: 'Verrouiller le curseur pour vue 360° libre (Échap pour libérer)',
+    micLockedDead: '👻 Mort (Fantôme) — Micro verrouillé',
+    micLockedShort: 'Micro bloqué',
+    ghostMicChatLocked: '👻 Fantôme — Micro & Chat verrouillés',
+    ghostChannelSilent: 'Canal Fantôme silencieux — mode spectateur...',
+    loneWolfTonight: 'Vous êtes le seul Loup cette nuit — choisissez votre cible.',
+    bgmToggleLabel: 'Musique & Ambiance',
+    sfxToggleLabel: 'Effets & Voix',
+    onLabel: 'Activé',
+    offLabel: 'Coupé',
+    phaseWaitTimersSec: 'Durée des Phases (Secondes)',
+    guestPlayerPrefix: 'Joueur',
+    campfireAbstain: 'Feu de Camp (Abstention)',
+    abstainShort: 'Abstention',
+    dayDiscussHint: 'Partagez vos indices autour du feu avant le vote',
+    youVotedAbstain: '🔥 Vous avez voté Blanc (Feu de Camp)',
+    yourVotePrefix: 'Votre vote :',
+    selectSuspectHint: 'Choisissez 1 suspect ou cliquez sur le Feu pour vous abstenir !',
+    changeVoteBtn: 'Changer',
+    finishBtn: 'Terminer',
+    holdFireBtn: 'Ne pas tirer',
+    nextShort: 'Suiv.',
+    yourTurnBadge: 'À vous',
+    confirmedWaiting: '✓ Confirmé — en attente des autres...',
+    confirmAndEndNight: 'Confirmer & Fin de Nuit',
+    timeUpConfirmCue: '⏳ Temps écoulé — confirmez pour continuer',
+    packmatesPicked: 'Choix de la meute :',
+    tapTargetHint: '(Cliquez un joueur 3D ou la barre du bas)',
+    witchHealDepletedDesc: '🧪 Potion de vie épuisée — Victime des loups masquée',
+    witchNoFatalVictim: '🐺 Aucune victime fatale des loups cette nuit',
+    bittenPrefix: 'Mordu :',
+    noVictimToHeal: 'Personne à sauver',
+    poisonSealed: '🧪 Poison scellé',
+    poisonReady: '🧪 Poison prêt',
+    seerTargetPending: 'Cible choisie :',
+    seerConfirmBtn: 'Confirmer Vision',
+    selectedPrefix: 'Sélection :',
+    homeBtn: 'Accueil',
+    jumpToMyTurn: (roleName) => `⚡ Aller à mon tour (${roleName})`,
+    switchToNightRole: 'Prendre un rôle nocturne',
+    waitingNightTurn: 'En attente du tour nocturne',
+    blindfoldEmbersSub: 'La nuit tombe, seules brillent les braises du feu...',
+    sitBackBtn: 'Se rasseoir sur votre tabouret [X]',
+    sitShort: 'Asseoir',
+    doppelModelLabel: 'Modèle',
+    suspectLabel: 'Suspect',
+    trustedLabel: 'Fiable',
+    votedBadge: '✓ Voté',
+    behindViewBanner:
+      '👁️ VUE DE DOS [B] : Glissez la souris pour regarder à 360° (cliquez 360° pour verrouiller le curseur) · WASD Bouger · Espace Sauter · E/Clic Interagir',
+    ghostFlightBanner:
+      '👻 Mode Fantôme · Vol libre WASD · Espace Monter / Shift Descendre · Glisser 360° · 🔒 Chat Village & Micro verrouillés · Salon Fantôme ouvert',
+    winDraw: 'ÉGALITÉ — AUCUN SURVIVANT !',
+    waitingHostRematch: '⏳ En attente que l’hôte lance une nouvelle partie...',
+    deadChatLockedBanner: '👻 Vous êtes Fantôme — Le chat principal est verrouillé !',
+    openGhostRealmBtn: 'Ouvrir Canal Fantôme',
+    ghostChatIsolatedBanner:
+      '👻 Canal Fantôme isolé — Seuls les joueurs éliminés peuvent lire ici.',
+    lockedBtn: 'Verrouillé',
+    gmHostShellTitle: 'Mode Maître du Jeu (Table)',
+    gmHostShellSubtitle: 'Compagnon de jeu sur table · Séparé du mode IA/En Ligne',
+    gmPlayerShellTitle: 'Carte Personnelle — Salle MJ',
+    gmPlayerShellSubtitle: 'Affiche UNIQUEMENT votre rôle secret',
   },
   es: {
     appTitle: 'HOMBRE LOBO 3D',
@@ -951,7 +1408,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     firstPersonBtn: 'Primera Persona [V]',
     firstPersonShort: '1ra Pers. [V]',
     firstPersonBanner:
-      '👁️ PRIMERA PERSONA [V]: Mueve el ratón para mirar, WASD/D-Pad para caminar, [E]/Clic para seleccionar!',
+      '👁️ PRIMERA PERSONA [V]: Arrastra el ratón para mirar 360° (pulsa 360° para fijar el cursor) · WASD Mover · Espacio Saltar · E/Clic Interactuar',
     fpvTargetPrompt: (name) => `🎯 Apuntando a: ${name} — Pulsa [E] o Clic`,
     dpadWalkFpv: 'Caminar 1ra Pers.',
     switchCamera: 'Cámara 3D',
@@ -1123,6 +1580,120 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
         ],
       },
     ],
+    lockerAndMaps: 'Armario y Mapas',
+    matchSettings: 'Ajustes',
+    view3dBtn: 'Vista 3D',
+    expandMenuBtn: 'Abrir Menú',
+    randomRoleShort: 'Rol aleatorio',
+    quickRulesTitle: 'Reglas y 13 Roles',
+    quickRulesDesc: 'Lee habilidades sin iniciar una partida',
+    playTutorialTitle: 'Tutorial interactivo de 5 pasos',
+    playTutorialDesc: 'Entra a una mesa de práctica guiada con IA',
+    campfireMapLabel: 'Mapa de Fogata 3D',
+    phaseTimers: 'Tiempos de Fase',
+    presetFast: 'Rápido',
+    presetStandard: 'Estándar',
+    presetRelaxed: 'Relajado',
+    nightLabel: 'Noche',
+    debateLabel: 'Debate',
+    voteLabel: 'Votación',
+    practiceHelper: 'Ayuda de Práctica: Mostrar Lobos / Aldeanos vivos en el HUD',
+    playCampfireAi: 'Jugar en la Fogata (IA)',
+    playOnline: 'Jugar Online',
+    gmAssistant: 'Asistente Narrador',
+    saveEloHint: 'Guardar ELO e historial:',
+    signIn: 'Iniciar Sesión',
+    createAccount: 'Crear Cuenta',
+    resumeMatchBtn: '▶️ Reanudar partida',
+    dismissBtn: 'Descartar',
+    yourRoleIs: 'Tu rol es',
+    callingProgress: 'Llamando',
+    nextStep: 'Siguiente paso',
+    mayorBadge: 'Alcalde (x2)',
+    mayorTooltip: 'El Alcalde tiene voto doble para desempatar',
+    briefing: 'Informe',
+    voteAction: 'Votar',
+    notebookBtn: 'Cuaderno',
+    emotesAndProps: 'Emotes y Objetos',
+    emotes3dLabel: 'Emotes 3D:',
+    voiceBtn: 'Voz',
+    loverLabel: 'Enamorado',
+    wolfAllyLabel: 'Aliado Lobo',
+    campfireGm: 'Narrador de la Fogata',
+    nightCasualties: 'Bajas de la noche',
+    eliminatedLabel: 'Eliminados',
+    survivors: 'Supervivientes',
+    replayMatch: 'Volver a jugar',
+    replayVoice: 'Repetir',
+    privateGmNotice: 'Aviso privado del Narrador (Solo tú lo ves)',
+    behindCamBtn: 'Espalda [B]',
+    behindCamShort: '3ra',
+    fpvShort: '1ra',
+    thirdPartyAlive: 'TERCERO',
+    gameOverShort: 'FIN',
+    freeLookTooltip: 'Fijar cursor para vista 360° libre (pulsa Esc para soltar)',
+    micLockedDead: '👻 Muerto (Fantasma) — Micrófono bloqueado',
+    micLockedShort: 'Mic bloqueado',
+    ghostMicChatLocked: '👻 Fantasma — Mic y Chat bloqueados',
+    ghostChannelSilent: 'Canal Fantasma en silencio — observando la partida...',
+    loneWolfTonight: 'Eres el único Lobo esta noche — elige tu objetivo.',
+    bgmToggleLabel: 'Música y Ambiente',
+    sfxToggleLabel: 'Efectos y Voz',
+    onLabel: 'Sí',
+    offLabel: 'No',
+    phaseWaitTimersSec: 'Temporizadores de Fase (Segundos)',
+    guestPlayerPrefix: 'Jugador',
+    campfireAbstain: 'Fogata (Abstención)',
+    abstainShort: 'Abstenerse',
+    dayDiscussHint: 'Comparte pistas en la fogata antes de votar',
+    youVotedAbstain: '🔥 Votaste Abstención (Fogata)',
+    yourVotePrefix: 'Tu voto:',
+    selectSuspectHint: '¡Elige 1 sospechoso o pulsa la Fogata para abstenerte!',
+    changeVoteBtn: 'Cambiar',
+    finishBtn: 'Finalizar',
+    holdFireBtn: 'No disparar',
+    nextShort: 'Sig.',
+    yourTurnBadge: 'Tu turno',
+    confirmedWaiting: '✓ Confirmado — esperando a los demás...',
+    confirmAndEndNight: 'Confirmar y Terminar Noche',
+    timeUpConfirmCue: '⏳ Tiempo agotado — pulsa Confirmar para seguir',
+    packmatesPicked: 'La manada eligió:',
+    tapTargetHint: '(Toca un aldeano 3D o la barra inferior)',
+    witchHealDepletedDesc: '🧪 Poción de cura agotada — Víctima oculta esta noche',
+    witchNoFatalVictim: '🐺 Sin víctima mortal de los lobos esta noche',
+    bittenPrefix: 'Mordido:',
+    noVictimToHeal: 'Nadie que curar',
+    poisonSealed: '🧪 Veneno sellado',
+    poisonReady: '🧪 Veneno listo',
+    seerTargetPending: 'Objetivo elegido:',
+    seerConfirmBtn: 'Confirmar Visión',
+    selectedPrefix: 'Seleccionado:',
+    homeBtn: 'Inicio',
+    jumpToMyTurn: (roleName) => `⚡ Ir a mi turno (${roleName})`,
+    switchToNightRole: 'Cambiar a rol nocturno',
+    waitingNightTurn: 'Esperando turno nocturno',
+    blindfoldEmbersSub: 'Cae la noche, solo brillan las brasas de la fogata...',
+    sitBackBtn: 'Volver a tu asiento [X]',
+    sitShort: 'Sentarse',
+    doppelModelLabel: 'Modelo',
+    suspectLabel: 'Sospechoso',
+    trustedLabel: 'Confiable',
+    votedBadge: '✓ Votado',
+    behindViewBanner:
+      '👁️ VISTA TRASERA [B]: Arrastra el ratón para mirar 360° (pulsa 360° para fijar el cursor) · WASD Mover · Espacio Saltar · E/Clic Interactuar',
+    ghostFlightBanner:
+      '👻 Modo Fantasma · Vuelo libre WASD · Espacio Subir / Shift Bajar · Arrastrar 360° · 🔒 Chat de Aldea y Mic bloqueados · Chat Fantasma abierto',
+    winDraw: '¡EMPATE — SIN SUPERVIVIENTES!',
+    waitingHostRematch: '⏳ Esperando al anfitrión para nueva partida...',
+    deadChatLockedBanner: '👻 Eres Fantasma — ¡El chat principal está bloqueado!',
+    openGhostRealmBtn: 'Abrir Canal Fantasma',
+    ghostChatIsolatedBanner:
+      '👻 Canal Fantasma aislado — Solo los eliminados pueden leer aquí.',
+    lockedBtn: 'Bloqueado',
+    gmHostShellTitle: 'Modo Narrador en Vivo',
+    gmHostShellSubtitle: 'Asistente de mesa · Separado del modo IA/Online',
+    gmPlayerShellTitle: 'Carta Personal — Sala Narrador',
+    gmPlayerShellSubtitle: 'Muestra SOLO tu rol secreto',
   },
   ja: {
     appTitle: '人狼 3D',
@@ -1185,7 +1756,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     firstPersonBtn: '一人称視点 [V]',
     firstPersonShort: '一人称 [V]',
     firstPersonBanner:
-      '👁️ 一人称視点モード [V]: マウス移動で周囲を見渡し、WASD/十字キーで移動、[E]/クリックで対象選択！',
+      '👁️ 一人称視点 [V]: マウスドラッグで360°視点（360°ボタンでポインター固定）・WASD移動・Spaceジャンプ・E/クリック操作',
     fpvTargetPrompt: (name) => `🎯 照準中: ${name} — [E]キーまたはクリックで選択`,
     dpadWalkFpv: '一人称移動',
     switchCamera: '3Dカメラ切替',
@@ -1357,10 +1928,219 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
         ],
       },
     ],
+    lockerAndMaps: 'ロッカー＆マップ',
+    matchSettings: '試合設定',
+    view3dBtn: '3Dビュー',
+    expandMenuBtn: 'メニューを開く',
+    randomRoleShort: 'ランダム役職',
+    quickRulesTitle: 'ルール＆13役職一覧',
+    quickRulesDesc: '試合を始めずに各役職の能力を確認',
+    playTutorialTitle: '5ステップ体験チュートリアル',
+    playTutorialDesc: 'AIとのガイド付き練習テーブルへ参加',
+    campfireMapLabel: '3D焚き火マップ',
+    phaseTimers: 'フェーズ時間',
+    presetFast: '高速',
+    presetStandard: '標準',
+    presetRelaxed: 'ゆったり',
+    nightLabel: '夜',
+    debateLabel: '議論',
+    voteLabel: '投票',
+    practiceHelper: '練習補助: HUDに生存中の人狼・村人数を表示',
+    playCampfireAi: '焚き火の村へ参加 (AI)',
+    playOnline: 'オンライン対戦',
+    gmAssistant: 'GMアシスタント',
+    saveEloHint: 'ELOと対戦履歴を保存:',
+    signIn: 'ログイン',
+    createAccount: 'アカウント作成',
+    resumeMatchBtn: '▶️ 途中の試合を再開',
+    dismissBtn: '閉じる',
+    yourRoleIs: 'あなたの役職は',
+    callingProgress: '点呼中',
+    nextStep: '次のステップ',
+    mayorBadge: '村長 (x2)',
+    mayorTooltip: '村長は同票決着用の2票を持ちます',
+    briefing: '朝の報告',
+    voteAction: '投票',
+    notebookBtn: '推理ノート',
+    emotesAndProps: 'エモート＆アイテム',
+    emotes3dLabel: '3Dエモート:',
+    voiceBtn: 'ボイス',
+    loverLabel: '恋人',
+    wolfAllyLabel: '仲間の人狼',
+    campfireGm: '焚き火のゲームマスター',
+    nightCasualties: '昨夜の犠牲者',
+    eliminatedLabel: '追放者',
+    survivors: '生存者',
+    replayMatch: 'もう一度',
+    replayVoice: '再生',
+    privateGmNotice: 'GMからの極秘通知（あなたのみ閲覧可）',
+    behindCamBtn: '背面 [B]',
+    behindCamShort: '背面',
+    fpvShort: '一人称',
+    thirdPartyAlive: '第三勢力',
+    gameOverShort: '終了',
+    freeLookTooltip: 'カーソル固定で360°自由視点（Escで解除）',
+    micLockedDead: '👻 死亡（幽霊）— マイクはロックされています',
+    micLockedShort: 'マイク無効',
+    ghostMicChatLocked: '👻 幽霊 — マイク＆チャット無効',
+    ghostChannelSilent: '霊界チャンネルは静かです — 観戦中...',
+    loneWolfTonight: '今夜はあなた一人が人狼です — 襲撃対象を選んでください。',
+    bgmToggleLabel: 'BGM＆環境音',
+    sfxToggleLabel: '効果音＆音声',
+    onLabel: 'ON',
+    offLabel: 'OFF',
+    phaseWaitTimersSec: '各フェーズ待機時間 (秒)',
+    guestPlayerPrefix: 'プレイヤー',
+    campfireAbstain: '焚き火（棄権）',
+    abstainShort: '棄権',
+    dayDiscussHint: '投票前に焚き火で手がかりを話し合おう',
+    youVotedAbstain: '🔥 焚き火（棄権）に投票しました',
+    yourVotePrefix: '投票先:',
+    selectSuspectHint: '容疑者を1人選ぶか焚き火をクリックして棄権！',
+    changeVoteBtn: '変更',
+    finishBtn: '終了',
+    holdFireBtn: '撃たない（温存）',
+    nextShort: '次へ',
+    yourTurnBadge: 'あなたの手番',
+    confirmedWaiting: '✓ 確定済み — 他プレイヤー待機中...',
+    confirmAndEndNight: '確定して夜を終える',
+    timeUpConfirmCue: '⏳ 時間切れ — 確定を押して続行',
+    packmatesPicked: '仲間人狼の選択:',
+    tapTargetHint: '（3Dキャラまたは下部バーをタップ）',
+    witchHealDepletedDesc: '🧪 蘇生薬は使用済み — 今夜の襲撃対象は見えません',
+    witchNoFatalVictim: '🐺 今夜は人狼の襲撃被害者がいません',
+    bittenPrefix: '襲撃対象:',
+    noVictimToHeal: '救う対象なし',
+    poisonSealed: '🧪 毒薬は封印中',
+    poisonReady: '🧪 毒薬あり',
+    seerTargetPending: '占い対象:',
+    seerConfirmBtn: '占いを確定',
+    selectedPrefix: '選択中:',
+    homeBtn: 'ホーム',
+    jumpToMyTurn: (roleName) => `⚡ 自分の手番へ (${roleName})`,
+    switchToNightRole: '夜能力のある役職へ変更',
+    waitingNightTurn: '夜の手番を待機中',
+    blindfoldEmbersSub: '闇が降り、焚き火の残り火だけが揺れている…',
+    sitBackBtn: '席に戻る [X]',
+    sitShort: '着席',
+    doppelModelLabel: 'コピー元',
+    suspectLabel: '容疑者',
+    trustedLabel: '信頼',
+    votedBadge: '✓ 投票済',
+    behindViewBanner:
+      '👁️ 背面視点 [B]: マウスドラッグで360°視点（360°ボタンでポインター固定）・WASD移動・Spaceジャンプ・E/クリック操作',
+    ghostFlightBanner:
+      '👻 幽霊モード・WASD自由飛行・Space上昇/Shift下降・ドラッグで360°視点・🔒 村チャット＆マイク無効・霊界チャット解放',
+    winDraw: '引き分け — 生存者なし！',
+    waitingHostRematch: '⏳ ホストが次の試合を開始するのを待機中...',
+    deadChatLockedBanner: '👻 幽霊状態です — 不正防止のため村チャットはロックされています',
+    openGhostRealmBtn: '霊界チャットへ',
+    ghostChatIsolatedBanner:
+      '👻 霊界専用チャンネル — 脱落したプレイヤーのみ閲覧できます。',
+    lockedBtn: 'ロック中',
+    gmHostShellTitle: '対面ゲームマスターモード',
+    gmHostShellSubtitle: '対面プレイ専用ツール・AI/オンライン対戦とは独立',
+    gmPlayerShellTitle: '個人役職カード — GMルーム',
+    gmPlayerShellSubtitle: 'あなた自身の秘密の役職のみ表示',
   },
 };
 
-export const TRANSLATIONS: Record<Language, Record<string, string>> = {
+export interface TranslationSchema {
+  appTitle: string;
+  appSubtitle: string;
+  playOnline: string;
+  playOnlineDesc: string;
+  gmAssistant: string;
+  gmAssistantDesc: string;
+  virtualCards: string;
+  virtualCardsDesc: string;
+  leaderboard: string;
+  matchHistory: string;
+  roleEncyclopedia: string;
+  voiceChat: string;
+  voiceLive: string;
+  muteMic: string;
+  unmuteMic: string;
+  pushToTalk: string;
+  antiCheatActive: string;
+  antiCheatDesc: string;
+  createRoom: string;
+  joinRoom: string;
+  quickMatch: string;
+  roomId: string;
+  enterRoomId: string;
+  yourName: string;
+  enterName: string;
+  loginSocial: string;
+  loginGoogle: string;
+  loginDiscord: string;
+  loginGuest: string;
+  factionVillager: string;
+  factionWerewolf: string;
+  factionNeutral: string;
+  alive: string;
+  dead: string;
+  nightPhase: string;
+  dayDiscussion: string;
+  dayVoting: string;
+  hunterRetribution: string;
+  nightFalls: string;
+  dayBreaks: string;
+  castVote: string;
+  skipVote: string;
+  revealRole: string;
+  hideRole: string;
+  gmNextStep: string;
+  gmPrevStep: string;
+  gmResolveNight: string;
+  gmAnnounceVictims: string;
+  gmEndGame: string;
+  soundToggle: string;
+  language: string;
+  // GM Companion Header, Setup & Phase Controls
+  gmHideRoles: string;
+  gmShowRoles: string;
+  gmHiddenMask: string;
+  gmRoomCodeQrLabel: string;
+  gmCopyCode: string;
+  gmCopied: string;
+  gmZoomQr: string;
+  gmCopyLink: string;
+  gmCopiedLink: string;
+  gmPlayerViewBtn: string;
+  gmSoundboardTitle: string;
+  gmVirtualDeckTitle: string;
+  gmPhysicalCardsTitle: string;
+  gmPlayerListTitle: string;
+  gmCustomCount: string;
+  gmReshuffleRoles: string;
+  gmFillVillagers: string;
+  gmAddPlayerPlaceholder: string;
+  gmAddBtn: string;
+  gmStartMatchBtn: string;
+  gmNightOrderHint: string;
+  gmDayPhaseHint: string;
+  gmPlayCalloutBtn: string;
+  gmUndoBtn: string;
+  gmResetMatchBtn: string;
+  gmConfirmResetBtn: string;
+  gmCancelBtn: string;
+  gmDiscussTimerTitle: string;
+  gmTimerStart: string;
+  gmTimerPause: string;
+  gmLynchPrompt: string;
+  gmSkipLynchBtn: string;
+  gmConfirmLynchBtn: string;
+  gmPlayNewMatchBtn: string;
+  gmScanQrTitle: string;
+  gmUnassignedRole: string;
+  gmSelectRolePlaceholder: string;
+  gmStepLabel: string;
+  gmNightTitlePrefix: string;
+  gmDayTitlePrefix: string;
+}
+
+export const TRANSLATIONS: Record<Language, TranslationSchema> = {
   vi: {
     appTitle: 'Ma Sói Huyền Thoại',
     appSubtitle: 'Đấu Trí Đỉnh Cao & Trợ Lý Quản Trò Thông Minh',
@@ -1413,6 +2193,46 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     gmEndGame: 'Kết Thúc Ván',
     soundToggle: 'Âm thanh',
     language: 'Ngôn ngữ',
+    gmHideRoles: '🙈 Ẩn Vai Trò (Chống nhìn trộm)',
+    gmShowRoles: '👁️ Hiện Vai Trò',
+    gmHiddenMask: '••• (Đã ẩn)',
+    gmRoomCodeQrLabel: 'Mã Phòng & QR Cho Người Chơi',
+    gmCopyCode: 'Chép mã',
+    gmCopied: 'Đã chép',
+    gmZoomQr: '🔍 Phóng to QR',
+    gmCopyLink: 'Chép link vào phòng',
+    gmCopiedLink: 'Đã sao chép link phòng',
+    gmPlayerViewBtn: 'Xem Giao Diện Người Chơi',
+    gmSoundboardTitle: 'Bàn Phím Âm Hiệu & Giọng Gọi Vai Kịch Tính',
+    gmVirtualDeckTitle: 'Không Có Bộ Bài Ngoài Đời (App Chia Vai)',
+    gmPhysicalCardsTitle: 'Đã Có Bài Giấy (Người Chơi Tự Nhập / GM Nhập Hộ)',
+    gmPlayerListTitle: 'Danh Sách Người Chơi',
+    gmCustomCount: 'Tuỳ chỉnh:',
+    gmReshuffleRoles: 'Phân Lại Vai Ngẫu Nhiên',
+    gmFillVillagers: 'Điền Dân Làng Cho Ghế Trống',
+    gmAddPlayerPlaceholder: 'Nhập tên người chơi mới...',
+    gmAddBtn: 'Thêm',
+    gmStartMatchBtn: 'Bắt Đầu Ván Đấu Thực Tế (Vòng 1)',
+    gmNightOrderHint: 'Quản trò gọi các vai theo thứ tự bên dưới.',
+    gmDayPhaseHint: 'Công bố kết quả đêm và biểu quyết treo cổ.',
+    gmPlayCalloutBtn: '🔊 Phát Tiếng Gọi',
+    gmUndoBtn: '↩️ Hoàn tác bước vừa rồi',
+    gmResetMatchBtn: 'Thiết Lập Lại Ván',
+    gmConfirmResetBtn: 'Xác nhận xóa ván?',
+    gmCancelBtn: 'Hủy',
+    gmDiscussTimerTitle: 'Đồng Hồ Thảo Luận',
+    gmTimerStart: 'Chạy Giờ',
+    gmTimerPause: 'Tạm Dừng',
+    gmLynchPrompt: 'Chọn Người Bị Làng Biểu Quyết Treo Cổ Hôm Nay:',
+    gmSkipLynchBtn: 'Không Treo Cổ Ai (Sang Đêm Tiếp)',
+    gmConfirmLynchBtn: 'Xác Nhận Treo Cổ',
+    gmPlayNewMatchBtn: 'Chơi Ván Mới',
+    gmScanQrTitle: 'Quét Mã QR Để Vào Phòng Quản Trò',
+    gmUnassignedRole: 'Chưa gán bài',
+    gmSelectRolePlaceholder: '-- Chờ nhập vai / Chọn hộ --',
+    gmStepLabel: 'Bước',
+    gmNightTitlePrefix: 'Đêm Thứ',
+    gmDayTitlePrefix: 'Ngày Thứ',
   },
   en: {
     appTitle: 'Legend of Werewolf',
@@ -1466,6 +2286,46 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     gmEndGame: 'End Game',
     soundToggle: 'Sound',
     language: 'Language',
+    gmHideRoles: '🙈 Hide Roles (Privacy)',
+    gmShowRoles: '👁️ Show Roles',
+    gmHiddenMask: '••• (Hidden)',
+    gmRoomCodeQrLabel: 'Player Room Code & QR',
+    gmCopyCode: 'Copy code',
+    gmCopied: 'Copied',
+    gmZoomQr: '🔍 Zoom QR',
+    gmCopyLink: 'Copy join link',
+    gmCopiedLink: 'Join link copied',
+    gmPlayerViewBtn: 'Open Player View',
+    gmSoundboardTitle: 'Soundboard & Dramatic Role Callouts',
+    gmVirtualDeckTitle: 'No Physical Cards (App Deals Roles)',
+    gmPhysicalCardsTitle: 'Physical Deck (Self-Input / GM Assign)',
+    gmPlayerListTitle: 'Player Roster',
+    gmCustomCount: 'Custom:',
+    gmReshuffleRoles: 'Reshuffle Balanced Roles',
+    gmFillVillagers: 'Fill Empty as Villager',
+    gmAddPlayerPlaceholder: 'Enter new player name...',
+    gmAddBtn: 'Add',
+    gmStartMatchBtn: 'Start Tabletop Match (Round 1)',
+    gmNightOrderHint: 'Call each active role in the night order below.',
+    gmDayPhaseHint: 'Announce dawn results and run the day vote.',
+    gmPlayCalloutBtn: '🔊 Play Callout',
+    gmUndoBtn: '↩️ Undo Last Step',
+    gmResetMatchBtn: 'Reset Match',
+    gmConfirmResetBtn: 'Confirm Reset?',
+    gmCancelBtn: 'Cancel',
+    gmDiscussTimerTitle: 'Discussion Timer',
+    gmTimerStart: 'Start',
+    gmTimerPause: 'Pause',
+    gmLynchPrompt: 'Select Today’s Village Execution Target:',
+    gmSkipLynchBtn: 'No Execution (Next Night)',
+    gmConfirmLynchBtn: 'Confirm Execution',
+    gmPlayNewMatchBtn: 'New Match',
+    gmScanQrTitle: 'Scan QR Code to Join GM Room',
+    gmUnassignedRole: 'Unassigned',
+    gmSelectRolePlaceholder: '-- Waiting / Assign Role --',
+    gmStepLabel: 'Step',
+    gmNightTitlePrefix: 'Night',
+    gmDayTitlePrefix: 'Day',
   },
   fr: {
     appTitle: 'Les Loups-Garous Légendaires',
@@ -1519,6 +2379,46 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     gmEndGame: 'Terminer la Partie',
     soundToggle: 'Son',
     language: 'Langue',
+    gmHideRoles: '🙈 Masquer les rôles (Privé)',
+    gmShowRoles: '👁️ Afficher les rôles',
+    gmHiddenMask: '••• (Masqué)',
+    gmRoomCodeQrLabel: 'Code Salle & QR Joueurs',
+    gmCopyCode: 'Copier code',
+    gmCopied: 'Copié',
+    gmZoomQr: '🔍 Agrandir QR',
+    gmCopyLink: 'Copier lien',
+    gmCopiedLink: 'Lien copié',
+    gmPlayerViewBtn: 'Vue Joueur',
+    gmSoundboardTitle: 'Effets Sonores & Appels de Rôles',
+    gmVirtualDeckTitle: 'Sans Cartes Physiques (Distribution Auto)',
+    gmPhysicalCardsTitle: 'Cartes Physiques (Saisie Joueur / MJ)',
+    gmPlayerListTitle: 'Liste des Joueurs',
+    gmCustomCount: 'Perso :',
+    gmReshuffleRoles: 'Redistribuer les Rôles',
+    gmFillVillagers: 'Remplir en Villageois',
+    gmAddPlayerPlaceholder: 'Nom du nouveau joueur...',
+    gmAddBtn: 'Ajouter',
+    gmStartMatchBtn: 'Démarrer la Partie (Tour 1)',
+    gmNightOrderHint: 'Appelez chaque rôle actif dans l’ordre ci-dessous.',
+    gmDayPhaseHint: 'Annoncez les résultats de la nuit puis lancez le vote.',
+    gmPlayCalloutBtn: '🔊 Jouer l’Appel',
+    gmUndoBtn: '↩️ Annuler dernière action',
+    gmResetMatchBtn: 'Réinitialiser',
+    gmConfirmResetBtn: 'Confirmer ?',
+    gmCancelBtn: 'Annuler',
+    gmDiscussTimerTitle: 'Chrono de Débat',
+    gmTimerStart: 'Démarrer',
+    gmTimerPause: 'Pause',
+    gmLynchPrompt: 'Choisissez le joueur éliminé par le vote :',
+    gmSkipLynchBtn: 'Personne d’éliminé (Nuit suivante)',
+    gmConfirmLynchBtn: 'Confirmer l’Élimination',
+    gmPlayNewMatchBtn: 'Nouvelle Partie',
+    gmScanQrTitle: 'Scannez le QR pour rejoindre la salle MJ',
+    gmUnassignedRole: 'Non assigné',
+    gmSelectRolePlaceholder: '-- En attente / Choisir Rôle --',
+    gmStepLabel: 'Étape',
+    gmNightTitlePrefix: 'Nuit',
+    gmDayTitlePrefix: 'Jour',
   },
   es: {
     appTitle: 'Leyenda de Hombres Lobo',
@@ -1572,6 +2472,46 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     gmEndGame: 'Finalizar Partida',
     soundToggle: 'Sonido',
     language: 'Idioma',
+    gmHideRoles: '🙈 Ocultar roles (Privacidad)',
+    gmShowRoles: '👁️ Mostrar roles',
+    gmHiddenMask: '••• (Oculto)',
+    gmRoomCodeQrLabel: 'Código y QR para Jugadores',
+    gmCopyCode: 'Copiar código',
+    gmCopied: 'Copiado',
+    gmZoomQr: '🔍 Ampliar QR',
+    gmCopyLink: 'Copiar enlace',
+    gmCopiedLink: 'Enlace copiado',
+    gmPlayerViewBtn: 'Vista de Jugador',
+    gmSoundboardTitle: 'Efectos de Sonido y Llamadas de Rol',
+    gmVirtualDeckTitle: 'Sin Cartas Físicas (App Reparte Roles)',
+    gmPhysicalCardsTitle: 'Cartas Físicas (Auto-registro / Narrador)',
+    gmPlayerListTitle: 'Lista de Jugadores',
+    gmCustomCount: 'Pers.:',
+    gmReshuffleRoles: 'Repartir Roles de Nuevo',
+    gmFillVillagers: 'Llenar con Aldeanos',
+    gmAddPlayerPlaceholder: 'Nombre del nuevo jugador...',
+    gmAddBtn: 'Añadir',
+    gmStartMatchBtn: 'Iniciar Partida (Ronda 1)',
+    gmNightOrderHint: 'Llama a cada rol activo en el orden de abajo.',
+    gmDayPhaseHint: 'Anuncia los resultados nocturnos y realiza la votación.',
+    gmPlayCalloutBtn: '🔊 Reproducir Llamada',
+    gmUndoBtn: '↩️ Deshacer último paso',
+    gmResetMatchBtn: 'Reiniciar Partida',
+    gmConfirmResetBtn: '¿Confirmar?',
+    gmCancelBtn: 'Cancelar',
+    gmDiscussTimerTitle: 'Temporizador de Debate',
+    gmTimerStart: 'Iniciar',
+    gmTimerPause: 'Pausa',
+    gmLynchPrompt: 'Elige al jugador linchado hoy:',
+    gmSkipLynchBtn: 'Nadie linchado (Siguiente Noche)',
+    gmConfirmLynchBtn: 'Confirmar Linchamiento',
+    gmPlayNewMatchBtn: 'Nueva Partida',
+    gmScanQrTitle: 'Escanea el QR para unirte a la sala',
+    gmUnassignedRole: 'Sin asignar',
+    gmSelectRolePlaceholder: '-- Esperando / Asignar Rol --',
+    gmStepLabel: 'Paso',
+    gmNightTitlePrefix: 'Noche',
+    gmDayTitlePrefix: 'Día',
   },
   ja: {
     appTitle: '伝説の人狼 (Werewolf)',
@@ -1625,5 +2565,45 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
     gmEndGame: 'ゲーム終了',
     soundToggle: 'サウンド',
     language: '言語',
+    gmHideRoles: '🙈 役職を隠す（覗き見防止）',
+    gmShowRoles: '👁️ 役職を表示',
+    gmHiddenMask: '•••（非表示）',
+    gmRoomCodeQrLabel: '参加者用ルームコード＆QR',
+    gmCopyCode: 'コピー',
+    gmCopied: 'コピー済',
+    gmZoomQr: '🔍 QR拡大',
+    gmCopyLink: '参加リンクをコピー',
+    gmCopiedLink: 'リンクをコピーしました',
+    gmPlayerViewBtn: 'プレイヤー画面を開く',
+    gmSoundboardTitle: '効果音＆役職点呼サウンドボード',
+    gmVirtualDeckTitle: '紙カードなし（アプリが配役）',
+    gmPhysicalCardsTitle: '紙カードあり（各自入力 / GM入力）',
+    gmPlayerListTitle: 'プレイヤー一覧',
+    gmCustomCount: '人数指定:',
+    gmReshuffleRoles: '役職を再シャッフル',
+    gmFillVillagers: '空席を村人で埋める',
+    gmAddPlayerPlaceholder: '新しいプレイヤー名を入力...',
+    gmAddBtn: '追加',
+    gmStartMatchBtn: '対面ゲームを開始（第1夜）',
+    gmNightOrderHint: '以下の順番で夜の役職を点呼してください。',
+    gmDayPhaseHint: '朝の結果を発表し、昼の投票を進行します。',
+    gmPlayCalloutBtn: '🔊 点呼ボイス再生',
+    gmUndoBtn: '↩️ 直前の操作を戻す',
+    gmResetMatchBtn: '試合をリセット',
+    gmConfirmResetBtn: 'リセット確定？',
+    gmCancelBtn: 'キャンセル',
+    gmDiscussTimerTitle: '議論タイマー',
+    gmTimerStart: '開始',
+    gmTimerPause: '一時停止',
+    gmLynchPrompt: '本日の処刑対象を選択:',
+    gmSkipLynchBtn: '処刑なし（次の夜へ）',
+    gmConfirmLynchBtn: '処刑を確定',
+    gmPlayNewMatchBtn: '新しい試合',
+    gmScanQrTitle: 'QRコードをスキャンしてGMルームへ参加',
+    gmUnassignedRole: '未割当',
+    gmSelectRolePlaceholder: '-- 入力待ち / 役職を選択 --',
+    gmStepLabel: 'ステップ',
+    gmNightTitlePrefix: '夜',
+    gmDayTitlePrefix: '昼',
   },
 };

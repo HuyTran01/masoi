@@ -80,6 +80,84 @@ function getStoredAuthToken(): string | undefined {
   }
 }
 
+interface NumericDraftInputProps
+  extends Omit<
+    React.InputHTMLAttributes<HTMLInputElement>,
+    'type' | 'value' | 'onChange' | 'min' | 'max'
+  > {
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (next: number) => void;
+}
+
+const NumericDraftInput: React.FC<NumericDraftInputProps> = ({
+  value,
+  min,
+  max,
+  onCommit,
+  onBlur,
+  onFocus,
+  onKeyDown,
+  ...rest
+}) => {
+  const [draft, setDraft] = useState<string>(String(value));
+  const [focused, setFocused] = useState<boolean>(false);
+  const skipNextBlurRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!focused) setDraft(String(value));
+  }, [value, focused]);
+
+  const commit = (raw: string) => {
+    const parsed = parseInt(raw, 10);
+    if (Number.isNaN(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+    const clamped = Math.max(min, Math.min(max, parsed));
+    setDraft(String(clamped));
+    if (clamped !== value) onCommit(clamped);
+  };
+
+  return (
+    <input
+      {...rest}
+      type="number"
+      min={min}
+      max={max}
+      value={draft}
+      onFocus={(e) => {
+        skipNextBlurRef.current = false;
+        setFocused(true);
+        onFocus?.(e);
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={(e) => {
+        setFocused(false);
+        if (skipNextBlurRef.current) {
+          skipNextBlurRef.current = false;
+        } else {
+          commit(e.currentTarget.value);
+        }
+        onBlur?.(e);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          skipNextBlurRef.current = true;
+          commit(e.currentTarget.value);
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          skipNextBlurRef.current = true;
+          setDraft(String(value));
+          e.currentTarget.blur();
+        }
+        onKeyDown?.(e);
+      }}
+    />
+  );
+};
+
 export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   isOpen,
   lang,
@@ -112,6 +190,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   const [openGMRooms, setOpenGMRooms] = useState<GMRoomSummary[]>([]);
   const [gmDeckMode, setGmDeckMode] = useState<GMDeckMode>('virtual_deck');
   const [isJoining, setIsJoining] = useState<boolean>(false);
+  const [isStarting, setIsStarting] = useState<boolean>(false);
   const [connectTimedOut, setConnectTimedOut] = useState<boolean>(false);
 
   const launchedRef = useRef(false);
@@ -128,6 +207,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   });
   const joinTimeoutRef = useRef<number | null>(null);
   const connectTimeoutRef = useRef<number | null>(null);
+  const startTimeoutRef = useRef<number | null>(null);
 
   const t = UI_TEXT[lang];
 
@@ -135,6 +215,13 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     if (joinTimeoutRef.current !== null) {
       window.clearTimeout(joinTimeoutRef.current);
       joinTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearStartTimeout = useCallback(() => {
+    if (startTimeoutRef.current !== null) {
+      window.clearTimeout(startTimeoutRef.current);
+      startTimeoutRef.current = null;
     }
   }, []);
 
@@ -167,7 +254,9 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     if (!isOpen) return;
     launchedRef.current = false;
     pendingJoinCodeRef.current = null;
+    clearStartTimeout();
     setIsJoining(false);
+    setIsStarting(false);
     setConnectTimedOut(false);
     setModeTab(initialMode);
     if (initialMode === 'gm' || !liveRoomRef.current) {
@@ -182,7 +271,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     setJoinError('');
     fetchOpenOnlineRooms();
     fetchOpenGMRooms();
-  }, [initialMode, isOpen, fetchOpenOnlineRooms, fetchOpenGMRooms]);
+  }, [initialMode, isOpen, fetchOpenOnlineRooms, fetchOpenGMRooms, clearStartTimeout]);
 
   // Subscribe to real WebSocket/HTTP room events while modal is open
   useEffect(() => {
@@ -195,6 +284,8 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     ) => {
       if (launchedRef.current) return;
       clearJoinTimeout();
+      clearStartTimeout();
+      setIsStarting(false);
       launchedRef.current = true;
       sound.playNightBell();
       const mapped: LobbyParticipant[] = room.participants.map((p) => ({
@@ -225,14 +316,14 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         setOpenGMRooms(evt.rooms);
       } else if (evt.type === 'room:state') {
         clearJoinTimeout();
-        // Drop late room:state from a solo auto-created room if user already switched to Join tab
+        const prevRoom = liveRoomRef.current;
         if (
-          actionTabRef.current === 'join' &&
-          !pendingJoinCodeRef.current &&
-          evt.room.hostId === currentUser.id
+          pendingJoinCodeRef.current &&
+          evt.room.code === pendingJoinCodeRef.current &&
+          prevRoom &&
+          prevRoom.code !== evt.room.code
         ) {
-          realtimeClient.leaveRoom(evt.room.code, currentUser.id);
-          return;
+          realtimeClient.leaveRoom(prevRoom.code, currentUser.id);
         }
         setConnectTimedOut(false);
         setLiveRoom(evt.room);
@@ -258,13 +349,15 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         }
       } else if (evt.type === 'room:kicked' && evt.targetId === currentUser.id) {
         clearJoinTimeout();
+        clearStartTimeout();
         isJoinedGuestRoomRef.current = false;
         pendingJoinCodeRef.current = null;
         setIsJoining(false);
+        setIsStarting(false);
         setLiveRoom(null);
         setActionTab('join');
         setJoinError(evt.reason);
-        setLobbyNotice(evt.reason);
+        setLobbyNotice('');
         realtimeClient.requestRoomList();
       } else if (evt.type === 'room:match_started' && !launchedRef.current) {
         launchRoomMatch(evt.room);
@@ -277,12 +370,18 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         launchRoomMatch(liveRoomRef.current, evt.view, evt.serverNow);
       } else if (evt.type === 'error') {
         clearJoinTimeout();
+        clearStartTimeout();
+        setIsStarting(false);
+        const wasJoining = Boolean(pendingJoinCodeRef.current);
         if (pendingJoinCodeRef.current) {
           pendingJoinCodeRef.current = null;
           setIsJoining(false);
         }
-        setJoinError(evt.message);
-        setLobbyNotice(evt.message);
+        if (actionTabRef.current === 'join' || wasJoining) {
+          setJoinError(evt.message);
+        } else {
+          setLobbyNotice(evt.message);
+        }
       }
     });
 
@@ -292,18 +391,34 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
 
     return () => {
       clearJoinTimeout();
+      clearStartTimeout();
       unsubStatus();
       unsubTransport();
       unsubEvents();
     };
-  }, [isOpen, currentUser.id, onLaunchOnlineRoom, fetchOpenOnlineRooms, fetchOpenGMRooms, clearJoinTimeout]);
+  }, [
+    isOpen,
+    currentUser.id,
+    onLaunchOnlineRoom,
+    fetchOpenOnlineRooms,
+    fetchOpenGMRooms,
+    clearJoinTimeout,
+    clearStartTimeout,
+  ]);
 
-  // Automatically create the Host's own online room ONLY when on Create tab and NOT joining via invite code
+  // Automatically create the Host's own online room ONLY when on Create tab and NOT already in that room
   useEffect(() => {
     if (!isOpen || modeTab !== 'online' || actionTab !== 'create') return;
     if (isJoinedGuestRoomRef.current || pendingJoinCodeRef.current) return;
     if (liveRoomRef.current && liveRoomRef.current.hostId !== currentUser.id) return;
     if (!createdRoomId.startsWith('ONL-')) return;
+    if (
+      liveRoomRef.current &&
+      liveRoomRef.current.code === createdRoomId &&
+      liveRoomRef.current.participants.some((p) => p.id === currentUser.id)
+    ) {
+      return;
+    }
 
     preservedCodesRef.current.online = createdRoomId;
     autoCreatedCodeRef.current = createdRoomId;
@@ -347,6 +462,19 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     currentUser.avatar,
     currentUser.elo,
   ]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isStarting) {
+        clearJoinTimeout();
+        setIsJoining(false);
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isStarting, clearJoinTimeout, onClose]);
 
   if (!isOpen) return null;
 
@@ -393,6 +521,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
 
   const leaveActiveOnlineRoomIfAny = () => {
     clearJoinTimeout();
+    clearStartTimeout();
     const activeCode = liveRoomRef.current?.code || autoCreatedCodeRef.current;
     if (activeCode && !launchedRef.current) {
       realtimeClient.leaveRoom(activeCode, currentUser.id);
@@ -401,11 +530,14 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     isJoinedGuestRoomRef.current = false;
     pendingJoinCodeRef.current = null;
     setIsJoining(false);
+    setIsStarting(false);
     setLiveRoom(null);
+    liveRoomRef.current = null;
   };
 
   // BUG-26: Closing the modal preserves the active/created room code unless user clicks "Rời phòng"
   const handleCloseModal = () => {
+    if (isStarting) return;
     clearJoinTimeout();
     setIsJoining(false);
     onClose();
@@ -436,6 +568,9 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   const handleLeaveJoinedRoom = () => {
     sound.playCardFlip();
     leaveActiveOnlineRoomIfAny();
+    const nextOnlineCode = generateRoomCode('ONL-');
+    preservedCodesRef.current.online = nextOnlineCode;
+    setCreatedRoomId(nextOnlineCode);
     setLobbyNotice('');
     setJoinError('');
     setActionTab('join');
@@ -490,6 +625,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   };
 
   const handleStartOnlineClick = () => {
+    if (isStarting) return;
     if (!isHost || !liveRoom) {
       setLobbyNotice(
         lang === 'vi'
@@ -502,6 +638,12 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
       setLobbyNotice(t.minPlayersWarning(participants.length));
       return;
     }
+    setIsStarting(true);
+    setLobbyNotice('');
+    clearStartTimeout();
+    startTimeoutRef.current = window.setTimeout(() => {
+      setIsStarting(false);
+    }, 8000);
     realtimeClient.startMatch(liveRoom.code, currentUser.id);
   };
 
@@ -588,13 +730,18 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-label={modeTab === 'online' ? t.lobbyOnlineTitle : t.lobbyGMTitle}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isStarting) {
+          handleCloseModal();
+        }
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-5 pointer-events-auto"
       style={{ backgroundColor: 'rgba(4, 7, 15, 0.9)' }}
       data-testid="room-lobby-modal"
     >
       <div className="w-full max-w-2xl bg-[#0b1120] border-2 border-amber-500/60 rounded-3xl p-4 sm:p-6 shadow-2xl space-y-3.5 max-h-[92vh] overflow-y-auto">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-800 pb-3 gap-2">
+        {/* Header (sticky so Close × stays reachable on 390×844 mobile) */}
+        <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 -mt-4 sm:-mt-6 px-4 sm:px-6 pt-4 sm:pt-5 pb-3 bg-[#0b1120]/95 backdrop-blur-sm flex items-center justify-between border-b border-slate-800 gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="p-2.5 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-400 shrink-0">
               {modeTab === 'online' ? <Globe className="w-5 h-5" /> : <Shield className="w-5 h-5" />}
@@ -638,8 +785,9 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
 
           <button
             type="button"
+            disabled={isStarting}
             onClick={handleCloseModal}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer shrink-0"
+            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 cursor-pointer shrink-0"
             aria-label="Close"
           >
             <X className="w-4 h-4" />
@@ -647,27 +795,27 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         </div>
 
         {/* Mode Switcher */}
-        <div className="grid grid-cols-2 gap-2 bg-[#070a14] p-1.5 rounded-2xl border border-slate-800">
+        <div className="grid grid-cols-2 gap-1.5 sm:gap-2 bg-[#070a14] p-1 sm:p-1.5 rounded-2xl border border-slate-800">
           <button
             type="button"
             onClick={() => {
               sound.playCardFlip();
               if (modeTab === 'online') return;
-              leaveActiveOnlineRoomIfAny();
               setModeTab('online');
               setActionTab('create');
-              setCreatedRoomId(preservedCodesRef.current.online);
+              setCreatedRoomId(liveRoomRef.current?.code || preservedCodesRef.current.online);
               setJoinError('');
               setLobbyNotice('');
             }}
-            className={`py-2.5 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer ${
+            className={`py-2 px-2 sm:py-2.5 sm:px-3 rounded-xl text-[11px] sm:text-xs font-extrabold flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer whitespace-nowrap ${
               modeTab === 'online'
                 ? 'bg-rose-600 text-white shadow-lg'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Globe className="w-4 h-4 shrink-0" />
-            <span className="truncate">{t.tabOnline3D}</span>
+            <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+            <span className="sm:hidden">{lang === 'vi' ? '1. Online 3D' : '1. Online 3D'}</span>
+            <span className="hidden sm:inline truncate">{t.tabOnline3D}</span>
           </button>
 
           <button
@@ -675,7 +823,6 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
             onClick={() => {
               sound.playCardFlip();
               if (modeTab === 'gm') return;
-              leaveActiveOnlineRoomIfAny();
               setModeTab('gm');
               setActionTab('create');
               setCreatedRoomId(preservedCodesRef.current.gm);
@@ -683,14 +830,15 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
               setLobbyNotice('');
               fetchOpenGMRooms();
             }}
-            className={`py-2.5 px-3 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 cursor-pointer ${
+            className={`py-2 px-2 sm:py-2.5 sm:px-3 rounded-xl text-[11px] sm:text-xs font-extrabold flex items-center justify-center gap-1.5 sm:gap-2 cursor-pointer whitespace-nowrap ${
               modeTab === 'gm'
                 ? 'bg-amber-500 text-slate-950 shadow-lg'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Shield className="w-4 h-4 shrink-0" />
-            <span className="truncate">{t.tabGMOffline}</span>
+            <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+            <span className="sm:hidden">{lang === 'vi' ? '2. Quản Trò' : '2. GM Tool'}</span>
+            <span className="hidden sm:inline truncate">{t.tabGMOffline}</span>
           </button>
         </div>
 
@@ -740,28 +888,29 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
           </div>
         ) : (
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 data-testid="lobby-subtab-create"
                 onClick={() => {
                   sound.playCardFlip();
-                  isJoinedGuestRoomRef.current = false;
+                  clearJoinTimeout();
                   pendingJoinCodeRef.current = null;
                   setIsJoining(false);
-                  if (modeTab === 'online' && !liveRoom) {
-                    setCreatedRoomId(generateRoomCode('ONL-'));
+                  if (modeTab === 'online') {
+                    setCreatedRoomId(liveRoomRef.current?.code || preservedCodesRef.current.online);
                   }
                   setActionTab('create');
                   setJoinError('');
+                  setLobbyNotice('');
                 }}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
+                className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
                   actionTab === 'create'
                     ? 'bg-amber-500/20 border border-amber-400 text-amber-200'
                     : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <Plus className="w-4 h-4" />
+                <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
                 <span>{t.subTabCreate}</span>
               </button>
 
@@ -770,35 +919,43 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                 data-testid="lobby-subtab-join"
                 onClick={() => {
                   sound.playCardFlip();
-                  if (modeTab === 'online') {
-                    // Leave auto-created solo room so open room list stays clean
-                    leaveActiveOnlineRoomIfAny();
-                  }
                   setActionTab('join');
                   setJoinError('');
                   setLobbyNotice('');
                   realtimeClient.requestRoomList();
                   fetchOpenGMRooms();
                 }}
-                className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
+                className={`px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold flex items-center gap-1.5 cursor-pointer ${
                   actionTab === 'join'
                     ? 'bg-sky-500/20 border border-sky-400 text-sky-200'
                     : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-slate-200'
                 }`}
               >
-                <LogIn className="w-4 h-4" />
+                <LogIn className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
                 <span>{t.subTabJoin}</span>
               </button>
             </div>
 
             {isInJoinedOnlineRoom && isHost && (
-              <span
-                data-testid="lobby-host-badge"
-                className="px-2.5 py-1 rounded-lg bg-amber-950/70 border border-amber-500/40 text-[11px] font-bold text-amber-300 flex items-center gap-1"
-              >
-                <Crown className="w-3.5 h-3.5" />
-                <span>{lang === 'vi' ? 'Chủ phòng' : 'Room Host'}</span>
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span
+                  data-testid="lobby-host-badge"
+                  className="px-2.5 py-1 rounded-lg bg-amber-950/70 border border-amber-500/40 text-[11px] font-bold text-amber-300 flex items-center gap-1"
+                >
+                  <Crown className="w-3.5 h-3.5" />
+                  <span>{lang === 'vi' ? 'Chủ phòng' : 'Room Host'}</span>
+                </span>
+                <button
+                  type="button"
+                  data-testid="lobby-leave-room-btn"
+                  disabled={isStarting}
+                  onClick={handleLeaveJoinedRoom}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 border border-slate-700 text-[11px] font-bold text-slate-200 flex items-center gap-1 cursor-pointer"
+                >
+                  <LogOut className="w-3 h-3" />
+                  <span>{lang === 'vi' ? 'Rời phòng' : 'Leave Room'}</span>
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -875,17 +1032,13 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                       >
                         <Minus className="w-3 h-3" />
                       </button>
-                      <input
-                        type="number"
-                        min={4}
+                      <NumericDraftInput
+                        min={modeTab === 'online' ? Math.max(4, humanCount) : 4}
                         max={20}
                         data-testid="lobby-custom-size-input"
                         aria-label={lang === 'vi' ? 'Số ghế tối đa' : 'Maximum seats'}
                         value={effectiveSize}
-                        onChange={(e) => {
-                          const val = parseInt(e.target.value, 10);
-                          if (!Number.isNaN(val)) handleChangeSize(val);
-                        }}
+                        onCommit={handleChangeSize}
                         className="w-10 text-center bg-slate-950 border border-slate-700 rounded py-0.5 text-xs font-mono font-extrabold text-amber-300 focus:outline-none"
                       />
                       <button
@@ -971,8 +1124,8 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                   <p className="text-[11px] text-slate-400">
                     {isHost
                       ? lang === 'vi'
-                        ? `Gửi mã ${activeRoomCode} cho bạn bè ở thiết bị khác nhập tại tab "Vào Phòng" để cùng chơi trực tuyến thời gian thực.`
-                        : `Share code ${activeRoomCode} with friends on other devices to join this live WebSocket room.`
+                        ? `Gửi mã ${activeRoomCode} cho bạn bè ở thiết bị khác nhập tại tab "Nhập Mã Phòng Để Vào" để cùng chơi trực tuyến thời gian thực.`
+                        : `Share code ${activeRoomCode} with friends on other devices to enter in "Join with Room Code" and play live.`
                       : lang === 'vi'
                       ? 'Danh sách thành viên và cấu hình phòng được đồng bộ trực tiếp từ Chủ phòng.'
                       : 'Participant list and room rules are synced live from the Room Host.'}
@@ -1127,20 +1280,16 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                             <span className="text-slate-300 font-semibold">
                               🌙 {lang === 'vi' ? 'Đêm:' : 'Night:'}
                             </span>
-                            <input
-                              type="number"
+                            <NumericDraftInput
                               min={5}
                               max={120}
                               value={effectiveTimer.nightActionSec}
-                              onChange={(e) => {
-                                const v = parseInt(e.target.value, 10);
-                                if (!Number.isNaN(v)) {
-                                  handleChangeTimers({
-                                    ...timerConfig,
-                                    nightActionSec: Math.max(5, Math.min(120, v)),
-                                  });
-                                }
-                              }}
+                              onCommit={(v) =>
+                                handleChangeTimers({
+                                  ...timerConfig,
+                                  nightActionSec: v,
+                                })
+                              }
                               className="w-12 text-center bg-slate-950 border border-slate-700 rounded py-0.5 font-mono font-bold text-amber-300"
                             />
                           </label>
@@ -1148,20 +1297,16 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                             <span className="text-slate-300 font-semibold">
                               ☀️ {lang === 'vi' ? 'Thảo luận:' : 'Debate:'}
                             </span>
-                            <input
-                              type="number"
+                            <NumericDraftInput
                               min={10}
                               max={300}
                               value={effectiveTimer.dayDiscussSec}
-                              onChange={(e) => {
-                                const v = parseInt(e.target.value, 10);
-                                if (!Number.isNaN(v)) {
-                                  handleChangeTimers({
-                                    ...timerConfig,
-                                    dayDiscussSec: Math.max(10, Math.min(300, v)),
-                                  });
-                                }
-                              }}
+                              onCommit={(v) =>
+                                handleChangeTimers({
+                                  ...timerConfig,
+                                  dayDiscussSec: v,
+                                })
+                              }
                               className="w-12 text-center bg-slate-950 border border-slate-700 rounded py-0.5 font-mono font-bold text-amber-300"
                             />
                           </label>
@@ -1169,20 +1314,16 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                             <span className="text-slate-300 font-semibold">
                               ⚖️ {lang === 'vi' ? 'Bỏ phiếu:' : 'Vote:'}
                             </span>
-                            <input
-                              type="number"
+                            <NumericDraftInput
                               min={10}
                               max={180}
                               value={effectiveTimer.dayVoteSec}
-                              onChange={(e) => {
-                                const v = parseInt(e.target.value, 10);
-                                if (!Number.isNaN(v)) {
-                                  handleChangeTimers({
-                                    ...timerConfig,
-                                    dayVoteSec: Math.max(10, Math.min(180, v)),
-                                  });
-                                }
-                              }}
+                              onCommit={(v) =>
+                                handleChangeTimers({
+                                  ...timerConfig,
+                                  dayVoteSec: v,
+                                })
+                              }
                               className="w-12 text-center bg-slate-950 border border-slate-700 rounded py-0.5 font-mono font-bold text-amber-300"
                             />
                           </label>
@@ -1195,23 +1336,27 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                 <button
                   type="button"
                   data-testid="lobby-start-online-btn"
-                  disabled={!isHost || isHostSyncing}
+                  disabled={!isHost || isHostSyncing || isStarting}
                   onClick={handleStartOnlineClick}
                   className={`w-full py-3.5 rounded-2xl font-extrabold text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 ${
-                    isHost && !isHostSyncing
+                    isHost && !isHostSyncing && !isStarting
                       ? 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
                       : 'bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed'
                   }`}
                 >
-                  {isHost && !isHostSyncing ? (
+                  {isHost && !isHostSyncing && !isStarting ? (
                     <Play className="w-4 h-4 fill-white" />
-                  ) : isHostSyncing ? (
+                  ) : isHostSyncing || isStarting ? (
                     <RefreshCw className="w-4 h-4 animate-spin" />
                   ) : (
                     <Lock className="w-4 h-4" />
                   )}
                   <span>
-                    {isHostSyncing
+                    {isStarting
+                      ? lang === 'vi'
+                        ? 'Đang bắt đầu ván đấu...'
+                        : 'Starting match...'
+                      : isHostSyncing
                       ? lang === 'vi'
                         ? 'Đang đồng bộ phòng với máy chủ...'
                         : 'Syncing room with server...'
@@ -1286,8 +1431,8 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                   </p>
                   <p>
                     {lang === 'vi'
-                      ? `2. Người chơi nhập mã ${createdRoomId} ở tab "Vào Phòng" — chỉ xem được mỗi vai trò của mình hoặc tự nhập bài trước khi bắt đầu.`
-                      : `2. Players enter ${createdRoomId} in "Join Room" to view ONLY their own secret role or enter their physical card.`}
+                      ? `2. Người chơi nhập mã ${createdRoomId} ở tab "Nhập Mã Phòng Để Vào" — chỉ xem được mỗi vai trò của mình hoặc tự nhập bài trước khi bắt đầu.`
+                      : `2. Players enter ${createdRoomId} in "Join with Room Code" to view ONLY their own secret role or enter their physical card.`}
                   </p>
                 </div>
 

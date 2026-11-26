@@ -21,6 +21,7 @@ interface NightActionConsoleProps {
   seerInspectResult: string | null;
   cupidLovers: [string, string] | null;
   isOnlineWaitingConfirm?: boolean;
+  isSeerInspectPending?: boolean;
   canAdvanceBotStep?: boolean;
   wolfPackPicks?: Record<string, { primary?: string; secondary?: string }> | null;
   onSelectWitchHealTarget: (victimId: string | null) => void;
@@ -46,6 +47,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
   seerInspectResult,
   cupidLovers,
   isOnlineWaitingConfirm = false,
+  isSeerInspectPending = false,
   canAdvanceBotStep = true,
   wolfPackPicks = null,
   onSelectWitchHealTarget,
@@ -68,7 +70,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
         <span className="truncate font-extrabold text-[#fff8ed]">
           {ROLES[currentNightStep.roleId].name[lang]}
         </span>
-        {canAdvanceBotStep ? (
+        {!me.isAlive && canAdvanceBotStep ? (
           <button
             type="button"
             data-testid="auto-gm-next-step-btn"
@@ -76,7 +78,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
             className="px-2.5 py-0.5 rounded-lg bg-[#b84b10] hover:bg-[#9e3f0c] text-white font-extrabold text-[10px] flex items-center gap-1 cursor-pointer shrink-0"
           >
             <CheckCircle2 className="w-3 h-3" />
-            <span>{lang === 'vi' ? 'Tiếp' : 'Next'}</span>
+            <span>{t.nextShort}</span>
           </button>
         ) : (
           <span className="text-[10px] font-mono font-bold text-[#fde7c3] shrink-0">
@@ -87,25 +89,35 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
     );
   }
 
-  const hasSelectedAction = Boolean(
-    selectedTargetId ||
-      seerInspectResult ||
-      witchHealTargetId ||
-      witchPoisonTargetId ||
-      (me.roleId === 'cupid' && cupidLovers && cupidLovers[0] && cupidLovers[1])
-  );
+  const cupidSelectedIds =
+    me.roleId === 'cupid' && currentNightStep.key === 'cupid'
+      ? (cupidLovers || []).filter((id): id is string => Boolean(id))
+      : [];
+  const cupidDistinctCount = new Set(cupidSelectedIds).size;
+  const isCupidIncomplete =
+    me.roleId === 'cupid' && currentNightStep.key === 'cupid' && cupidDistinctCount < 2;
+
+  const hasSelectedAction =
+    me.roleId === 'cupid' && currentNightStep.key === 'cupid'
+      ? cupidDistinctCount === 2
+      : Boolean(
+          selectedTargetId ||
+            seerInspectResult ||
+            witchHealTargetId ||
+            witchPoisonTargetId
+        );
 
   const witchActionParts: string[] = [];
   if (me.roleId === 'witch' && witchHealTargetId) {
     const healedName = players.find((p) => p.id === witchHealTargetId)?.name || '';
     if (healedName) {
-      witchActionParts.push(`${lang === 'vi' ? 'Bình Cứu' : 'Heal'}: ${healedName}`);
+      witchActionParts.push(`🧪+ ${healedName}`);
     }
   }
   if (me.roleId === 'witch' && witchPoisonTargetId) {
     const poisonedName = players.find((p) => p.id === witchPoisonTargetId)?.name || '';
     if (poisonedName) {
-      witchActionParts.push(`${lang === 'vi' ? 'Bình Độc' : 'Poison'}: ${poisonedName}`);
+      witchActionParts.push(`☠️ ${poisonedName}`);
     }
   }
 
@@ -141,7 +153,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
       ? Object.entries(wolfPackPicks)
           .filter(([wolfId, pick]) => wolfId !== me.id && (pick.primary || pick.secondary))
           .map(([wolfId, pick]) => {
-            const wolfName = players.find((p) => p.id === wolfId)?.name || 'Sói';
+            const wolfName = players.find((p) => p.id === wolfId)?.name || ROLES.werewolf.name[lang];
             const targets = [pick.primary, pick.secondary]
               .filter((id): id is string => Boolean(id))
               .map((id) => players.find((p) => p.id === id)?.name)
@@ -160,7 +172,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="px-1.5 py-0.5 rounded bg-[#b84b10] text-white font-black text-[10px] uppercase shrink-0">
-            {lang === 'vi' ? 'Lượt bạn' : 'Your Turn'}
+            {t.yourTurnBadge}
           </span>
           <span className="text-xs sm:text-sm font-black text-[#fde7c3] truncate">
             {myRole.name[lang]}
@@ -189,27 +201,25 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
           <button
             type="button"
             data-testid="role-console-confirm-btn"
-            disabled={isOnlineWaitingConfirm}
+            disabled={isOnlineWaitingConfirm || isCupidIncomplete}
             onClick={onConfirmNightAction}
             className={`px-2.5 py-1 rounded-xl border font-extrabold text-[11px] sm:text-xs flex items-center gap-1 shadow ${
               isOnlineWaitingConfirm
                 ? 'bg-[#1c3621] border-[#6ee7b7]/60 text-[#bbf7d0] cursor-default'
+                : isCupidIncomplete
+                ? 'bg-[#3a2819] border-[#785334] text-[#d6bfa2] opacity-80 cursor-not-allowed'
                 : 'bg-[#2f7d4d] hover:bg-[#38945b] border-[#86efac]/70 text-white cursor-pointer'
             }`}
           >
             <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
             <span>
               {isOnlineWaitingConfirm
-                ? lang === 'vi'
-                  ? '✓ Đã xác nhận — chờ người khác...'
-                  : '✓ Confirmed — waiting for others...'
+                ? t.confirmedWaiting
+                : isCupidIncomplete
+                ? `💘 ${t.loverLabel} (${cupidDistinctCount}/2)`
                 : hasSelectedAction
-                ? lang === 'vi'
-                  ? 'Xác Nhận & Kết Thúc Đêm'
-                  : 'Confirm & End Night'
-                : lang === 'vi'
-                ? 'Qua Đêm'
-                : 'End Night'}
+                ? t.confirmAndEndNight
+                : t.skipNightBtn}
             </span>
           </button>
         </div>
@@ -222,13 +232,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
           data-testid="role-console-timeout-cue"
           className="px-2.5 py-1 rounded-lg bg-[#4a2b10] border border-[#f5b82e] text-[#fef3c7] text-[11px] font-extrabold"
         >
-          {isOnlineWaitingConfirm
-            ? lang === 'vi'
-              ? '⏳ Đã xác nhận — đang chờ người chơi khác...'
-              : '⏳ Confirmed — waiting for other players...'
-            : lang === 'vi'
-            ? '⏳ Hết giờ — bấm Xác Nhận để tiếp tục'
-            : '⏳ Time is up — press Confirm to continue'}
+          {isOnlineWaitingConfirm ? t.confirmedWaiting : t.timeUpConfirmCue}
         </div>
       )}
 
@@ -238,19 +242,14 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
           data-testid="role-console-wolf-pack-picks"
           className="px-2.5 py-1 rounded-lg bg-[#3b1518] border border-rose-500/60 text-rose-200 text-[11px] font-bold"
         >
-          🐺 {lang === 'vi' ? 'Đồng đội Sói chọn:' : 'Packmates picked:'}{' '}
-          {packmatePickLabels.join(' · ')}
+          🐺 {t.packmatesPicked} {packmatePickLabels.join(' · ')}
         </div>
       )}
 
       {/* Clear 1-Line Instruction */}
       <p className="text-[11px] text-[#e6d5b8] leading-snug">
         {currentNightStep.playerInstruction[lang]}{' '}
-        <span className="text-[#f5b82e] font-semibold">
-          {lang === 'vi'
-            ? '(Bấm vào nhân vật 3D hoặc thanh bên dưới)'
-            : '(Tap a 3D villager or bottom dock)'}
-        </span>
+        <span className="text-[#f5b82e] font-semibold">{t.tapTargetHint}</span>
       </p>
 
       {/* Witch Heal & Poison Controls — STRICT ZERO META-LEAK: Only show genuinely dying wolf victims */}
@@ -259,18 +258,10 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2 bg-[#1c3621] border border-[#5cb85c]/60 rounded-xl px-2.5 py-1.5">
             <span className="text-[11px] text-[#dcfce7] font-bold">
               {isHealUnavailable
-                ? lang === 'vi'
-                  ? '🧪 Bình Cứu đã dùng hết — Không thể thấy nạn nhân bị Sói cắn đêm nay'
-                  : '🧪 Heal potion depleted — Tonight’s wolf victim is hidden'
+                ? t.witchHealDepletedDesc
                 : dyingVictimPlayers.length === 0
-                ? lang === 'vi'
-                  ? '🐺 Đêm nay không có nạn nhân nào nguy kịch vì vết cắn Sói'
-                  : '🐺 No fatal werewolf victim tonight'
-                : `🐺 ${
-                    lang === 'vi'
-                      ? `Bị Sói cắn: ${dyingVictimPlayers.map((v) => v.name).join(' & ')}`
-                      : `Bitten: ${dyingVictimPlayers.map((v) => v.name).join(' & ')}`
-                  }`}
+                ? t.witchNoFatalVictim
+                : `🐺 ${t.bittenPrefix} ${dyingVictimPlayers.map((v) => v.name).join(' & ')}`}
             </span>
 
             <div className="flex flex-wrap items-center gap-1.5">
@@ -285,9 +276,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
                   <span>
                     {me.hasUsedHeal || me.hasUsedPower
                       ? t.witchOutHeal
-                      : lang === 'vi'
-                      ? 'Không có ai để cứu'
-                      : 'No victim to heal'}
+                      : t.noVictimToHeal}
                   </span>
                 </button>
               ) : (
@@ -334,21 +323,15 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
               }`}
             >
               {me.hasUsedPower
-                ? lang === 'vi'
-                  ? '🧪 Bình độc đã bị phong ấn'
-                  : '🧪 Poison potion sealed'
+                ? t.poisonSealed
                 : me.hasUsedPoison
-                ? lang === 'vi'
-                  ? '🧪 Đã dùng bình độc'
-                  : '🧪 Poison Used'
-                : lang === 'vi'
-                ? '🧪 Còn bình độc'
-                : '🧪 Poison Ready'}
+                ? `🧪 ${t.witchOutPoison}`
+                : t.poisonReady}
             </span>
             {!isPoisonUnavailable && (
               <span className="text-[10px] text-purple-300 font-semibold truncate">
                 {witchPoisonTargetId
-                  ? `${lang === 'vi' ? 'Đang chọn:' : 'Target:'} ${
+                  ? `${t.selectedPrefix} ${
                       players.find((p) => p.id === witchPoisonTargetId)?.name || ''
                     }`
                   : t.witchPoisonHint}
@@ -373,7 +356,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
           className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-[#2c193a] border border-[#c084fc]/80"
         >
           <span className="text-xs font-bold text-[#f3e8ff]">
-            🔮 {lang === 'vi' ? 'Đang ngắm soi:' : 'Target selected:'}{' '}
+            🔮 {t.seerTargetPending}{' '}
             <strong className="text-[#fde047]">
               {players.find((p) => p.id === selectedTargetId)?.name || ''}
             </strong>
@@ -381,10 +364,15 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
           <button
             type="button"
             data-testid="role-console-seer-confirm-btn"
+            disabled={isSeerInspectPending}
             onClick={onConfirmSeerInspect}
-            className="px-3 py-1 rounded-lg bg-[#9333ea] hover:bg-[#a855f7] border border-[#e9d5ff]/70 text-white text-xs font-extrabold cursor-pointer shadow"
+            className={`px-3 py-1 rounded-lg border text-white text-xs font-extrabold shadow ${
+              isSeerInspectPending
+                ? 'bg-[#581c87] border-[#c084fc]/50 opacity-75 cursor-wait'
+                : 'bg-[#9333ea] hover:bg-[#a855f7] border-[#e9d5ff]/70 cursor-pointer'
+            }`}
           >
-            🔮 {lang === 'vi' ? 'Xác Nhận Soi' : 'Confirm Inspect'}
+            🔮 {isSeerInspectPending ? `${t.seerConfirmBtn}...` : t.seerConfirmBtn}
           </button>
         </div>
       ) : (
@@ -394,7 +382,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
             data-testid="role-console-selected-status"
             className="px-2.5 py-1 rounded-lg bg-[#422614] border border-[#e89c3e] text-[#fef3c7] text-[11px] font-bold"
           >
-            🎯 {lang === 'vi' ? 'Đã chọn:' : 'Selected:'} {selectedSummary}
+            🎯 {t.selectedPrefix} {selectedSummary}
           </div>
         )
       )}

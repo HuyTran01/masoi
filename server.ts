@@ -460,9 +460,6 @@ async function startServer() {
           }
 
           const meta = socketMeta.get(ws);
-          if (meta && meta.roomCode && meta.roomCode !== code) {
-            detachSocketFromRoom(ws);
-          }
 
           const result = roomManager.createOrJoinRoom(
             code,
@@ -485,6 +482,11 @@ async function startServer() {
           if (!result.ok) {
             sendJson(ws, { type: 'error', message: result.error });
             return;
+          }
+
+          // Only leave the previous room after the new join succeeds so failed room codes keep the active room intact.
+          if (meta && meta.roomCode && meta.roomCode !== result.room.code) {
+            detachSocketFromRoom(ws);
           }
 
           roomManager.getOrIssuePlayerSecret(result.room.code, cleanUserId);

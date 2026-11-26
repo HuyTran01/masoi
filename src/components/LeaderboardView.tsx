@@ -1,34 +1,117 @@
 import React from 'react';
 import { Trophy, TrendingUp } from 'lucide-react';
-import { LeaderboardUser, Language } from '../types/game';
-import { loadLeaderboard } from '../utils/storage';
+import { LeaderboardUser, Language, RoleId } from '../types/game';
+import { loadHistory, loadLeaderboard } from '../utils/storage';
 import { ROLES } from '../game/roles';
 import { TRANSLATIONS } from '../utils/i18n';
 
 interface LeaderboardViewProps {
   lang: Language;
+  users?: LeaderboardUser[];
 }
 
-export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ lang }) => {
+const DEMO_LEADERBOARD_IDS = new Set([
+  'user_1',
+  'user_2',
+  'user_3',
+  'user_4',
+  'user_5',
+  'user_6',
+]);
+const DEMO_HISTORY_IDS = new Set(['match_1092', 'match_1091']);
+
+function buildLocalSessionUser(isVi: boolean): LeaderboardUser | null {
+  try {
+    const realHistory = loadHistory().filter((r) => !DEMO_HISTORY_IDS.has(r.id));
+    const rawUser = localStorage.getItem('werewolf_user');
+    const parsed = rawUser ? JSON.parse(rawUser) : null;
+    const savedMatches = typeof parsed?.matchesPlayed === 'number' ? parsed.matchesPlayed : 0;
+    const matchesPlayed = Math.max(savedMatches, realHistory.length);
+    if (matchesPlayed <= 0) return null;
+
+    const wins =
+      typeof parsed?.wins === 'number' ? Math.min(matchesPlayed, Math.max(0, parsed.wins)) : 0;
+    const winRate = Number(((wins / matchesPlayed) * 100).toFixed(1));
+    const roleCounts = new Map<RoleId, number>();
+    const playerName =
+      typeof parsed?.name === 'string' && parsed.name.trim()
+        ? parsed.name.trim()
+        : isVi
+        ? 'Bạn'
+        : 'You';
+    for (const rec of realHistory) {
+      const entry = rec.roster.find((p) => p.name === playerName) || rec.roster[0];
+      if (entry?.roleId && entry.roleId in ROLES) {
+        roleCounts.set(entry.roleId, (roleCounts.get(entry.roleId) || 0) + 1);
+      }
+    }
+    let favoriteRole: RoleId = 'villager';
+    let topCount = 0;
+    for (const [roleId, count] of roleCounts.entries()) {
+      if (count > topCount) {
+        topCount = count;
+        favoriteRole = roleId;
+      }
+    }
+
+    return {
+      id: typeof parsed?.id === 'string' && parsed.id ? parsed.id : 'local_player',
+      name: playerName,
+      avatar: typeof parsed?.avatar === 'string' && parsed.avatar ? parsed.avatar : '🐺',
+      elo: typeof parsed?.elo === 'number' && Number.isFinite(parsed.elo) ? parsed.elo : 1620,
+      matchesPlayed,
+      wins,
+      winRate,
+      favoriteRole,
+      badges: [isVi ? 'Lịch sử thực tế' : 'Live Session'],
+    };
+  } catch {
+    return null;
+  }
+}
+
+export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ lang, users: usersProp }) => {
   const t = TRANSLATIONS[lang];
   const isVi = lang === 'vi';
-  const users: LeaderboardUser[] = loadLeaderboard();
+  const storedUsers: LeaderboardUser[] = usersProp ?? loadLeaderboard();
+  const realStoredUsers = storedUsers.filter((u) => !DEMO_LEADERBOARD_IDS.has(u.id));
+  const localUser = usersProp ? null : buildLocalSessionUser(isVi);
+  const realUsers = [...realStoredUsers];
+  if (localUser && !realUsers.some((u) => u.id === localUser.id)) {
+    realUsers.push(localUser);
+  }
+  realUsers.sort((a, b) => b.elo - a.elo);
+
+  const showingDemoFallback = realUsers.length === 0;
+  const visibleUsers = showingDemoFallback ? storedUsers : realUsers;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       {/* Banner */}
-      <div className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-yellow-950/60 border border-amber-800/40 rounded-2xl p-6 shadow-xl flex items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-amber-950/70 via-slate-900 to-yellow-950/60 border border-amber-800/40 rounded-2xl p-6 shadow-xl flex flex-wrap items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30">
               <Trophy className="w-5 h-5" />
             </span>
             <h2 className="text-xl sm:text-2xl font-bold font-display text-amber-200">
               {t.leaderboard}
             </h2>
+            {showingDemoFallback && (
+              <span
+                data-testid="leaderboard-demo-badge"
+                className="px-2.5 py-0.5 rounded-full bg-amber-950/90 border border-amber-500/50 text-[11px] font-bold text-amber-200"
+              >
+                {isVi ? 'Mẫu minh họa' : 'Sample Data'}
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-300 mt-1 max-w-lg">
-            {isVi
+            {showingDemoFallback
+              ? isVi
+                ? 'Chưa có trận đấu thực tế nào được lưu trên thiết bị này. Bảng dưới đây là dữ liệu mẫu minh họa — thành tích của bạn sẽ xuất hiện sau ván đầu tiên.'
+                : 'No local matches recorded yet. Showing sample leaderboard rows below — your real stats appear after your first match.'
+              : isVi
               ? 'Bảng vinh danh những người chơi có điểm số ELO, tỷ lệ thắng và tư duy suy luận xuất sắc nhất mùa giải.'
               : 'Top-ranked players this season by ELO rating, win rate, and deduction mastery.'}
           </p>
@@ -63,8 +146,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ lang }) => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80">
-              {users.map((user, idx) => {
-                const favRole = ROLES[user.favoriteRole];
+              {visibleUsers.map((user, idx) => {
+                const favRole = ROLES[user.favoriteRole] || ROLES.villager;
+                const isDemoRow = DEMO_LEADERBOARD_IDS.has(user.id);
                 return (
                   <tr
                     key={user.id}
@@ -91,6 +175,11 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ lang }) => {
                           <span className="font-bold text-slate-200 block">
                             {user.name}
                           </span>
+                          {isDemoRow && (
+                            <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-amber-950/70 border border-amber-700/50 text-[10px] font-semibold text-amber-200">
+                              {isVi ? 'Mẫu minh họa' : 'Sample'}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </td>

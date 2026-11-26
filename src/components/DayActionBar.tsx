@@ -19,6 +19,7 @@ interface DayActionBarProps {
   hasVoted: boolean;
   selectedTargetId: string | null;
   timerSeconds: number;
+  canAdvancePhase?: boolean;
   onStartDayVoting: () => void;
   onResolveDayVoting: () => void;
   onVoteCampfireAbstain?: () => void;
@@ -42,6 +43,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
   hasVoted,
   selectedTargetId,
   timerSeconds,
+  canAdvancePhase = true,
   onStartDayVoting,
   onResolveDayVoting,
   onVoteCampfireAbstain,
@@ -79,10 +81,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                 hasDeathInSummary ? 'text-[#fecaca]' : 'text-[#d1fae5]'
               }`}
             >
-              {cleanSummary ||
-                (lang === 'vi'
-                  ? 'Chia sẻ manh mối quanh lửa trại trước khi bỏ phiếu'
-                  : 'Share campfire clues before voting')}
+              {cleanSummary || t.dayDiscussHint}
             </span>
           </div>
 
@@ -92,23 +91,29 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                 type="button"
                 data-testid="reopen-gm-announcement-btn"
                 onClick={onReopenGMAnnouncement}
-                title={lang === 'vi' ? 'Xem lại thông báo buổi sáng của Quản Trò' : 'Reopen GM Morning Briefing'}
-                aria-label={lang === 'vi' ? 'Xem lại thông báo buổi sáng' : 'Reopen GM Briefing'}
+                title={t.briefing}
+                aria-label={t.briefing}
                 className="px-2 py-1 rounded-xl bg-[#1b120b] hover:bg-[#312115] border border-[#9c7248] text-[#fde7c3] font-bold text-[10px] flex items-center gap-1 cursor-pointer shrink-0"
               >
                 <Megaphone className="w-3 h-3 text-[#f5b82e]" />
-                <span className="hidden sm:inline">{lang === 'vi' ? 'Tin sáng' : 'Briefing'}</span>
+                <span className="hidden sm:inline">{t.briefing}</span>
               </button>
             )}
-            <button
-              type="button"
-              data-testid="day-console-go-vote-btn"
-              onClick={onStartDayVoting}
-              className="px-2.5 py-1 rounded-xl bg-[#b83227] hover:bg-[#cf3e32] border border-[#fca5a5]/60 text-white font-extrabold text-[11px] flex items-center gap-1 cursor-pointer shrink-0 shadow"
-            >
-              <FastForward className="w-3 h-3 fill-white" />
-              <span>{lang === 'vi' ? 'Bỏ Phiếu' : 'Vote'}</span>
-            </button>
+            {canAdvancePhase ? (
+              <button
+                type="button"
+                data-testid="day-console-go-vote-btn"
+                onClick={onStartDayVoting}
+                className="px-2.5 py-1 rounded-xl bg-[#b83227] hover:bg-[#cf3e32] border border-[#fca5a5]/60 text-white font-extrabold text-[11px] flex items-center gap-1 cursor-pointer shrink-0 shadow"
+              >
+                <FastForward className="w-3 h-3 fill-white" />
+                <span>{t.voteAction}</span>
+              </button>
+            ) : (
+              <span className="px-2 py-1 rounded-xl bg-[#1b120b] border border-[#6b4a2e] text-[10px] font-mono font-bold text-[#f5b82e] shrink-0">
+                ⏳ {Math.round(timerSeconds)}s
+              </span>
+            )}
           </div>
         </div>
 
@@ -149,20 +154,14 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-1.5">
           <div className="flex items-center gap-1.5 min-w-0">
             <span className="px-1.5 py-0.5 rounded bg-[#b83227] text-white font-black text-[10px] uppercase shrink-0">
-              ⚖️ {lang === 'vi' ? 'Bỏ Phiếu' : 'Vote'}
+              ⚖️ {t.voteAction}
             </span>
             <span className="text-[11px] font-bold text-[#fde7c3] truncate">
               {hasVoted && isAbstaining
-                ? lang === 'vi'
-                  ? '🔥 Bạn chọn Phiếu Trắng (Lửa Trại)'
-                  : '🔥 You voted Campfire Abstain'
+                ? t.youVotedAbstain
                 : hasVoted && chosenName
-                ? lang === 'vi'
-                  ? `Bạn bầu: ${chosenName}${me.id === mayorId ? ' (👑 x2)' : ''}`
-                  : `Your vote: ${chosenName}${me.id === mayorId ? ' (👑 x2)' : ''}`
-                : lang === 'vi'
-                ? 'Chọn 1 nghi phạm hoặc bấm Lửa Trại để bỏ phiếu trắng!'
-                : 'Select 1 suspect or click the Campfire to abstain!'}
+                ? `${t.yourVotePrefix} ${chosenName}${me.id === mayorId ? ' (👑 x2)' : ''}`
+                : t.selectSuspectHint}
             </span>
           </div>
 
@@ -172,11 +171,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                 type="button"
                 data-testid="vote-campfire-abstain-btn"
                 onClick={onVoteCampfireAbstain}
-                title={
-                  lang === 'vi'
-                    ? 'Bỏ phiếu trắng vào Lửa Trại (Không treo cổ ai)'
-                    : 'Cast Abstention vote into the Campfire'
-                }
+                title={t.campfireAbstain}
                 className={`px-2 py-1 rounded-xl border text-[10px] font-extrabold flex items-center gap-1 cursor-pointer ${
                   isAbstaining
                     ? 'bg-[#1c3621] border-[#6ee7b7] text-[#d1fae5]'
@@ -184,7 +179,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                 }`}
               >
                 <Flame className="w-3 h-3 text-[#f59e0b]" />
-                <span>{lang === 'vi' ? 'Lửa Trại' : 'Abstain'}</span>
+                <span>{t.abstainShort}</span>
               </button>
             )}
 
@@ -193,11 +188,11 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                 type="button"
                 data-testid="voting-console-clear-btn"
                 onClick={onClearVote}
-                title={lang === 'vi' ? 'Hủy lựa chọn hiện tại để bầu người khác' : 'Clear current selection'}
+                title={t.changeVoteBtn}
                 className="px-2 py-1 rounded-xl bg-[#1b120b] hover:bg-[#312115] border border-[#785334] text-[#e6d5b8] font-bold text-[10px] flex items-center gap-1 cursor-pointer"
               >
                 <RotateCcw className="w-3 h-3 text-[#f5b82e]" />
-                <span className="hidden sm:inline">{lang === 'vi' ? 'Đổi phiếu' : 'Change'}</span>
+                <span className="hidden sm:inline">{t.changeVoteBtn}</span>
               </button>
             )}
 
@@ -206,8 +201,8 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                 type="button"
                 data-testid="reopen-gm-announcement-btn"
                 onClick={onReopenGMAnnouncement}
-                title={lang === 'vi' ? 'Xem lại thông báo buổi sáng' : 'Reopen Morning Briefing'}
-                aria-label={lang === 'vi' ? 'Xem lại thông báo buổi sáng' : 'Reopen Morning Briefing'}
+                title={t.briefing}
+                aria-label={t.briefing}
                 className="p-1 rounded-lg bg-[#1b120b] hover:bg-[#312115] border border-[#9c7248] text-[#f5b82e] cursor-pointer"
               >
                 <Megaphone className="w-3.5 h-3.5" />
@@ -218,23 +213,17 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
               {timerSeconds === 0 && me.isAlive && !hasVoted ? '⏳' : `${Math.round(timerSeconds)}s`}
             </span>
 
-            <button
-              type="button"
-              data-testid="voting-console-confirm-btn"
-              onClick={onResolveDayVoting}
-              className="px-2.5 py-1 rounded-xl bg-[#b84b10] hover:bg-[#9e3f0c] border border-[#fbc266] text-white font-extrabold text-[11px] flex items-center gap-1 cursor-pointer shadow"
-            >
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>
-                {hasVoted
-                  ? lang === 'vi'
-                    ? 'Chốt Phiếu'
-                    : 'Confirm Vote'
-                  : lang === 'vi'
-                  ? 'Kết Thúc'
-                  : 'Finish'}
-              </span>
-            </button>
+            {canAdvancePhase && (
+              <button
+                type="button"
+                data-testid="voting-console-confirm-btn"
+                onClick={onResolveDayVoting}
+                className="px-2.5 py-1 rounded-xl bg-[#b84b10] hover:bg-[#9e3f0c] border border-[#fbc266] text-white font-extrabold text-[11px] flex items-center gap-1 cursor-pointer shadow"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{hasVoted ? t.confirmVoteBtn : t.finishBtn}</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -242,7 +231,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
         {(voteEntries.length > 0 || mayorTally.abstainCount > 0) && (
           <div
             data-testid="live-vote-breakdown"
-            className="bg-[#1a110a] border border-[#6b4a2e] rounded-xl p-2 max-h-[176px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5"
+            className="bg-[#1a110a] border border-[#6b4a2e] rounded-xl p-2 max-h-32 sm:max-h-56 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5"
           >
             {voteEntries.map((entry) => {
               const isMyTarget = selectedTargetId === entry.playerId;
@@ -279,7 +268,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                           }`}
                         >
                           {isVoterMayor ? '👑 ' : ''}#{voter.seatNumber} {voter.name}
-                          {isVoterMayor ? ' (x2)' : isVoterMe ? (lang === 'vi' ? ' (Bạn)' : ' (You)') : ''}
+                          {isVoterMayor ? ' (x2)' : isVoterMe ? ` ${t.youSuffix}` : ''}
                         </span>
                       );
                     })}
@@ -297,7 +286,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
               >
                 <span className="font-extrabold text-[#fde7c3] whitespace-nowrap flex items-center gap-1">
                   <span>🔥</span>
-                  <span>{lang === 'vi' ? 'Phiếu Trắng (Lửa Trại)' : 'Campfire Abstain'}</span>
+                  <span>{t.campfireAbstain}</span>
                   <span className="px-1 py-0.2 rounded bg-[#b84b10] text-white font-mono text-[9px]">
                     {mayorTally.abstainCount} {t.votesUnit}
                   </span>
@@ -337,7 +326,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
             onClick={onSkipHunterShot}
             className="px-3 py-1 rounded-lg bg-[#1b120b] hover:bg-[#312115] border border-[#f5b82e]/80 text-[#fde7c3] text-[11px] font-extrabold cursor-pointer"
           >
-            {lang === 'vi' ? 'Giữ súng (Không bắn)' : 'Hold Fire (No Shot)'}
+            {t.holdFireBtn}
           </button>
         )}
       </div>

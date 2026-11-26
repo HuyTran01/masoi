@@ -31,7 +31,7 @@ import {
   X,
 } from 'lucide-react';
 import { Player, RoleId, Language, NightActions, NightResult } from '../types/game';
-import { ROLES } from '../game/roles';
+import { getRoleBadge, ROLES } from '../game/roles';
 import {
   generateBalancedRoster,
   resolveNightActions,
@@ -40,7 +40,7 @@ import {
   resolveHunterShot,
 } from '../game/rules';
 import { sound, ROLE_CALLOUT_LINES } from '../utils/sound';
-import { TRANSLATIONS } from '../utils/i18n';
+import { TRANSLATIONS, UI_TEXT } from '../utils/i18n';
 import { addMatchHistory } from '../utils/storage';
 import { realtimeClient } from '../utils/realtimeClient';
 import type { GMDeckMode, GMPlayerSeat, GMRoleSource } from '../server/gmRooms';
@@ -54,8 +54,86 @@ interface GMAssistantViewProps {
   initialRoomId?: string;
   initialPlayerCount?: number;
   initialDeckMode?: GMDeckMode;
-  onOpenVirtualCards: (roomId: string) => void;
+  onOpenVirtualCards?: (roomId: string) => void;
 }
+
+interface NumericDraftInputProps
+  extends Omit<
+    React.InputHTMLAttributes<HTMLInputElement>,
+    'type' | 'value' | 'onChange' | 'min' | 'max'
+  > {
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (next: number) => void;
+}
+
+const NumericDraftInput: React.FC<NumericDraftInputProps> = ({
+  value,
+  min,
+  max,
+  onCommit,
+  onBlur,
+  onFocus,
+  onKeyDown,
+  ...rest
+}) => {
+  const [draft, setDraft] = useState<string>(String(value));
+  const [focused, setFocused] = useState<boolean>(false);
+  const skipNextBlurRef = React.useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!focused) setDraft(String(value));
+  }, [value, focused]);
+
+  const commit = (raw: string) => {
+    const parsed = parseInt(raw, 10);
+    if (Number.isNaN(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+    const clamped = Math.max(min, Math.min(max, parsed));
+    setDraft(String(clamped));
+    if (clamped !== value) onCommit(clamped);
+  };
+
+  return (
+    <input
+      {...rest}
+      type="number"
+      min={min}
+      max={max}
+      value={draft}
+      onFocus={(e) => {
+        skipNextBlurRef.current = false;
+        setFocused(true);
+        onFocus?.(e);
+      }}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={(e) => {
+        setFocused(false);
+        if (skipNextBlurRef.current) {
+          skipNextBlurRef.current = false;
+        } else {
+          commit(e.currentTarget.value);
+        }
+        onBlur?.(e);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          skipNextBlurRef.current = true;
+          commit(e.currentTarget.value);
+          e.currentTarget.blur();
+        } else if (e.key === 'Escape') {
+          skipNextBlurRef.current = true;
+          setDraft(String(value));
+          e.currentTarget.blur();
+        }
+        onKeyDown?.(e);
+      }}
+    />
+  );
+};
 
 const DEFAULT_PLAYERS: string[] = [
   'Bảo An',
@@ -138,9 +216,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   initialRoomId,
   initialPlayerCount = 8,
   initialDeckMode = 'virtual_deck',
-  onOpenVirtualCards,
 }) => {
-  const t = TRANSLATIONS[lang];
+  const t = TRANSLATIONS[lang] || TRANSLATIONS.en;
+  const ut = UI_TEXT[lang] || UI_TEXT.en;
 
   const [roomId, setRoomId] = useState<string>(
     () => (initialRoomId || 'GM-' + Math.floor(1000 + Math.random() * 9000)).trim().toUpperCase()
@@ -149,12 +227,29 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   const [seats, setSeats] = useState<GMPlayerSeat[]>(() =>
     buildInitialSeats(initialPlayerCount, initialDeckMode)
   );
-  const [customCountInput, setCustomCountInput] = useState<string>(() =>
-    String(Math.max(4, Math.min(20, initialPlayerCount)))
-  );
   const [newNameInput, setNewNameInput] = useState<string>('');
   const [setupWarning, setSetupWarning] = useState<string>('');
   const [copiedType, setCopiedType] = useState<'none' | 'code' | 'link'>('none');
+
+  const duplicateNames = React.useMemo(() => {
+    const counts = new Map<string, { display: string; count: number }>();
+    for (const s of seats) {
+      const trimmed = s.name.trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      const prev = counts.get(key);
+      if (prev) prev.count += 1;
+      else counts.set(key, { display: trimmed, count: 1 });
+    }
+    return Array.from(counts.values())
+      .filter((entry) => entry.count > 1)
+      .map((entry) => entry.display);
+  }, [seats]);
+
+  const duplicateNameKeySet = React.useMemo(
+    () => new Set(duplicateNames.map((n) => n.toLowerCase())),
+    [duplicateNames]
+  );
 
   const [isGameStarted, setIsGameStarted] = useState<boolean>(false);
   const [roundNumber, setRoundNumber] = useState<number>(1);
@@ -214,7 +309,6 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     if (!isGameStartedRef.current) {
       skipNextSyncRef.current = true;
       setSeats(incomingSeats);
-      setCustomCountInput(String(incomingSeats.length));
     } else {
       skipNextSyncRef.current = true;
       setSeats((prev) =>
@@ -471,7 +565,6 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   const handleSetCustomPlayerCount = (rawCount: number) => {
     const clamped = Math.max(4, Math.min(20, Math.round(rawCount) || 8));
     sound.playCardFlip();
-    setCustomCountInput(String(clamped));
     setSetupWarning('');
     setSeats((prev) => {
       const next = prev.slice(0, clamped);
@@ -557,7 +650,6 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     } else {
       setSeats(updated);
     }
-    setCustomCountInput(String(updated.length));
     setNewNameInput('');
   };
 
@@ -567,7 +659,6 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       .filter((_, i) => i !== index)
       .map((s, idx) => ({ ...s, seatNumber: idx + 1 }));
     setSeats(updated);
-    setCustomCountInput(String(updated.length));
   };
 
   const handleUpdatePlayerName = (index: number, nextName: string) => {
@@ -770,7 +861,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setNightActions(undoSnapshot.nightActions);
     setLastNightSummary(undoSnapshot.lastNightSummary);
     setLastNightResult(undoSnapshot.lastNightResult);
-    setSelectedLynchTargetId(undoSnapshot.selectedLynchTargetId);
+    setSelectedLynchTargetId('');
     setTimerSeconds(undoSnapshot.timerSeconds);
     setIsTimerRunning(false);
     setShowHunterModal(false);
@@ -778,7 +869,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setHunterVictimId('');
     setGameResult(null);
     setUndoSnapshot(null);
-    showToast(`↩️ Đã hoàn tác: ${undoSnapshot.label}`);
+    showToast(`Đã hoàn tác: ${undoSnapshot.label}`);
   };
 
   const recordVictory = (
@@ -948,6 +1039,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
   const handleNextNight = () => {
     sound.playNightBell();
+    setSelectedLynchTargetId('');
     setRoundNumber((r) => r + 1);
     setCurrentPhase('night');
     setNightStep(0);
@@ -981,6 +1073,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               type="button"
               data-testid="gm-privacy-shield-btn"
               aria-pressed={hideRolesForPrivacy}
+              aria-label={hideRolesForPrivacy ? t.gmShowRoles : t.gmHideRoles}
               onClick={() => {
                 sound.playCardFlip();
                 setHideRolesForPrivacy((prev) => {
@@ -998,18 +1091,18 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               {hideRolesForPrivacy ? (
                 <>
                   <Eye className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
-                  <span>👁️ Hiện Vai Trò</span>
+                  <span>{t.gmShowRoles.replace(/^👁️\s*/, '')}</span>
                 </>
               ) : (
                 <>
                   <EyeOff className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                  <span>🙈 Ẩn Vai Trò (Chống nhìn trộm)</span>
+                  <span>{t.gmHideRoles.replace(/^🙈\s*/, '')}</span>
                 </>
               )}
             </button>
           </div>
           <p className="text-xs text-slate-300 max-w-xl">
-            Công cụ tối ưu cho Quản Trò ngoài đời thực: gọi vai kèm âm thanh & câu thoại ma mị, tự động ghi nhớ Bảo Vệ trùng đêm, Sói Con cuồng nộ, Tình Nhân quyên sinh và phát bài qua ĐT.
+            {t.gmAssistantDesc}
           </p>
         </div>
 
@@ -1022,8 +1115,8 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               sound.playCardFlip();
               setShowQrModal(true);
             }}
-            title={`Bấm để phóng to QR phòng ${roomId}`}
-            aria-label={`Phóng to mã QR phòng ${roomId}`}
+            title={`${t.gmZoomQr} (${roomId})`}
+            aria-label={`${t.gmZoomQr} (${roomId})`}
             className="bg-white p-1.5 rounded-lg shrink-0 border border-amber-400/50 shadow cursor-pointer hover:ring-2 hover:ring-amber-400 transition-all"
           >
             <svg
@@ -1032,7 +1125,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               viewBox={`0 0 ${qrMatrix.length + 2} ${qrMatrix.length + 2}`}
               shapeRendering="crispEdges"
               role="img"
-              aria-label={`Mã QR phòng ${roomId}`}
+              aria-label={`QR ${roomId}`}
             >
               <rect
                 x={0}
@@ -1060,7 +1153,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
           <div className="text-left space-y-1.5">
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
-              Mã Phòng & QR Cho Người Chơi
+              {t.gmRoomCodeQrLabel}
             </span>
             <div className="flex items-center gap-2 flex-wrap">
               <span
@@ -1075,7 +1168,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-amber-200 flex items-center gap-1 cursor-pointer"
               >
                 {copiedType === 'code' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                <span>{copiedType === 'code' ? 'Đã chép' : 'Chép mã'}</span>
+                <span>{copiedType === 'code' ? t.gmCopied : t.gmCopyCode}</span>
               </button>
               <button
                 type="button"
@@ -1087,7 +1180,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-[10px] font-bold text-amber-200 flex items-center gap-1 cursor-pointer"
               >
                 <ZoomIn className="w-3 h-3" />
-                <span>🔍 Phóng to QR</span>
+                <span>{t.gmZoomQr.replace(/^🔍\s*/, '')}</span>
               </button>
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-0.5">
@@ -1098,18 +1191,19 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 className="text-[11px] text-sky-300 hover:text-sky-200 flex items-center gap-1 font-semibold cursor-pointer"
               >
                 {copiedType === 'link' ? <Check className="w-3 h-3 text-emerald-400" /> : <Link2 className="w-3 h-3" />}
-                <span>{copiedType === 'link' ? 'Đã sao chép link phòng' : 'Chép link vào phòng'}</span>
+                <span>{copiedType === 'link' ? t.gmCopiedLink : t.gmCopyLink}</span>
               </button>
               <span className="text-slate-700">·</span>
-              <button
-                type="button"
+              <a
+                href={joinUrl}
+                target="_blank"
+                rel="noopener noreferrer"
                 data-testid="gm-open-player-view-btn"
-                onClick={() => onOpenVirtualCards(roomId)}
                 className="text-[11px] text-amber-400 hover:text-amber-300 underline flex items-center gap-1 font-semibold cursor-pointer"
               >
                 <Smartphone className="w-3 h-3" />
-                <span>Xem Giao Diện Người Chơi</span>
-              </button>
+                <span>{t.gmPlayerViewBtn}</span>
+              </a>
             </div>
           </div>
         </div>
@@ -1119,7 +1213,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
         <div
           role="status"
           data-testid="gm-copy-toast"
-          className="fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-xl bg-emerald-950/95 border border-emerald-400/70 text-xs font-extrabold text-emerald-100 shadow-2xl flex items-center gap-2"
+          className="fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl bg-emerald-950/95 border border-emerald-400/70 text-xs font-extrabold text-emerald-100 shadow-2xl flex items-center gap-2 max-w-[92vw]"
         >
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{copyToast}</span>
@@ -1131,20 +1225,25 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
         <div className="flex items-center justify-between gap-2">
           <span className="text-[11px] font-extrabold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
             <Volume2 className="w-4 h-4 text-rose-400" />
-            Bàn Phím Âm Hiệu & Giọng Gọi Vai Kịch Tính (Chạm Để Phát Loa)
+            {t.gmSoundboardTitle}
           </span>
+        </div>
+
+        <div className="px-3 py-2 rounded-xl bg-rose-950/40 border border-rose-800/50 text-xs text-amber-200 font-medium flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>{activeCalloutBanner}</span>
         </div>
 
         <div className="flex flex-wrap gap-1.5">
           {(
             [
-              { role: 'werewolf', label: '🐺 Gọi Sói Hú' },
-              { role: 'witch', label: '🧪 Gọi Phù Thủy Ma Mị' },
-              { role: 'hunter', label: '🎯 Thợ Săn: "Tao có súng!"' },
-              { role: 'seer', label: '🔮 Gọi Tiên Tri' },
-              { role: 'bodyguard', label: '🛡️ Gọi Bảo Vệ' },
-              { role: 'cupid', label: '💘 Gọi Cupid' },
-            ] as { role: RoleId; label: string }[]
+              { role: 'werewolf', icon: '🐺', viLabel: '🐺 Gọi Sói Hú' },
+              { role: 'witch', icon: '🧪', viLabel: '🧪 Gọi Phù Thủy Ma Mị' },
+              { role: 'hunter', icon: '🎯', viLabel: '🎯 Thợ Săn: "Tao có súng!"' },
+              { role: 'seer', icon: '🔮', viLabel: '🔮 Gọi Tiên Tri' },
+              { role: 'bodyguard', icon: '🛡️', viLabel: '🛡️ Gọi Bảo Vệ' },
+              { role: 'cupid', icon: '💘', viLabel: '💘 Gọi Cupid' },
+            ] as { role: RoleId; icon: string; viLabel: string }[]
           ).map((item) => (
             <button
               key={item.role}
@@ -1152,14 +1251,11 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               onClick={() => triggerRoleVoice(item.role)}
               className="px-3 py-1.5 rounded-xl bg-[#131c31] hover:bg-amber-500/20 border border-slate-700 hover:border-amber-400 text-xs font-bold text-amber-100 transition-all cursor-pointer"
             >
-              {item.label}
+              {lang === 'vi'
+                ? item.viLabel
+                : `${item.icon} ${ROLES[item.role].name[lang] || ROLES[item.role].name.en}`}
             </button>
           ))}
-        </div>
-
-        <div className="px-3 py-2 rounded-xl bg-rose-950/40 border border-rose-800/50 text-xs text-amber-200 font-medium flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-          <span>{activeCalloutBanner}</span>
         </div>
       </div>
 
@@ -1182,10 +1278,10 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
             >
               <div className="text-xs font-black flex items-center gap-1.5">
                 <span>🃏</span>
-                <span>Không Có Bộ Bài Ngoài Đời (App Chia Vai)</span>
+                <span>{t.gmVirtualDeckTitle}</span>
               </div>
               <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                App chia ngẫu nhiên vai cân bằng. Người chơi nhập mã <strong className="text-amber-300 font-mono">{roomId}</strong> và chỉ thấy duy nhất vai trò của mình.
+                {t.virtualCardsDesc} (<strong className="text-amber-300 font-mono">{roomId}</strong>)
               </p>
             </button>
 
@@ -1201,10 +1297,10 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
             >
               <div className="text-xs font-black flex items-center gap-1.5">
                 <span>🎴</span>
-                <span>Đã Có Bài Giấy (Người Chơi Tự Nhập / GM Nhập Hộ)</span>
+                <span>{t.gmPhysicalCardsTitle}</span>
               </div>
               <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                Phát bài giấy ngoài đời, người chơi vào mã <strong className="text-emerald-300 font-mono">{roomId}</strong> tự nhập lá bài trước trận, hoặc Quản Trò chọn hộ ngay bên dưới.
+                {t.roomId}: <strong className="text-emerald-300 font-mono">{roomId}</strong>
               </p>
             </button>
           </div>
@@ -1213,9 +1309,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
             <div>
               <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 <Users className="w-5 h-5 text-amber-400" />
-                <span>Danh Sách Người Chơi ({seats.length} người)</span>
+                <span>{t.gmPlayerListTitle} ({seats.length})</span>
                 <span className="text-[11px] font-mono text-emerald-300 bg-emerald-950/80 border border-emerald-500/40 px-2 py-0.5 rounded-lg">
-                  📱 {seats.filter((s) => Boolean(s.claimedByUserId)).length}/{seats.length} đã vào phòng
+                  📱 {seats.filter((s) => Boolean(s.claimedByUserId)).length}/{seats.length}
                 </span>
               </h3>
             </div>
@@ -1242,7 +1338,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               {/* Custom Number Stepper & Input */}
               <div className="flex items-center gap-1 bg-[#090d18] border border-amber-500/40 rounded-xl px-2 py-1">
                 <span className="text-[10px] font-bold uppercase text-amber-400 mr-1">
-                  Tuỳ chỉnh:
+                  {t.gmCustomCount}
                 </span>
                 <button
                   type="button"
@@ -1250,23 +1346,17 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   onClick={() => handleSetCustomPlayerCount(seats.length - 1)}
                   disabled={seats.length <= 4}
                   className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
-                  aria-label="Giảm số người chơi"
+                  aria-label="-1"
                 >
                   <Minus className="w-3 h-3" />
                 </button>
-                <input
-                  type="number"
+                <NumericDraftInput
                   min={4}
                   max={20}
                   data-testid="gm-custom-count-input"
-                  value={customCountInput}
-                  onChange={(e) => {
-                    setCustomCountInput(e.target.value);
-                    const val = parseInt(e.target.value, 10);
-                    if (!Number.isNaN(val) && val >= 4 && val <= 20) {
-                      handleSetCustomPlayerCount(val);
-                    }
-                  }}
+                  aria-label={t.gmPlayerListTitle}
+                  value={seats.length}
+                  onCommit={handleSetCustomPlayerCount}
                   className="w-11 text-center bg-slate-950 border border-slate-700 rounded-lg py-0.5 text-xs font-mono font-extrabold text-amber-300 focus:outline-none focus:border-amber-400"
                 />
                 <button
@@ -1275,7 +1365,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   onClick={() => handleSetCustomPlayerCount(seats.length + 1)}
                   disabled={seats.length >= 20}
                   className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
-                  aria-label="Tăng số người chơi"
+                  aria-label="+1"
                 >
                   <Plus className="w-3 h-3" />
                 </button>
@@ -1288,7 +1378,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-amber-300 border border-slate-700 flex items-center gap-1.5 cursor-pointer"
                 >
                   <Shuffle className="w-3.5 h-3.5" />
-                  <span>Phân Lại Vai Ngẫu Nhiên</span>
+                  <span>{t.gmReshuffleRoles}</span>
                 </button>
               ) : (
                 <button
@@ -1297,7 +1387,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-emerald-300 border border-slate-700 flex items-center gap-1.5 cursor-pointer"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Điền Dân Làng Cho Ghế Trống</span>
+                  <span>{t.gmFillVillagers}</span>
                 </button>
               )}
             </div>
@@ -1309,7 +1399,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               value={newNameInput}
               onChange={(e) => setNewNameInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAddPlayer()}
-              placeholder="Nhập tên người chơi mới..."
+              placeholder={t.gmAddPlayerPlaceholder}
               className="flex-1 bg-[#090d18] border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
             />
             <button
@@ -1318,21 +1408,36 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
-              <span>Thêm</span>
+              <span>{t.gmAddBtn}</span>
             </button>
           </div>
+
+          {duplicateNames.length > 0 && (
+            <div
+              role="alert"
+              data-testid="gm-duplicate-names-warning"
+              className="px-3 py-2 rounded-xl bg-amber-950/75 border border-amber-400/70 text-xs text-amber-200 font-bold"
+            >
+              {lang === 'vi'
+                ? `⚠️ Tên trùng lặp: ${duplicateNames.join(', ')} — Hãy đổi tên để tránh nhầm lẫn khi gọi vai & treo cổ.`
+                : `⚠️ Duplicate names: ${duplicateNames.join(', ')} — Rename players to avoid confusion during callouts & lynching.`}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
             {seats.map((seat, idx) => {
               const roleDef = seat.roleId ? ROLES[seat.roleId] : null;
               const isJoined = Boolean(seat.claimedByUserId);
+              const isDuplicateName = duplicateNameKeySet.has(seat.name.trim().toLowerCase());
 
               return (
                 <div
                   key={seat.id}
                   data-testid={`gm-seat-card-${idx + 1}`}
                   className={`bg-[#090d18] border rounded-xl p-3 flex flex-col justify-between gap-2 ${
-                    seat.roleId === null
+                    isDuplicateName
+                      ? 'border-amber-400/80'
+                      : seat.roleId === null
                       ? 'border-amber-500/40'
                       : isJoined
                       ? 'border-emerald-500/45'
@@ -1374,27 +1479,29 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       value={seat.name}
                       onChange={(e) => handleUpdatePlayerName(idx, e.target.value)}
                       aria-label={`Tên người chơi #${idx + 1}`}
-                      className="w-full bg-slate-950/90 border border-slate-800 focus:border-amber-500 rounded-lg px-2 py-1 font-semibold text-xs text-slate-100 focus:outline-none"
+                      className={`w-full bg-slate-950/90 border focus:border-amber-500 rounded-lg px-2 py-1 font-semibold text-xs text-slate-100 focus:outline-none ${
+                        isDuplicateName ? 'border-amber-400' : 'border-slate-800'
+                      }`}
                     />
                     {hideRolesForPrivacy ? (
                       <div className="w-full bg-slate-900/90 border border-slate-700 text-xs font-mono font-bold text-slate-400 rounded-lg px-2 py-1.5">
-                        ••• (Đã ẩn)
+                        {t.gmHiddenMask}
                       </div>
                     ) : (
                       <select
                         value={seat.roleId || ''}
                         onChange={(e) => handleUpdateRole(idx, e.target.value as RoleId | '')}
-                        aria-label={`Vai trò của ${seat.name}`}
+                        aria-label={`${seat.name}`}
                         className={`w-full bg-slate-900 border text-xs font-bold rounded-lg px-2 py-1.5 focus:outline-none ${
                           seat.roleId
                             ? 'border-slate-700 text-amber-300'
                             : 'border-amber-500/60 text-slate-400'
                         }`}
                       >
-                        <option value="">-- Chờ nhập vai / Chọn hộ --</option>
+                        <option value="">{t.gmSelectRolePlaceholder}</option>
                         {Object.values(ROLES).map((r) => (
                           <option key={r.id} value={r.id}>
-                            {r.name.vi}
+                            {r.name[lang] || r.name.en}
                           </option>
                         ))}
                       </select>
@@ -1402,7 +1509,11 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   </div>
 
                   <span className="text-[10px] text-slate-400 font-mono">
-                    {hideRolesForPrivacy ? '••• (Đã ẩn)' : roleDef ? roleDef.badge : 'Chưa gán bài'}
+                    {hideRolesForPrivacy
+                      ? t.gmHiddenMask
+                      : roleDef
+                      ? getRoleBadge(roleDef.id, lang)
+                      : t.gmUnassignedRole}
                   </span>
                 </div>
               );
@@ -1419,22 +1530,22 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center justify-between pt-3 border-t border-slate-800 gap-3">
+          {/* Spacer so fixed mobile CTA bar never hides the last player card */}
+          <div className="h-20 sm:hidden" aria-hidden="true" />
+
+          <div className="fixed bottom-2 inset-x-3 z-30 px-3 py-2.5 rounded-2xl bg-[#0f172a]/95 backdrop-blur-sm border border-amber-500/40 shadow-2xl sm:static sm:inset-auto sm:mx-0 sm:px-0 sm:py-0 sm:pt-3 sm:rounded-none sm:bg-transparent sm:backdrop-blur-none sm:border-0 sm:border-t sm:border-slate-800 sm:shadow-none flex flex-wrap items-center justify-between gap-2.5 sm:gap-3">
             <div className="text-xs text-slate-400">
-              {deckMode === 'physical_cards'
-                ? 'Chế độ bài giấy: Người chơi tự nhập lá bài bằng mã '
-                : 'Chế độ chia bài ảo: Người chơi xem vai bí mật bằng mã '}
-              <strong className="text-amber-300 font-mono">{roomId}</strong>
+              {t.roomId}: <strong className="text-amber-300 font-mono">{roomId}</strong>
             </div>
 
             <button
               type="button"
               data-testid="gm-start-match-btn"
               onClick={handleStartGame}
-              className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shadow-lg flex items-center gap-2 cursor-pointer"
+              className="w-full sm:w-auto justify-center px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs shadow-lg flex items-center gap-2 cursor-pointer"
             >
               <Play className="w-4 h-4 fill-slate-950" />
-              <span>Bắt Đầu Ván Đấu Thực Tế (Vòng 1)</span>
+              <span>{t.gmStartMatchBtn}</span>
             </button>
           </div>
         </div>
@@ -1455,13 +1566,13 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-base text-slate-100">
-                    {currentPhase === 'night' ? `Đêm Thứ ${roundNumber}` : `Ngày Thứ ${roundNumber}`}
+                    {currentPhase === 'night'
+                      ? `${t.gmNightTitlePrefix} ${roundNumber}`
+                      : `${t.gmDayTitlePrefix} ${roundNumber}`}
                   </span>
                 </div>
                 <p className="text-xs text-slate-400">
-                  {currentPhase === 'night'
-                    ? 'Quản trò gọi các vai theo thứ tự bên dưới.'
-                    : 'Công bố kết quả đêm và biểu quyết treo cổ.'}
+                  {currentPhase === 'night' ? t.gmNightOrderHint : t.gmDayPhaseHint}
                 </p>
               </div>
             </div>
@@ -1472,11 +1583,11 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   type="button"
                   data-testid="gm-undo-btn"
                   onClick={handleUndoLastStep}
-                  title={`Hoàn tác: ${undoSnapshot.label}`}
+                  title={t.gmUndoBtn}
                   className="px-3 py-1.5 rounded-lg bg-amber-950/80 hover:bg-amber-900/80 border border-amber-500/50 text-xs font-bold text-amber-200 flex items-center gap-1.5 cursor-pointer"
                 >
                   <Undo2 className="w-3.5 h-3.5" />
-                  <span>↩️ Hoàn tác bước vừa rồi</span>
+                  <span>{t.gmUndoBtn.replace(/^↩️\s*/, '')}</span>
                 </button>
               )}
 
@@ -1489,7 +1600,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     className="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600 border border-rose-400 text-xs font-extrabold text-white flex items-center gap-1.5 cursor-pointer"
                   >
                     <AlertTriangle className="w-3.5 h-3.5" />
-                    <span>Xác nhận xóa ván?</span>
+                    <span>{t.gmConfirmResetBtn}</span>
                   </button>
                   <button
                     type="button"
@@ -1497,7 +1608,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     onClick={() => setConfirmReset(false)}
                     className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 cursor-pointer"
                   >
-                    Hủy
+                    {t.gmCancelBtn}
                   </button>
                 </div>
               ) : (
@@ -1508,7 +1619,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
-                  Thiết Lập Lại Ván
+                  {t.gmResetMatchBtn}
                 </button>
               )}
             </div>
@@ -1541,10 +1652,12 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                     <div>
                       <span className="text-xs font-bold text-rose-400 uppercase tracking-widest">
-                        Bước {safeNightStepIndex + 1} / {nightSteps.length}
+                        {t.gmStepLabel} {safeNightStepIndex + 1} / {nightSteps.length}
                       </span>
                       <h4 className="text-base font-bold text-slate-100">
-                        {activeNightStep.title}
+                        {lang === 'vi'
+                          ? activeNightStep.title
+                          : ROLES[activeNightStep.roleId].name[lang] || activeNightStep.title}
                       </h4>
                     </div>
                     <button
@@ -1554,7 +1667,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       className="px-3 py-1.5 rounded-lg bg-rose-900/60 hover:bg-rose-800 border border-rose-500/40 text-xs font-bold text-rose-100 flex items-center gap-1.5 cursor-pointer"
                     >
                       <Volume2 className="w-3.5 h-3.5 text-rose-300" />
-                      🔊 Phát Tiếng Gọi
+                      <span>{t.gmPlayCalloutBtn.replace(/^🔊\s*/, '')}</span>
                     </button>
                   </div>
 
@@ -1816,10 +1929,10 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                                 {isSelected && activeSeer && (
                                   <span className="text-[10px] font-bold">
                                     {hideRolesForPrivacy
-                                      ? '••• (Đã ẩn)'
+                                      ? t.gmHiddenMask
                                       : isWolf
-                                      ? '👎 SÓI'
-                                      : '👍 DÂN'}
+                                      ? `👎 ${t.factionWerewolf}`
+                                      : `👍 ${t.factionVillager}`}
                                   </span>
                                 )}
                               </button>
@@ -1870,7 +1983,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       className="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-semibold text-slate-300 disabled:opacity-40 flex items-center gap-1 cursor-pointer"
                     >
                       <ChevronLeft className="w-3.5 h-3.5" />
-                      Bước Trước
+                      {t.gmPrevStep}
                     </button>
 
                     {safeNightStepIndex < nightSteps.length - 1 ? (
@@ -1881,7 +1994,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                         }}
                         className="px-4 py-2 rounded-lg bg-rose-700 hover:bg-rose-600 text-xs font-bold text-white flex items-center gap-1 cursor-pointer"
                       >
-                        Bước Tiếp Theo
+                        {t.gmNextStep}
                         <ChevronRight className="w-3.5 h-3.5" />
                       </button>
                     ) : (
@@ -1891,7 +2004,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                         className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 cursor-pointer"
                       >
                         <Sun className="w-4 h-4" />
-                        Kết Thúc Đêm & Tính Toán
+                        {t.gmResolveNight}
                       </button>
                     )}
                   </div>
@@ -2121,7 +2234,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   <Timer className="w-5 h-5 text-amber-400" />
                   <div>
                     <span className="text-xs font-bold text-slate-300 block">
-                      Đồng Hồ Thảo Luận (Custom Thời Gian Đợi)
+                      {t.gmDiscussTimerTitle}
                     </span>
                     <span className="text-xl font-mono font-extrabold text-amber-300">
                       {Math.floor(timerSeconds / 60)}:{(timerSeconds % 60).toString().padStart(2, '0')}{' '}
@@ -2136,7 +2249,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     onClick={() => setIsTimerRunning(!isTimerRunning)}
                     className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold cursor-pointer"
                   >
-                    {isTimerRunning ? 'Tạm Dừng' : 'Chạy Giờ'}
+                    {isTimerRunning ? t.gmTimerPause : t.gmTimerStart}
                   </button>
                   <button
                     type="button"
@@ -2170,18 +2283,13 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       {presetSec}s
                     </button>
                   ))}
-                  <input
-                    type="number"
-                    min={10}
+                  <NumericDraftInput
+                    min={5}
                     max={600}
                     value={timerSeconds}
-                    onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
-                      if (!Number.isNaN(val)) {
-                        const clamped = Math.max(5, Math.min(600, val));
-                        setTimerSeconds(clamped);
-                        setCustomDiscussDefaultSec(clamped);
-                      }
+                    onCommit={(clamped) => {
+                      setTimerSeconds(clamped);
+                      setCustomDiscussDefaultSec(clamped);
                     }}
                     aria-label="Custom GM timer seconds"
                     className="w-16 text-center bg-slate-950 border border-amber-500/40 rounded-lg py-1 text-xs font-mono font-extrabold text-amber-300"
@@ -2191,7 +2299,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
               <div className="bg-[#090d18] border border-slate-800 rounded-xl p-4 space-y-3">
                 <h4 className="text-xs font-bold text-slate-200">
-                  Chọn Người Bị Làng Biểu Quyết Treo Cổ Hôm Nay:
+                  {t.gmLynchPrompt}
                 </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   {players
@@ -2211,7 +2319,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                           <div className="flex items-center justify-between gap-2">
                             <span>{p.name}</span>
                             <span className="text-[10px] text-amber-400 font-mono">
-                              {hideRolesForPrivacy ? '••• (Đã ẩn)' : ROLES[p.roleId].name.vi}
+                              {hideRolesForPrivacy
+                                ? t.gmHiddenMask
+                                : ROLES[p.roleId].name[lang] || ROLES[p.roleId].name.en}
                             </span>
                           </div>
                         </button>
@@ -2224,14 +2334,14 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     onClick={handleNextNight}
                     className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 cursor-pointer"
                   >
-                    Không Treo Cổ Ai (Sang Đêm Tiếp)
+                    {t.gmSkipLynchBtn}
                   </button>
                   <button
                     disabled={!selectedLynchTargetId}
                     onClick={handleExecuteLynch}
                     className="px-4 py-2 rounded-xl bg-rose-700 hover:bg-rose-600 disabled:opacity-40 text-white font-bold text-xs cursor-pointer"
                   >
-                    Xác Nhận Treo Cổ
+                    {t.gmConfirmLynchBtn}
                   </button>
                 </div>
               </div>
@@ -2307,12 +2417,12 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
           <div className="w-full max-w-2xl bg-[#0f172a] border-2 border-amber-500/60 rounded-2xl p-6 text-center space-y-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-extrabold text-amber-200">
               {gameResult.winner === 'werewolves'
-                ? '🐺 Phe Ma Sói Chiến Thắng!'
+                ? `🐺 ${ut.winWerewolves}`
                 : gameResult.winner === 'lovers'
-                ? '💘 Phe Tình Nhân Chiến Thắng!'
+                ? `💘 ${ut.winLovers}`
                 : gameResult.winner === 'tanner'
-                ? '🎭 Kẻ Chán Đời Chiến Thắng!'
-                : '🏆 Phe Dân Làng Chiến Thắng!'}
+                ? `🎭 ${ut.winTanner}`
+                : `🏆 ${ut.winVillagers}`}
             </h3>
             <p className="text-xs text-slate-300">{gameResult.reason}</p>
 
@@ -2327,7 +2437,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Undo2 className="w-3.5 h-3.5" />
-                  <span>↩️ Hoàn tác bước vừa rồi</span>
+                  <span>{t.gmUndoBtn.replace(/^↩️\s*/, '')}</span>
                 </button>
               )}
               <button
@@ -2336,7 +2446,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 onClick={handleResetForNewMatch}
                 className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer"
               >
-                Chơi Ván Mới
+                {t.gmPlayNewMatchBtn}
               </button>
             </div>
           </div>
@@ -2347,8 +2457,11 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label={`Mã QR phòng ${roomId}`}
+          aria-label={`QR ${roomId}`}
           data-testid="gm-qr-modal"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowQrModal(false);
+          }}
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ backgroundColor: '#050811' }}
         >
@@ -2356,16 +2469,16 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
             <button
               type="button"
               data-testid="gm-qr-modal-close-btn"
-              aria-label="Đóng mã QR"
+              aria-label={ut.closeEsc}
               onClick={() => setShowQrModal(false)}
               className="absolute top-4 right-4 p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
             >
               <X className="w-4 h-4" />
             </button>
 
-            <div className="space-y-1">
+            <div className="space-y-1 px-10">
               <span className="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-bold block">
-                Quét Mã QR Để Vào Phòng Quản Trò
+                {t.gmScanQrTitle}
               </span>
               <div
                 data-testid="gm-qr-modal-room-code"
@@ -2419,7 +2532,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Copy className="w-3.5 h-3.5" />
-                <span>Chép mã phòng</span>
+                <span>{t.gmCopyCode}</span>
               </button>
               <button
                 type="button"
@@ -2427,7 +2540,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Link2 className="w-3.5 h-3.5" />
-                <span>Chép link vào phòng</span>
+                <span>{t.gmCopyLink}</span>
               </button>
             </div>
           </div>

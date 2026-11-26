@@ -289,6 +289,8 @@ const ACCOUNT_I18N: Record<
   },
 };
 
+const makeDefaultGuestName = () => `Người Chơi #${Math.floor(100 + Math.random() * 900)}`;
+
 export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
   currentUser,
   authToken = null,
@@ -303,8 +305,9 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
   );
 
   const [activeTab, setActiveTab] = useState<AccountModalTab>(() => {
+    if (isLoggedInAccount) return 'profile';
     if (initialTab) return initialTab;
-    return isLoggedInAccount ? 'profile' : 'login';
+    return 'login';
   });
 
   const [username, setUsername] = useState<string>(() =>
@@ -313,7 +316,9 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
   const [password, setPassword] = useState<string>('');
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [displayName, setDisplayName] = useState<string>(currentUser.name || 'Thợ Săn Đêm');
+  const [displayName, setDisplayName] = useState<string>(
+    () => currentUser.name || makeDefaultGuestName()
+  );
   const [selectedAvatar, setSelectedAvatar] = useState<string>(currentUser.avatar || '🐺');
   const [region, setRegion] = useState<'VN' | 'SEA' | 'GLOBAL'>(
     (currentUser.region as 'VN' | 'SEA' | 'GLOBAL') || 'VN'
@@ -321,9 +326,32 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
   const [validationError, setValidationError] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
+  const handleSwitchTab = (next: AccountModalTab) => {
+    setActiveTab(next);
+    setPassword('');
+    setConfirmPassword('');
+    setValidationError('');
+  };
+
+  useEffect(() => {
+    if (isLoggedInAccount && activeTab !== 'profile') {
+      setActiveTab('profile');
+    }
+  }, [isLoggedInAccount, activeTab]);
+
   useEffect(() => {
     setValidationError('');
   }, [activeTab, username, password, confirmPassword, displayName]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSubmitting) {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isSubmitting, onClose]);
 
   const handleGoogleSignIn = async () => {
     sound.playCardFlip();
@@ -573,7 +601,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
     }
     onSaveProfile(
       {
-        name: 'Thợ Săn Đêm',
+        name: makeDefaultGuestName(),
         avatar: '🐺',
         provider: 'guest',
         handle: '',
@@ -592,6 +620,9 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-label={st.modalTitle}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSubmitting) onClose();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 pointer-events-auto"
       style={{ backgroundColor: 'rgba(4, 7, 15, 0.9)' }}
       data-testid="account-auth-modal"
@@ -625,48 +656,50 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
           </button>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="grid grid-cols-3 gap-1.5 bg-[#070a14] p-1 rounded-2xl border border-slate-800">
-          <button
-            type="button"
-            data-testid="account-tab-login"
-            onClick={() => setActiveTab('login')}
-            className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'login'
-                ? 'bg-amber-500 text-slate-950'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            <span>{st.tabLogin}</span>
-          </button>
-          <button
-            type="button"
-            data-testid="account-tab-register"
-            onClick={() => setActiveTab('register')}
-            className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'register'
-                ? 'bg-emerald-500 text-slate-950'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span>{st.tabRegister}</span>
-          </button>
-          <button
-            type="button"
-            data-testid="account-tab-profile"
-            onClick={() => setActiveTab('profile')}
-            className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
-              activeTab === 'profile'
-                ? 'bg-sky-500 text-slate-950'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <User className="w-3.5 h-3.5" />
-            <span>{st.tabProfile}</span>
-          </button>
-        </div>
+        {/* Navigation Tabs (Hide Login/Register tabs once user is logged in) */}
+        {!isLoggedInAccount && (
+          <div className="grid grid-cols-3 gap-1.5 bg-[#070a14] p-1 rounded-2xl border border-slate-800">
+            <button
+              type="button"
+              data-testid="account-tab-login"
+              onClick={() => handleSwitchTab('login')}
+              className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'login'
+                  ? 'bg-amber-500 text-slate-950'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>{st.tabLogin}</span>
+            </button>
+            <button
+              type="button"
+              data-testid="account-tab-register"
+              onClick={() => handleSwitchTab('register')}
+              className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'register'
+                  ? 'bg-emerald-500 text-slate-950'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>{st.tabRegister}</span>
+            </button>
+            <button
+              type="button"
+              data-testid="account-tab-profile"
+              onClick={() => handleSwitchTab('profile')}
+              className={`py-2 px-2 rounded-xl text-xs font-extrabold flex items-center justify-center gap-1.5 cursor-pointer ${
+                activeTab === 'profile'
+                  ? 'bg-sky-500 text-slate-950'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>{st.tabProfile}</span>
+            </button>
+          </div>
+        )}
 
         {validationError && (
           <div
@@ -753,7 +786,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
               {st.noAccountYet}{' '}
               <button
                 type="button"
-                onClick={() => setActiveTab('register')}
+                onClick={() => handleSwitchTab('register')}
                 className="text-emerald-400 font-bold hover:underline cursor-pointer"
               >
                 {st.switchToRegister}
@@ -862,7 +895,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
               {st.alreadyHaveAccount}{' '}
               <button
                 type="button"
-                onClick={() => setActiveTab('login')}
+                onClick={() => handleSwitchTab('login')}
                 className="text-amber-300 font-bold hover:underline cursor-pointer"
               >
                 {st.switchToLogin}

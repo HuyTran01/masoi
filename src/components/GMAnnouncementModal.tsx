@@ -11,12 +11,15 @@ import {
   Volume2,
 } from 'lucide-react';
 import { GMAnnouncementData } from '../game/autoGM';
+import { CAMPFIRE_ABSTAIN_ID } from '../game/agrouMechanics';
 import { Language } from '../types/game';
+import { UI_TEXT } from '../utils/i18n';
 
 interface GMAnnouncementModalProps {
   announcement: GMAnnouncementData;
   lang: Language;
   isMuted: boolean;
+  mayorId?: string | null;
   onReplayVoice: () => void;
   onContinue: () => void;
 }
@@ -25,9 +28,11 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
   announcement,
   lang,
   isMuted,
+  mayorId = null,
   onReplayVoice,
   onContinue,
 }) => {
+  const t = UI_TEXT[lang];
   const isDawn = announcement.kind === 'dawn';
   const hasVictims = announcement.victims.length > 0;
 
@@ -90,7 +95,7 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
               </span>
               <span className="text-[11px] font-bold text-[#d6bfa2] flex items-center gap-1">
                 <span>🎙️</span>
-                <span>{lang === 'vi' ? 'Quản Trò Lửa Trại' : 'Campfire Game Master'}</span>
+                <span>{t.campfireGm}</span>
               </span>
             </div>
           </div>
@@ -100,14 +105,12 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
             data-testid="gm-announcement-replay-voice-btn"
             onClick={onReplayVoice}
             disabled={isMuted}
-            title={lang === 'vi' ? 'Nghe lại Quản Trò đọc' : 'Replay GM Voice'}
-            aria-label={lang === 'vi' ? 'Nghe lại Quản Trò đọc' : 'Replay GM Voice'}
+            title={t.replayVoice}
+            aria-label={t.replayVoice}
             className="px-2.5 py-1.5 rounded-xl bg-[#1b120b] hover:bg-[#312115] border border-[#785334] text-[11px] font-bold text-[#fde7c3] flex items-center gap-1.5 cursor-pointer disabled:opacity-40 shrink-0"
           >
             <Volume2 className="w-3.5 h-3.5 text-[#f5b82e]" />
-            <span className="hidden sm:inline">
-              {lang === 'vi' ? 'Đọc lại' : 'Replay'}
-            </span>
+            <span className="hidden sm:inline">{t.replayVoice}</span>
           </button>
         </div>
 
@@ -139,12 +142,8 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
               <Skull className="w-3.5 h-3.5" />
               <span>
                 {isDawn
-                  ? lang === 'vi'
-                    ? `Danh sách tử trận (${announcement.victims.length})`
-                    : `Night Casualties (${announcement.victims.length})`
-                  : lang === 'vi'
-                  ? `Người chơi bị loại (${announcement.victims.length})`
-                  : `Eliminated (${announcement.victims.length})`}
+                  ? `${t.nightCasualties} (${announcement.victims.length})`
+                  : `${t.eliminatedLabel} (${announcement.victims.length})`}
               </span>
             </div>
             <div
@@ -196,12 +195,20 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
             </div>
             <div className="text-xs sm:text-sm font-bold leading-snug">
               {isDawn
-                ? lang === 'vi'
-                  ? 'Không có ai thiệt mạng đêm qua! Cả làng cùng suy luận xem chuyện gì đã xảy ra.'
-                  : 'Zero casualties last night! Discuss with the village to figure out what happened.'
-                : lang === 'vi'
-                ? 'Không có ai bị treo cổ hôm nay. Màn đêm sắp buông xuống!'
-                : 'Nobody was executed today. Night is about to fall!'}
+                ? {
+                    vi: 'Không có ai thiệt mạng đêm qua! Cả làng cùng suy luận xem chuyện gì đã xảy ra.',
+                    en: 'Zero casualties last night! Discuss with the village to figure out what happened.',
+                    fr: 'Aucune victime cette nuit ! Discutez avec le village pour comprendre ce qui s’est passé.',
+                    es: '¡Sin víctimas anoche! Debate con la aldea para descubrir qué ocurrió.',
+                    ja: '昨夜は犠牲者なし！村のみんなで何が起きたか話し合いましょう。',
+                  }[lang]
+                : {
+                    vi: 'Không có ai bị treo cổ hôm nay. Màn đêm sắp buông xuống!',
+                    en: 'Nobody was executed today. Night is about to fall!',
+                    fr: 'Personne n’a été éliminé aujourd’hui. La nuit tombe !',
+                    es: 'Nadie fue ejecutado hoy. ¡Cae la noche!',
+                    ja: '本日の処刑者はいませんでした。まもなく夜が訪れます！',
+                  }[lang]}
             </div>
           </div>
         )}
@@ -213,44 +220,66 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
             className="bg-[#1a110a] border border-[#6b4a2e] rounded-2xl p-2.5 space-y-1.5"
           >
             <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#f5b82e]">
-              🗳️ {lang === 'vi' ? 'Kết quả kiểm phiếu (Ai bầu ai)' : 'Vote Tally (Who Voted Whom)'}
+              🗳️ {t.voteLabel}
             </div>
             <div className="space-y-1.5">
-              {announcement.voteBreakdown.slice(0, 8).map((entry) => (
-                <div
-                  key={entry.playerId}
-                  data-testid={`gm-vote-tally-row-${entry.playerId}`}
-                  className="px-2.5 py-1.5 rounded-xl bg-[#2a1c12] border border-[#6b4a2e] text-[11px] text-[#f6ebd8] space-y-1"
-                >
-                  <div className="flex items-center justify-between gap-2 font-bold">
-                    <span className="flex items-center gap-1.5 min-w-0 truncate">
-                      <span>{entry.avatar}</span>
-                      <span className="truncate">
-                        <span className="text-[#f5b82e] font-mono mr-0.5">#{entry.seatNumber}</span>
-                        {entry.name}
-                      </span>
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded bg-[#b83227] text-white font-mono text-[10px] shrink-0">
-                      {entry.votes} {lang === 'vi' ? 'phiếu' : 'votes'}
-                    </span>
-                  </div>
-                  {entry.voters && entry.voters.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-1 text-[10px] text-[#d6bfa2]">
-                      <span className="text-[#bfa586] font-semibold">
-                        {lang === 'vi' ? 'Người bầu:' : 'Voters:'}
-                      </span>
-                      {entry.voters.map((v) => (
-                        <span
-                          key={v.id}
-                          className="px-1.5 py-0.5 rounded bg-[#1b120b] border border-[#6b4a2e] text-[#fde7c3] font-semibold"
-                        >
-                          #{v.seatNumber} {v.name}
+              {announcement.voteBreakdown.slice(0, 8).map((entry) => {
+                const isAbstainRow = entry.playerId === CAMPFIRE_ABSTAIN_ID;
+                const displayName = isAbstainRow ? t.campfireAbstain : entry.name;
+                return (
+                  <div
+                    key={entry.playerId}
+                    data-testid={`gm-vote-tally-row-${entry.playerId}`}
+                    className={`px-2.5 py-1.5 rounded-xl border text-[11px] text-[#f6ebd8] space-y-1 ${
+                      isAbstainRow
+                        ? 'bg-[#2c1f12] border-[#b86d28]'
+                        : 'bg-[#2a1c12] border-[#6b4a2e]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2 font-bold">
+                      <span className="flex items-center gap-1.5 min-w-0 truncate">
+                        <span>{isAbstainRow ? '🔥' : entry.avatar}</span>
+                        <span className="truncate">
+                          {!isAbstainRow && entry.seatNumber > 0 && (
+                            <span className="text-[#f5b82e] font-mono mr-0.5">
+                              #{entry.seatNumber}
+                            </span>
+                          )}
+                          {displayName}
                         </span>
-                      ))}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-white font-mono text-[10px] shrink-0 ${
+                          isAbstainRow ? 'bg-[#b84b10]' : 'bg-[#b83227]'
+                        }`}
+                      >
+                        {entry.votes} {t.votesUnit}
+                      </span>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {entry.voters && entry.voters.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 text-[10px] text-[#d6bfa2]">
+                        <span className="text-[#bfa586] font-semibold">←</span>
+                        {entry.voters.map((v) => {
+                          const isVoterMayor = Boolean(mayorId && v.id === mayorId);
+                          return (
+                            <span
+                              key={v.id}
+                              className={`px-1.5 py-0.5 rounded border font-semibold ${
+                                isVoterMayor
+                                  ? 'bg-[#4f2c12] border-[#f5b82e] text-[#fef3c7]'
+                                  : 'bg-[#1b120b] border-[#6b4a2e] text-[#fde7c3]'
+                              }`}
+                            >
+                              {isVoterMayor ? '👑 ' : ''}#{v.seatNumber} {v.name}
+                              {isVoterMayor ? ' (x2)' : ''}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -281,11 +310,7 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
               ) : (
                 <Lock className="w-3.5 h-3.5 text-[#d8b4fe]" />
               )}
-              <span>
-                {lang === 'vi'
-                  ? 'Thông báo mật dành riêng cho bạn'
-                  : 'Private GM Notice (Only You Can See)'}
-              </span>
+              <span>{t.privateGmNotice}</span>
             </div>
             <p className="text-xs font-semibold text-[#f3e8ff] whitespace-pre-line leading-relaxed">
               {announcement.privateNotice}
@@ -298,9 +323,7 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
           <div className="flex items-center gap-1.5 text-xs font-bold text-[#e6d5b8]">
             <Users className="w-4 h-4 text-[#6ee7b7] shrink-0" />
             <span>
-              {lang === 'vi'
-                ? `Còn sống: ${announcement.aliveCount}/${announcement.totalCount} người`
-                : `Survivors: ${announcement.aliveCount}/${announcement.totalCount}`}
+              {`${t.survivors}: ${announcement.aliveCount}/${announcement.totalCount}`}
             </span>
           </div>
 

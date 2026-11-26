@@ -128,7 +128,9 @@ export function computeNonOverlappingTourLayout(
   }
 
   const sBottom = sTop + sHeight;
-  const spaceAbove = sTop - safeMargin - gapBetweenSpotAndCard;
+  const extraTopClearance = zone === 'bottom-dock' ? 32 : 0;
+  const topGap = gapBetweenSpotAndCard + extraTopClearance;
+  const spaceAbove = sTop - safeMargin - topGap;
   const spaceBelow = vh - sBottom - safeMargin - gapBetweenSpotAndCard;
 
   // Decide whether the dialog card belongs below or above the spotlight cutout
@@ -137,7 +139,7 @@ export function computeNonOverlappingTourLayout(
   if (preferTop) {
     const cardMaxHeight = Math.max(130, Math.min(340, spaceAbove));
     const effectiveH = Math.min(Math.max(measuredCardHeight, 210), cardMaxHeight);
-    const idealTop = sTop - effectiveH - gapBetweenSpotAndCard;
+    const idealTop = sTop - effectiveH - topGap;
     return {
       top: sTop,
       left: sLeft,
@@ -304,13 +306,22 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
   const cardPositionStyle: React.CSSProperties =
     layout.placement === 'top'
       ? {
-          bottom: `${Math.max(12, viewportH - layout.top + 26)}px`,
+          bottom: `${Math.max(12, viewportH - layout.top + (zone === 'bottom-dock' ? 58 : 26))}px`,
           maxHeight: `${layout.cardMaxHeight}px`,
         }
       : {
           top: `${layout.cardTop}px`,
           maxHeight: `${layout.cardMaxHeight}px`,
         };
+
+  const displayDescription =
+    zone === 'bottom-dock'
+      ? lang === 'vi'
+        ? 'Thanh điều khiển phía dưới chứa Sổ Tay ghi chú riêng, Kênh Voice/Chat, BXH, Luật chơi và dãy ghế chọn nhanh — cùng Biểu cảm & Đạo cụ ném 3D mở khóa vào Ban Ngày.'
+        : lang === 'en'
+        ? 'The bottom dock holds your private Deduction Notebook, Voice/Chat, Ranks, Roles, and quick-select seats — plus 3D Emotes & Props unlocked during Daytime.'
+        : step.description
+      : step.description;
 
   return (
     <div
@@ -400,7 +411,7 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
 
         {/* Main Explanation */}
         <p className="text-[11px] sm:text-xs text-slate-200 leading-snug">
-          {step.description}
+          {displayDescription}
         </p>
 
         {/* Highlight Tips */}
