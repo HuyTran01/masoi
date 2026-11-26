@@ -292,6 +292,12 @@ export interface UITranslationSchema {
   gmHostShellSubtitle: string;
   gmPlayerShellTitle: string;
   gmPlayerShellSubtitle: string;
+  storylineLabel: string;
+  ghostNightSpectatorTitle: string;
+  skipCutsceneBtn: string;
+  ghostFastForwardStep: string;
+  ghostNoLivingActor: string;
+  ghostWatchingAction: string;
 }
 
 export const UI_TEXT: Record<Language, UITranslationSchema> = {
@@ -648,6 +654,12 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     gmHostShellSubtitle: 'Công cụ hỗ trợ ván đấu ngoài đời · Không liên quan chế độ Bot/Online',
     gmPlayerShellTitle: 'Thẻ Bài Cá Nhân — Phòng Quản Trò',
     gmPlayerShellSubtitle: 'Chỉ hiển thị duy nhất vai trò của bạn',
+    storylineLabel: 'Kịch bản AI',
+    ghostNightSpectatorTitle: '👻 Chế Độ Hồn Ma Toàn Tri — Đang chứng kiến ban đêm',
+    skipCutsceneBtn: 'Bỏ qua ⏭',
+    ghostFastForwardStep: 'Tua nhanh ⏭',
+    ghostNoLivingActor: '💀 Vai này đã tử trận / không có người thức',
+    ghostWatchingAction: 'Đang chứng kiến:',
   },
   en: {
     appTitle: 'WEREWOLF 3D',
@@ -998,6 +1010,12 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     gmHostShellSubtitle: 'Offline table companion · Isolated from Bot/Online matches',
     gmPlayerShellTitle: 'Personal Role Card — GM Room',
     gmPlayerShellSubtitle: 'Shows ONLY your own secret role',
+    storylineLabel: 'AI Storyline',
+    ghostNightSpectatorTitle: '👻 Omniscient Ghost Mode — Witnessing the Night',
+    skipCutsceneBtn: 'Skip ⏭',
+    ghostFastForwardStep: 'Fast-Forward ⏭',
+    ghostNoLivingActor: '💀 This role fell / no living actor wakes',
+    ghostWatchingAction: 'Witnessing action:',
   },
   fr: {
     appTitle: 'LOUP-GAROU 3D',
@@ -1346,6 +1364,12 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     gmHostShellSubtitle: 'Compagnon de jeu sur table · Séparé du mode IA/En Ligne',
     gmPlayerShellTitle: 'Carte Personnelle — Salle MJ',
     gmPlayerShellSubtitle: 'Affiche UNIQUEMENT votre rôle secret',
+    storylineLabel: 'Scénario IA',
+    ghostNightSpectatorTitle: '👻 Mode Fantôme Omniscient — Témoin de la Nuit',
+    skipCutsceneBtn: 'Passer ⏭',
+    ghostFastForwardStep: 'Avancer ⏭',
+    ghostNoLivingActor: '💀 Ce rôle est tombé / aucun acteur éveillé',
+    ghostWatchingAction: 'Action observée :',
   },
   es: {
     appTitle: 'HOMBRE LOBO 3D',
@@ -1694,6 +1718,12 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     gmHostShellSubtitle: 'Asistente de mesa · Separado del modo IA/Online',
     gmPlayerShellTitle: 'Carta Personal — Sala Narrador',
     gmPlayerShellSubtitle: 'Muestra SOLO tu rol secreto',
+    storylineLabel: 'Trama IA',
+    ghostNightSpectatorTitle: '👻 Modo Fantasma Omnisciente — Testigo de la Noche',
+    skipCutsceneBtn: 'Omitir ⏭',
+    ghostFastForwardStep: 'Avanzar ⏭',
+    ghostNoLivingActor: '💀 Este rol cayó / nadie despierta',
+    ghostWatchingAction: 'Observando acción:',
   },
   ja: {
     appTitle: '人狼 3D',
@@ -2042,6 +2072,12 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     gmHostShellSubtitle: '対面プレイ専用ツール・AI/オンライン対戦とは独立',
     gmPlayerShellTitle: '個人役職カード — GMルーム',
     gmPlayerShellSubtitle: 'あなた自身の秘密の役職のみ表示',
+    storylineLabel: 'AIシナリオ',
+    ghostNightSpectatorTitle: '👻 全知の幽霊モード — 夜の行動を観戦中',
+    skipCutsceneBtn: 'スキップ ⏭',
+    ghostFastForwardStep: '早送り ⏭',
+    ghostNoLivingActor: '💀 この役職は脱落 / 生存者なし',
+    ghostWatchingAction: '現在の行動:',
   },
 };
 

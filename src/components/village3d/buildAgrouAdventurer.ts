@@ -30,9 +30,13 @@ export interface AgrouSeatVisual {
   hitbox: THREE.Mesh;
   ghostHitbox: THREE.Mesh;
   stoolHitbox: THREE.Mesh;
+  shadowDisc: THREE.Mesh;
+  haloRing: THREE.Mesh;
+  hipLantern: THREE.Mesh;
   haloMat: THREE.MeshBasicMaterial;
   lanternMat: THREE.MeshStandardMaterial;
   cloakMat: THREE.MeshStandardMaterial;
+  baseCloakRoughness: number;
   eyeLeftMat: THREE.MeshBasicMaterial;
   eyeRightMat: THREE.MeshBasicMaterial;
   tombstoneGroup: THREE.Group;
@@ -45,13 +49,21 @@ export interface AgrouSeatVisual {
   hatVariants: Record<AgrouHatId, THREE.Group>;
   koProgress: number;
   wobbleTimer: number;
+  hitRecoilX: number;
+  hitRecoilZ: number;
+  hitRecoilTimer: number;
   throwAnimTimer: number;
-  reactionType: 'none' | 'angry' | 'happy_dance';
+  throwTargetYaw: number;
+  wetTimer: number;
+  reactionType: 'none' | 'tomato_splat' | 'egg_disgust' | 'water_shiver' | 'happy_dance';
   reactionTimer: number;
   emoteType: AgrouEmoteId | null;
   emoteTimer: number;
   standFactor: number; // 0 = seated on wooden stool, 1 = standing upright
   walkPhase: number;
+  landingCompress: number;
+  prevBodyYaw: number;
+  nightCutsceneOverride: boolean;
   yOffset: number;
   vy: number;
   isGrounded: boolean;
@@ -87,27 +99,29 @@ export function applyAdventurerBodyPose(
     moveSpeedRatio: number; // 0 = idle, 1 = walk, 1.5 = sprint
     crouchBlend: number; // 0 = upright, 1 = crouched
     jumpHeight: number;
+    landingCompress?: number; // 0..1 landing squash spring
     koProgress?: number;
   }
 ) {
   const sf = Math.max(0, Math.min(1, params.standFactor));
   const cb = Math.max(0, Math.min(1, params.crouchBlend)) * sf;
+  const lc = Math.max(0, Math.min(1, params.landingCompress ?? 0)) * sf;
   const speedRatio = Math.max(0, Math.min(1.6, params.moveSpeedRatio)) * sf;
   const airborne = params.jumpHeight > 0.04 ? Math.min(1, params.jumpHeight / 0.45) * sf : 0;
 
   // Vertical hip height: seated on stool (0.48) -> standing grounded (0.74) -> crouched (0.50)
   const uprightY = THREE.MathUtils.lerp(0.48, 0.74, sf);
-  const crouchedY = uprightY - cb * 0.24;
+  const crouchedY = uprightY - cb * 0.24 - lc * 0.14;
   const strideBounce = speedRatio > 0.05 && airborne < 0.1
     ? Math.abs(Math.sin(params.walkPhase)) * (0.045 * Math.min(1.3, speedRatio))
     : 0;
   seat.bodyGroup.position.y = crouchedY + strideBounce + params.jumpHeight;
 
-  // Base leg angles from seated -> standing -> crouched
+  // Base leg angles from seated -> standing -> crouched + landing knee squash
   const seatedHipX = -1.48;
   const seatedKneeX = 1.42;
-  const standingHipX = -cb * 0.82;
-  const standingKneeX = cb * 1.36;
+  const standingHipX = -cb * 0.82 - lc * 0.34;
+  const standingKneeX = cb * 1.36 + lc * 0.58;
 
   let baseHipX = THREE.MathUtils.lerp(seatedHipX, standingHipX, sf);
   let baseKneeX = THREE.MathUtils.lerp(seatedKneeX, standingKneeX, sf);
@@ -136,9 +150,9 @@ export function applyAdventurerBodyPose(
   seat.leftHipPivot.rotation.y = -seatedSplay;
   seat.rightHipPivot.rotation.y = seatedSplay;
 
-  // Forward stealth lean when crouching or sprinting
+  // Forward stealth lean when crouching, sprinting, or absorbing a jump landing
   const sprintLean = speedRatio > 1.1 ? (speedRatio - 1.0) * 0.22 : 0;
-  seat.torsoGroup.rotation.x = cb * 0.28 + sprintLean;
+  seat.torsoGroup.rotation.x = cb * 0.28 + sprintLean + lc * 0.14;
 }
 
 const SKIN_TONES = [0xe8b08a, 0xd89b72, 0xf1c29b, 0xc6865e, 0xe0a67e, 0xa86f4c];
@@ -1235,9 +1249,13 @@ export function buildAgrouAdventurerPool(
       hitbox,
       ghostHitbox,
       stoolHitbox,
+      shadowDisc,
+      haloRing,
+      hipLantern,
       haloMat,
       lanternMat,
       cloakMat,
+      baseCloakRoughness: 0.82,
       eyeLeftMat,
       eyeRightMat,
       tombstoneGroup,
@@ -1250,13 +1268,21 @@ export function buildAgrouAdventurerPool(
       hatVariants,
       koProgress: 0,
       wobbleTimer: 0,
+      hitRecoilX: 0,
+      hitRecoilZ: 0,
+      hitRecoilTimer: 0,
       throwAnimTimer: 0,
+      throwTargetYaw: 0,
+      wetTimer: 0,
       reactionType: 'none',
       reactionTimer: 0,
       emoteType: null,
       emoteTimer: 0,
       standFactor: 0,
       walkPhase: 0,
+      landingCompress: 0,
+      prevBodyYaw: 0,
+      nightCutsceneOverride: false,
       yOffset: 0,
       vy: 0,
       isGrounded: true,

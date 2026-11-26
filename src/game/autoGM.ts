@@ -3,6 +3,7 @@ import {
   NightActions,
   NightDeathCinematicState,
   NightResult,
+  NightSkillCutsceneEvent,
   Phase,
   Player,
   RoleId,
@@ -15,6 +16,12 @@ import {
   getDyingWolfVictimsForWitch,
   VoteTallyVoter,
 } from './rules';
+import {
+  AIMatchBrain,
+  computeSmartBotNightAction,
+  computeSmartBotVotes,
+  pickSmartBotHunterTargetWithBrain,
+} from './smartAI';
 
 export type NightStepKey =
   | 'doppelganger'
@@ -572,9 +579,19 @@ export function computeAutoGMBotNightStepAction(
     wolfPupFrenzy: boolean;
     humanPlayerId: string;
     knownWolfIdsByBotSeer?: string[];
+    checkedIdsByBotSeer?: string[];
     suspectedIds?: string[];
+    brain?: AIMatchBrain | null;
   }
 ): Partial<NightActions> {
+  if (options.brain) {
+    return computeSmartBotNightAction(options.brain, stepKey, players, currentActions, {
+      round: options.round,
+      wolfPupFrenzy: options.wolfPupFrenzy,
+      humanPlayerId: options.humanPlayerId,
+    });
+  }
+
   const alivePlayers = players.filter((p) => p.isAlive);
   const human = players.find((p) => p.id === options.humanPlayerId);
 
@@ -669,7 +686,7 @@ export function computeAutoGMBotNightStepAction(
           updates.witchHealTargetId = botWitch.id;
         } else if (botWitch.loverId && dyingVictims.includes(botWitch.loverId)) {
           updates.witchHealTargetId = botWitch.loverId;
-        } else if (options.round <= 2 && Math.random() < 0.6) {
+        } else if (Math.random() < (options.round <= 2 ? 0.6 : 0.55)) {
           updates.witchHealTargetId =
             dyingVictims[Math.floor(Math.random() * dyingVictims.length)];
         }
@@ -701,9 +718,12 @@ export function computeAutoGMBotNightStepAction(
       (p) => p.roleId === 'seer' && p.id !== options.humanPlayerId
     );
     if (botSeer && !botSeer.hasUsedPower && !currentActions.seerTargetId) {
-      const alreadyKnown = new Set(options.knownWolfIdsByBotSeer || []);
+      const alreadyChecked = new Set([
+        ...(options.knownWolfIdsByBotSeer || []),
+        ...(options.checkedIdsByBotSeer || []),
+      ]);
       const candidates = alivePlayers.filter(
-        (p) => p.id !== botSeer.id && !alreadyKnown.has(p.id)
+        (p) => p.id !== botSeer.id && !alreadyChecked.has(p.id)
       );
       const pool =
         candidates.length > 0
@@ -834,8 +854,20 @@ export function computeSmartBotDayVotes(
   players: Player[],
   knownWolfIds: string[] = [],
   humanTargetId?: string | null,
-  chatSignals?: BotChatVoteSignals | null
+  chatSignals?: BotChatVoteSignals | null,
+  brain?: AIMatchBrain | null,
+  voteContext?: { currentVotes?: VoteRecord[]; mayorId?: string | null; round?: number }
 ): VoteRecord[] {
+  if (brain) {
+    return computeSmartBotVotes(brain, players, {
+      humanTargetId,
+      chatSignals,
+      currentVotes: voteContext?.currentVotes,
+      mayorId: voteContext?.mayorId,
+      round: voteContext?.round,
+    });
+  }
+
   const alive = players.filter((p) => p.isAlive);
   const aliveBots = alive.filter((p) => p.isBot);
   const knownSet = new Set(knownWolfIds);
@@ -853,10 +885,10 @@ export function computeSmartBotDayVotes(
       return { voterId: bot.id, targetId: bot.id };
     }
 
-    // Fair AI: Traitor does not wake with Werewolves and votes deductively without knowing packmates
     const isBotWolfTeam =
       bot.roleId === 'werewolf' ||
       bot.roleId === 'wolf_pup';
+    const isBotTraitor = bot.roleId === 'traitor';
 
     const mySuspects = new Set(chatSignals?.suspectsByVoter[bot.id] || []);
     const myAllies = new Set(chatSignals?.alliesByVoter[bot.id] || []);
@@ -884,6 +916,17 @@ export function computeSmartBotDayVotes(
           wolfCandidatePool[Math.floor(Math.random() * wolfCandidatePool.length)];
         return { voterId: bot.id, targetId: pick.id };
       }
+    } else if (isBotTraitor) {
+      // Traitor is Werewolf-aligned without night omniscience:
+      // NEVER self-sabotage publicly suspected/known wolves; counter-vote outside knownSet!
+      const nonKnownPool = preferredPool.filter((p) => !knownSet.has(p.id));
+      const traitorPool = nonKnownPool.length > 0 ? nonKnownPool : preferredPool;
+      const accusedOutside = traitorPool.filter((p) => mySuspects.has(p.id));
+      if (accusedOutside.length > 0) {
+        return { voterId: bot.id, targetId: accusedOutside[0].id };
+      }
+      const pick = traitorPool[Math.floor(Math.random() * traitorPool.length)];
+      return { voterId: bot.id, targetId: pick.id };
     } else {
       // 1. Confirmed known wolf takes top priority for Seer & villagers
       const knownWolvesAlive = preferredPool.filter((p) => knownSet.has(p.id));
@@ -928,8 +971,17 @@ export function pickSmartBotHunterTarget(
   players: Player[],
   hunter: Player,
   knownWolfIds?: string[],
-  chatSignals?: BotChatVoteSignals | null
+  chatSignals?: BotChatVoteSignals | null,
+  brain?: AIMatchBrain | null,
+  options?: { lynchVoters?: string[] }
 ): Player | null {
+  if (brain) {
+    return pickSmartBotHunterTargetWithBrain(brain, players, hunter, {
+      chatSignals,
+      lynchVoters: options?.lynchVoters,
+    });
+  }
+
   const aliveOthers = players.filter((p) => p.isAlive && p.id !== hunter.id);
   if (aliveOthers.length === 0) return null;
 
@@ -1106,16 +1158,28 @@ export function buildBotDayDiscussionLines(
 
 /**
  * Computes the exact initial countdown duration for a given Auto-GM night step.
+ * Supports Ghost Spectator pacing (>= 4.5s for active steps so 3D skill cutscenes & HUD readouts play cleanly).
  */
 export function getStepInitialTimerSeconds(
   step: AutoGMNightStep | null,
-  myNightStepIdx: number,
-  currentStepIdx: number
+  myNightStepIdx = -1,
+  currentStepIdxOrConfig: number | CustomTimerConfig = 0,
+  isGhostSpectator = false
 ): number {
-  if (!step) return 20;
+  if (!step) {
+    if (typeof currentStepIdxOrConfig === 'object' && currentStepIdxOrConfig) {
+      return currentStepIdxOrConfig.nightActionSec || 20;
+    }
+    return 20;
+  }
+  if (isGhostSpectator) {
+    return step.hasLivingActor ? Math.max(4.5, step.botDurationSec) : 1.8;
+  }
   if (step.isHumanTurn) {
     return step.humanDurationSec;
   }
+  const currentStepIdx =
+    typeof currentStepIdxOrConfig === 'number' ? currentStepIdxOrConfig : 0;
   if (myNightStepIdx > currentStepIdx) {
     return Math.min(2, step.botDurationSec);
   }
@@ -1143,7 +1207,9 @@ export function prepareNightStartForHuman(
   options: {
     wolfPupFrenzy?: boolean;
     knownWolfIdsByBotSeer?: string[];
+    checkedIdsByBotSeer?: string[];
     suspectedIds?: string[];
+    brain?: AIMatchBrain | null;
   } = {}
 ): PreparedNightStart {
   const schedule = buildAutoGMNightSchedule(players, round, timerConfig, humanPlayerId);
@@ -1151,6 +1217,7 @@ export function prepareNightStartForHuman(
     ? players.find((p) => p.id === humanPlayerId)
     : players.find((p) => !p.isBot) || players[0];
   const myStepIdx = findHumanNightStepIndex(schedule, humanPlayer, round);
+  const isGhostSpectator = Boolean(humanPlayer && !humanPlayer.isAlive);
 
   if (myStepIdx <= 0) {
     const firstStep = schedule[0] || null;
@@ -1158,9 +1225,7 @@ export function prepareNightStartForHuman(
       schedule,
       initialStepIndex: 0,
       initialTimerSec: firstStep
-        ? firstStep.isHumanTurn
-          ? firstStep.humanDurationSec
-          : Math.min(2, firstStep.botDurationSec)
+        ? getStepInitialTimerSeconds(firstStep, myStepIdx, 0, isGhostSpectator)
         : timerConfig.nightActionSec,
       preSimulatedActions: {},
       completedBotRoleIds: [],
@@ -1193,7 +1258,9 @@ export function prepareNightStartForHuman(
         wolfPupFrenzy: Boolean(options.wolfPupFrenzy),
         humanPlayerId: humanId,
         knownWolfIdsByBotSeer: options.knownWolfIdsByBotSeer || [],
+        checkedIdsByBotSeer: options.checkedIdsByBotSeer || [],
         suspectedIds: options.suspectedIds || [],
+        brain: options.brain,
       }
     );
     Object.assign(preSimulatedActions, botAct);
@@ -1207,6 +1274,150 @@ export function prepareNightStartForHuman(
     preSimulatedActions,
     completedBotRoleIds,
   };
+}
+
+/**
+ * Maps a night step's confirmed actions into 3D NightSkillCutsceneEvent items
+ * (including BOTH witch_heal and witch_poison when Witch uses both in one night).
+ * Seer alignment (`seerIsWolf`) is strictly null unless `includeSeerAlignment === true`
+ * (authorized ONLY for the Seer themselves after confirming, or dead Ghost spectators).
+ */
+export function buildNightSkillCutsceneForStep(params: {
+  stepKey: NightStepKey;
+  players: Player[];
+  actions: NightActions;
+  round: number;
+  wolfPupFrenzy?: boolean;
+  includeSeerAlignment?: boolean;
+  lang?: Language;
+}): NightSkillCutsceneEvent[] {
+  const {
+    stepKey,
+    players,
+    actions,
+    round,
+    wolfPupFrenzy = false,
+    includeSeerAlignment = false,
+    lang = 'vi',
+  } = params;
+
+  const wakingActors = players.filter((p) =>
+    isPlayerAwakeForNightStep(p, stepKey, round)
+  );
+  if (wakingActors.length === 0) return [];
+  const actorIds = wakingActors.map((p) => p.id);
+
+  if (stepKey === 'doppelganger' && actions.doppelgangerTargetId) {
+    return [
+      {
+        id: `cutscene_r${round}_doppelganger`,
+        kind: 'doppelganger',
+        actorIds,
+        primaryTargetId: actions.doppelgangerTargetId,
+        durationMs: 2200,
+        label: lang === 'vi' ? '🪞 Nhân Bản Sao Chép' : '🪞 Doppelgänger Copy',
+      },
+    ];
+  }
+
+  if (
+    stepKey === 'cupid' &&
+    actions.cupidLovers &&
+    actions.cupidLovers[0] &&
+    actions.cupidLovers[1] &&
+    actions.cupidLovers[0] !== actions.cupidLovers[1]
+  ) {
+    return [
+      {
+        id: `cutscene_r${round}_cupid`,
+        kind: 'cupid',
+        actorIds,
+        primaryTargetId: actions.cupidLovers[0],
+        secondaryTargetId: actions.cupidLovers[1],
+        durationMs: 2400,
+        label: lang === 'vi' ? '💘 Mũi Tên Cupid' : '💘 Cupid’s Arrow',
+      },
+    ];
+  }
+
+  if (stepKey === 'bodyguard' && actions.guardTargetId) {
+    return [
+      {
+        id: `cutscene_r${round}_bodyguard`,
+        kind: 'bodyguard',
+        actorIds,
+        primaryTargetId: actions.guardTargetId,
+        durationMs: 2200,
+        label: lang === 'vi' ? '🛡️ Khiên Bảo Vệ' : '🛡️ Bodyguard Shield',
+      },
+    ];
+  }
+
+  if (stepKey === 'werewolf' && actions.wolfTargetId) {
+    const secondary =
+      wolfPupFrenzy &&
+      actions.secondWolfTargetId &&
+      actions.secondWolfTargetId !== actions.wolfTargetId
+        ? actions.secondWolfTargetId
+        : null;
+    return [
+      {
+        id: `cutscene_r${round}_werewolf`,
+        kind: 'werewolf',
+        actorIds,
+        primaryTargetId: actions.wolfTargetId,
+        secondaryTargetId: secondary,
+        durationMs: 2300,
+        label: lang === 'vi' ? '🐺 Đàn Sói Săn Mồi' : '🐺 Werewolf Hunt',
+      },
+    ];
+  }
+
+  if (stepKey === 'witch') {
+    const events: NightSkillCutsceneEvent[] = [];
+    if (actions.witchHealTargetId) {
+      events.push({
+        id: `cutscene_r${round}_witch_heal`,
+        kind: 'witch_heal',
+        actorIds,
+        primaryTargetId: actions.witchHealTargetId,
+        durationMs: 2200,
+        label: lang === 'vi' ? '💚 Bình Cứu Sống' : '💚 Witch Heal Elixir',
+      });
+    }
+    if (actions.witchPoisonTargetId) {
+      events.push({
+        id: `cutscene_r${round}_witch_poison`,
+        kind: 'witch_poison',
+        actorIds,
+        primaryTargetId: actions.witchPoisonTargetId,
+        durationMs: 2200,
+        label: lang === 'vi' ? '🧪 Bình Độc Nửa Đêm' : '🧪 Witch Poison',
+      });
+    }
+    return events;
+  }
+
+  if (stepKey === 'seer' && actions.seerTargetId) {
+    const target = players.find((p) => p.id === actions.seerTargetId);
+    const seerIsWolf =
+      includeSeerAlignment && target
+        ? target.roleId === 'werewolf' || target.roleId === 'wolf_pup'
+        : null;
+    return [
+      {
+        id: `cutscene_r${round}_seer`,
+        kind: 'seer',
+        actorIds,
+        primaryTargetId: actions.seerTargetId,
+        seerIsWolf,
+        durationMs: 2200,
+        label: lang === 'vi' ? '🔮 Tiên Tri Soi Bài' : '🔮 Seer Divination',
+      },
+    ];
+  }
+
+  return [];
 }
 
 export interface GMAnnouncementVictim {

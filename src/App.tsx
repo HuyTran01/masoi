@@ -92,6 +92,9 @@ import {
   PropType,
   ThrownPropEvent,
   NightDeathCinematicState,
+  NightSkillCutsceneEvent,
+  GhostNightSpectatorView,
+  StorylineId,
 } from './types/game';
 import { ROLES } from './game/roles';
 import {
@@ -138,6 +141,7 @@ import {
   buildBotDayDiscussionLines,
   getStepInitialTimerSeconds,
   prepareNightStartForHuman,
+  buildNightSkillCutsceneForStep,
   shouldAutoAdvanceOnTimerZero,
   buildDawnGMAnnouncement,
   buildDuskGMAnnouncement,
@@ -146,6 +150,18 @@ import {
   CustomTimerConfig,
   DEFAULT_TIMER_CONFIG,
 } from './game/autoGM';
+import {
+  AIMatchBrain,
+  ScheduledBotBeat,
+  STORYLINE_CATALOG,
+  applyStorylineRoleSetup,
+  createAIMatchBrain,
+  recordBotSeerInspection,
+  recordRoundPublicOutcome,
+  generateScheduledDiscussionBeats,
+  generateGallowsDefenseBeat,
+  generateHumanChatResponses,
+} from './game/smartAI';
 import { UI_TEXT } from './utils/i18n';
 import { sound } from './utils/sound';
 import { addMatchHistory } from './utils/storage';
@@ -182,6 +198,8 @@ interface SavedAIMatchSnapshot {
   knownWolfIds?: string[];
   villageSize: number;
   preferredRole: RoleId | 'random';
+  preferredStoryline?: StorylineId;
+  aiBrain?: AIMatchBrain | null;
   eventBanner: string;
 }
 
@@ -520,6 +538,28 @@ export default function App() {
     }
     return 'random';
   });
+  const [preferredStoryline, setPreferredStoryline] = useState<StorylineId>(() => {
+    try {
+      const saved = localStorage.getItem('werewolf_pref_storyline') as StorylineId | null;
+      if (saved && saved in STORYLINE_CATALOG) {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return 'random_dramatic';
+  });
+  const [skillCutsceneQueue, setSkillCutsceneQueue] = useState<NightSkillCutsceneEvent[]>([]);
+  const activeNightScene = skillCutsceneQueue[0] ?? null;
+  const [onlineGhostNightState, setOnlineGhostNightState] =
+    useState<GhostNightSpectatorView | null>(null);
+  const pendingNightAdvanceRef = useRef<'resolve_night' | 'advance_night_step' | null>(null);
+  const pendingHunterShotRef = useRef<{ hunterId: string; targetId: string } | null>(null);
+  const processedOnlineCutscenesRef = useRef<Set<string>>(new Set());
+  const playedLocalCutscenesRef = useRef<Set<string>>(new Set());
+  const aiBrainRef = useRef<AIMatchBrain | null>(null);
+  const botChatTimeoutsRef = useRef<number[]>([]);
+  const gallowsDefenseScheduledRoundRef = useRef<number>(-1);
   const [timerConfig, setTimerConfig] = useState<CustomTimerConfig>(() => {
     try {
       const saved = localStorage.getItem('werewolf_timer_config');
@@ -658,6 +698,13 @@ export default function App() {
   const [players, setPlayers] = useState<Player[]>(() => initialBootState.readyPlayers);
   const [mayorId, setMayorId] = useState<string | null>(() => initialBootState.initialMayorId);
   const playersRef = useRef<Player[]>(players);
+  if (!aiBrainRef.current) {
+    aiBrainRef.current = createAIMatchBrain(
+      initialBootState.readyPlayers,
+      preferredStoryline,
+      currentUser.id
+    );
+  }
   useEffect(() => {
     playersRef.current = players;
   }, [players]);
@@ -708,6 +755,10 @@ export default function App() {
 
   // Voting & Voice State
   const [votes, setVotes] = useState<VoteRecord[]>([]);
+  const votesRef = useRef<VoteRecord[]>(votes);
+  useEffect(() => {
+    votesRef.current = votes;
+  }, [votes]);
   const [hasVoted, setHasVoted] = useState<boolean>(false);
   const [isMicOn, setIsMicOn] = useState<boolean>(false);
   const [activeSpeakers, setActiveSpeakers] = useState<string[]>([]);
@@ -734,14 +785,71 @@ export default function App() {
     messagesRef.current = messages;
   }, [messages]);
 
+  const enqueueSkillCutscenes = useCallback((events: NightSkillCutsceneEvent[]) => {
+    if (!Array.isArray(events) || events.length === 0) return;
+    setSkillCutsceneQueue((prev) => {
+      const seen = new Set(prev.map((e) => e.id));
+      const fresh = events.filter((e) => e && e.id && !seen.has(e.id));
+      return fresh.length > 0 ? [...prev, ...fresh] : prev;
+    });
+  }, []);
+
+  const skipActiveSkillCutscene = useCallback(() => {
+    setSkillCutsceneQueue((prev) => (prev.length > 0 ? prev.slice(1) : prev));
+  }, []);
+
+  const clearSkillCutscenes = useCallback(() => {
+    pendingNightAdvanceRef.current = null;
+    pendingHunterShotRef.current = null;
+    setSkillCutsceneQueue([]);
+  }, []);
+
+  const clearScheduledBotChats = useCallback(() => {
+    for (const id of botChatTimeoutsRef.current) {
+      window.clearTimeout(id);
+    }
+    botChatTimeoutsRef.current = [];
+  }, []);
+
+  const scheduleBotBeats = useCallback(
+    (beats: ScheduledBotBeat[], allowedPhases: Phase[], scheduledMatchId: number) => {
+      for (const beat of beats) {
+        const tid = window.setTimeout(() => {
+          botChatTimeoutsRef.current = botChatTimeoutsRef.current.filter((x) => x !== tid);
+          if (
+            matchInstanceIdRef.current !== scheduledMatchId ||
+            !allowedPhases.includes(phaseRef.current)
+          ) {
+            return;
+          }
+          const speakerNow = playersRef.current.find((p) => p.id === beat.speakerId);
+          if (!speakerNow || !speakerNow.isAlive) return;
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `bot_ai_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+              senderId: beat.speakerId,
+              senderName: beat.speakerName,
+              text: beat.text,
+              timestamp: Date.now(),
+            },
+          ]);
+        }, Math.max(0, beat.delayMs));
+        botChatTimeoutsRef.current.push(tid);
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     try {
       localStorage.setItem('werewolf_pref_village_size', String(villageSize));
       localStorage.setItem('werewolf_pref_role', preferredRole);
+      localStorage.setItem('werewolf_pref_storyline', preferredStoryline);
     } catch {
       // ignore
     }
-  }, [villageSize, preferredRole]);
+  }, [villageSize, preferredRole, preferredStoryline]);
 
   const me = players.find((p) => p.id === currentUser.id) || players[0];
   const myRole = (me && ROLES[me.roleId]) || ROLES.villager;
@@ -981,7 +1089,7 @@ export default function App() {
     }
   }, [me.isAlive, chatTab]);
 
-  // Cancel pending delayed bot vote / bot prop timers whenever phase, match, or shell changes
+  // Cancel pending delayed bot vote / prop / chat timers & cutscenes whenever phase, match, or shell changes
   useEffect(() => {
     if (phase !== 'day_voting' && botVoteTimeoutRef.current !== null) {
       window.clearTimeout(botVoteTimeoutRef.current);
@@ -991,7 +1099,25 @@ export default function App() {
       window.clearTimeout(botPropTimeoutRef.current);
       botPropTimeoutRef.current = null;
     }
-  }, [phase, matchInstanceId, shellState]);
+    if (shellState !== 'playing' || (phase !== 'day_discussion' && phase !== 'day_voting')) {
+      clearScheduledBotChats();
+    }
+    if (shellState !== 'playing' || (phase !== 'night' && phase !== 'hunter_revenge')) {
+      clearSkillCutscenes();
+      setOnlineGhostNightState(null);
+    }
+  }, [phase, matchInstanceId, shellState, clearScheduledBotChats, clearSkillCutscenes]);
+
+  // Auto-pop active 3D night skill cutscene after its durationMs (default 2200ms)
+  useEffect(() => {
+    if (!activeNightScene) return;
+    const activeId = activeNightScene.id;
+    const duration = Math.max(400, activeNightScene.durationMs ?? 2200);
+    const tid = window.setTimeout(() => {
+      setSkillCutsceneQueue((prev) => (prev[0]?.id === activeId ? prev.slice(1) : prev));
+    }, duration);
+    return () => window.clearTimeout(tid);
+  }, [activeNightScene]);
 
   useEffect(() => {
     return () => {
@@ -1003,8 +1129,9 @@ export default function App() {
         window.clearTimeout(botPropTimeoutRef.current);
         botPropTimeoutRef.current = null;
       }
+      clearScheduledBotChats();
     };
-  }, []);
+  }, [clearScheduledBotChats]);
 
   // Sync Ambient BGM with current phase (strictly ONLY during 3D 'playing' mode)
   useEffect(() => {
@@ -1014,6 +1141,11 @@ export default function App() {
       sound.stopBGM();
     }
   }, [shellState, phase]);
+
+  // Sync spatial biome audio soundscape whenever mapBiome changes (Title, Locker, live matches)
+  useEffect(() => {
+    sound.setBiome(avatarConfig.mapBiome);
+  }, [avatarConfig.mapBiome]);
 
   // Check URL query parameters on mount (?gm=GM-XXXX, ?gmroom=GM-XXXX, or ?room=GM-XXXX opens standalone GM Player Card view)
   useEffect(() => {
@@ -1118,6 +1250,11 @@ export default function App() {
         window.clearTimeout(botPropTimeoutRef.current);
         botPropTimeoutRef.current = null;
       }
+      clearScheduledBotChats();
+      clearSkillCutscenes();
+      playedLocalCutscenesRef.current.clear();
+      processedOnlineCutscenesRef.current.clear();
+      setOnlineGhostNightState(null);
 
       const human = targetPlayers.find((p) => p.id === currentUser.id) || targetPlayers[0];
       const prepared = prepareNightStartForHuman(
@@ -1129,6 +1266,7 @@ export default function App() {
           wolfPupFrenzy: targetFrenzy,
           knownWolfIdsByBotSeer: knownWolves,
           suspectedIds: getPublicSuspectedIds(targetPlayers),
+          brain: aiBrainRef.current,
         }
       );
 
@@ -1180,7 +1318,14 @@ export default function App() {
 
       return prepared;
     },
-    [currentUser.id, timerConfig, knownWolfIds, getPublicSuspectedIds]
+    [
+      currentUser.id,
+      timerConfig,
+      knownWolfIds,
+      getPublicSuspectedIds,
+      clearScheduledBotChats,
+      clearSkillCutscenes,
+    ]
   );
 
   // Automated Game Master ("Quản Trò Máy") sequential night step orchestrator
@@ -1191,7 +1336,9 @@ export default function App() {
 
     const awakeNow = isPlayerAwakeForNightStep(me, currentNightStep.key, round);
     setHasClosedEyesTonight(false);
-    setTimerSeconds(getStepInitialTimerSeconds(currentNightStep, myNightStepIdx, nightStepIndex));
+    setTimerSeconds(
+      getStepInitialTimerSeconds(currentNightStep, myNightStepIdx, nightStepIndex, !me.isAlive)
+    );
 
     setEventBanner(
       awakeNow
@@ -1208,25 +1355,27 @@ export default function App() {
       if (currentNightStep.key === 'witch') {
         botWitchActedTonightRef.current = true;
       }
+      const currentActions: NightActions = {
+        wolfTargetId: tonightWolfVictimId,
+        secondWolfTargetId,
+        guardTargetId: guardTargetTonightId,
+        witchHealTargetId: witchHealTargetTonightId,
+        witchPoisonTargetId,
+        seerTargetId: seerTargetTonightId,
+        cupidLovers,
+        doppelgangerTargetId,
+      };
       const botUpdates = computeAutoGMBotNightStepAction(
         currentNightStep.key,
         players,
-        {
-          wolfTargetId: tonightWolfVictimId,
-          secondWolfTargetId,
-          guardTargetId: guardTargetTonightId,
-          witchHealTargetId: witchHealTargetTonightId,
-          witchPoisonTargetId,
-          seerTargetId: seerTargetTonightId,
-          cupidLovers,
-          doppelgangerTargetId,
-        },
+        currentActions,
         {
           round,
           wolfPupFrenzy,
           humanPlayerId: me.id,
           knownWolfIdsByBotSeer: knownWolfIds,
           suspectedIds: getPublicSuspectedIds(players),
+          brain: aiBrainRef.current,
         }
       );
 
@@ -1262,6 +1411,34 @@ export default function App() {
       }
       if (botUpdates.guardTargetId) {
         setGuardTargetTonightId(botUpdates.guardTargetId);
+      }
+
+      // Omniscient Ghost Spectator: enqueue every AI role's 3D skill cast cutscene!
+      if (!me.isAlive) {
+        const mergedActions: NightActions = {
+          wolfTargetId: botUpdates.wolfTargetId ?? currentActions.wolfTargetId,
+          secondWolfTargetId: botUpdates.secondWolfTargetId ?? currentActions.secondWolfTargetId,
+          guardTargetId: botUpdates.guardTargetId ?? currentActions.guardTargetId,
+          witchHealTargetId: botUpdates.witchHealTargetId ?? currentActions.witchHealTargetId,
+          witchPoisonTargetId: botUpdates.witchPoisonTargetId ?? currentActions.witchPoisonTargetId,
+          seerTargetId: botUpdates.seerTargetId ?? currentActions.seerTargetId,
+          cupidLovers: botUpdates.cupidLovers ?? currentActions.cupidLovers,
+          doppelgangerTargetId:
+            botUpdates.doppelgangerTargetId ?? currentActions.doppelgangerTargetId,
+        };
+        const ghostEvents = buildNightSkillCutsceneForStep({
+          stepKey: currentNightStep.key,
+          players,
+          actions: mergedActions,
+          round,
+          wolfPupFrenzy,
+          includeSeerAlignment: true,
+          lang,
+        }).filter((ev) => !playedLocalCutscenesRef.current.has(ev.id));
+        if (ghostEvents.length > 0) {
+          ghostEvents.forEach((ev) => playedLocalCutscenesRef.current.add(ev.id));
+          enqueueSkillCutscenes(ghostEvents);
+        }
       }
     }
   }, [gameMode, phase, round, nightStepIndex, shellState, matchInstanceId]);
@@ -1410,6 +1587,30 @@ export default function App() {
     []
   );
 
+  const triggerSmartBotRepliesToHuman = useCallback(
+    (text: string) => {
+      if (
+        gameMode === 'online' ||
+        !me.isAlive ||
+        !aiBrainRef.current ||
+        (phaseRef.current !== 'day_discussion' && phaseRef.current !== 'day_voting')
+      ) {
+        return;
+      }
+      const replies = generateHumanChatResponses(
+        aiBrainRef.current,
+        text,
+        playersRef.current,
+        round,
+        lang
+      );
+      if (replies.length > 0) {
+        scheduleBotBeats(replies, ['day_discussion', 'day_voting'], matchInstanceIdRef.current);
+      }
+    },
+    [gameMode, me.isAlive, round, lang, scheduleBotBeats]
+  );
+
   const handleShareNotebookToChat = useCallback(() => {
     if (!me.isAlive) {
       setEventBanner(
@@ -1431,6 +1632,8 @@ export default function App() {
     setMessages((prev) => [...prev, nextMsg]);
     if (gameMode === 'online') {
       realtimeClient.sendChat(roomId, nextMsg);
+    } else {
+      triggerSmartBotRepliesToHuman(summaryText);
     }
     setEventBanner(
       lang === 'vi'
@@ -1439,7 +1642,17 @@ export default function App() {
     );
     setIsNotebookOpen(false);
     setActiveDrawer('chat');
-  }, [notebook, players, lang, me.id, me.name, me.roleId, me.isAlive, gameMode, roomId]);
+  }, [
+    notebook,
+    players,
+    lang,
+    me.id,
+    me.name,
+    me.isAlive,
+    gameMode,
+    roomId,
+    triggerSmartBotRepliesToHuman,
+  ]);
 
   const mergeOnlineChatMessages = useCallback(
     (incoming: RealtimeChatMessage[] | undefined, replaceExisting = false) => {
@@ -1480,6 +1693,10 @@ export default function App() {
         lastOnlineStepKeyRef.current = '';
         lastOnlinePhaseRef.current = null;
         lastNotebookSeerKeyRef.current = '';
+        processedOnlineCutscenesRef.current.clear();
+        playedLocalCutscenesRef.current.clear();
+        clearSkillCutscenes();
+        setOnlineGhostNightState(null);
         setGmAnnouncement(null);
         setLastDawnAnnouncement(null);
         setNightDeathCinematic(null);
@@ -1522,6 +1739,25 @@ export default function App() {
       const prevPhase = lastOnlinePhaseRef.current;
       const phaseChanged = prevPhase !== null && prevPhase !== view.phase;
       lastOnlinePhaseRef.current = view.phase;
+      if (phaseChanged && view.phase === 'night') {
+        processedOnlineCutscenesRef.current.clear();
+        playedLocalCutscenesRef.current.clear();
+      }
+
+      const nextGhostNightState =
+        !viewer?.isAlive && (view.phase === 'night' || view.phase === 'hunter_revenge')
+          ? view.ghostNightState ?? null
+          : null;
+      setOnlineGhostNightState(nextGhostNightState);
+      if (nextGhostNightState?.skillCutscenes && nextGhostNightState.skillCutscenes.length > 0) {
+        const unseen = nextGhostNightState.skillCutscenes.filter(
+          (ev) => ev && ev.id && !processedOnlineCutscenesRef.current.has(ev.id)
+        );
+        if (unseen.length > 0) {
+          unseen.forEach((ev) => processedOnlineCutscenesRef.current.add(ev.id));
+          enqueueSkillCutscenes(unseen);
+        }
+      }
 
       setPhase(view.phase);
       setRound(view.round);
@@ -1646,6 +1882,21 @@ export default function App() {
                 tone: 'clue',
               });
             });
+            const seerCutsceneKey = `online_seer_${seerNbKey}`;
+            if (viewer?.isAlive && !processedOnlineCutscenesRef.current.has(seerCutsceneKey)) {
+              processedOnlineCutscenesRef.current.add(seerCutsceneKey);
+              enqueueSkillCutscenes([
+                {
+                  id: seerCutsceneKey,
+                  kind: 'seer',
+                  actorIds: [viewer.id],
+                  primaryTargetId: inspected.id,
+                  seerIsWolf: isWolf,
+                  durationMs: 2200,
+                  label: curLang === 'vi' ? '🔮 Tiên Tri Soi Bài' : '🔮 Seer Divination',
+                },
+              ]);
+            }
           }
         }
       } else if (stepChanged || view.phase !== 'night') {
@@ -1817,7 +2068,7 @@ export default function App() {
         });
       }
     },
-    [roomId, triggerNightRoleCallout]
+    [roomId, triggerNightRoleCallout, clearSkillCutscenes, enqueueSkillCutscenes]
   );
 
   // Clean reset of match-scoped UI overlays, popovers, pointer lock & movement (BUG-19)
@@ -1844,10 +2095,15 @@ export default function App() {
     setActionWarningToast(null);
     setIsSeerInspectPending(false);
     isResolvingVoteRef.current = false;
+    clearScheduledBotChats();
+    clearSkillCutscenes();
+    processedOnlineCutscenesRef.current.clear();
+    playedLocalCutscenesRef.current.clear();
+    setOnlineGhostNightState(null);
     setMoveVector({ x: 0, z: 0 });
     setFpvLookTurnRate(0);
     setGhostVerticalRate(0);
-  }, []);
+  }, [clearScheduledBotChats, clearSkillCutscenes]);
 
   // Reconcile Dusk vote breakdown with Mayor x2 weight and Campfire Abstain row (BUG-08)
   const enrichDuskAnnouncementVotes = useCallback(
@@ -2001,7 +2257,11 @@ export default function App() {
       }
 
       const roleChoice = forcedRole ?? preferredRole;
-      const deck = assignPreferredRoleToDeck(generateBalancedRoster(count), roleChoice);
+      const baseDeck = assignPreferredRoleToDeck(generateBalancedRoster(count), roleChoice);
+      const deck =
+        nextMode === 'online'
+          ? baseDeck
+          : applyStorylineRoleSetup(baseDeck, preferredStoryline, count, roleChoice);
 
       const rawPlayers: Player[] =
         customParticipants && customParticipants.length >= 4
@@ -2088,6 +2348,8 @@ export default function App() {
       setSavedMatchSnapshot(null);
 
       if (nextMode === 'online') {
+        aiBrainRef.current = null;
+        gallowsDefenseScheduledRoundRef.current = -1;
         setPlayers(freshPlayers);
         setRound(1);
         setPhase('night');
@@ -2108,6 +2370,8 @@ export default function App() {
         setDoppelgangerTargetId(null);
         setShellState('playing');
       } else {
+        aiBrainRef.current = createAIMatchBrain(freshPlayers, preferredStoryline, currentUser.id);
+        gallowsDefenseScheduledRoundRef.current = -1;
         beginNewNight(freshPlayers, 1, false, []);
         setShellState('playing');
       }
@@ -2156,6 +2420,7 @@ export default function App() {
       roomId,
       villageSize,
       preferredRole,
+      preferredStoryline,
       timerConfig.nightActionSec,
       beginNewNight,
       applyOnlineMatchView,
@@ -2293,6 +2558,7 @@ export default function App() {
       humanPlayerId: me.id,
       knownWolfIdsByBotSeer: knownWolfIds,
       suspectedIds: getPublicSuspectedIds(players),
+      brain: aiBrainRef.current,
     };
 
     if (round === 1 && !resolvedDoppelTarget && me.roleId !== 'doppelganger') {
@@ -2375,20 +2641,29 @@ export default function App() {
     });
 
     // Only track bot Seer's inspections AFTER night deaths — dead Bot Seer NEVER leaks telepathy!
-    const isBotSeerAlive = updatedPlayers.some(
+    const livingBotSeer = updatedPlayers.find(
       (p) => p.roleId === 'seer' && Boolean(p.isBot) && p.isAlive
     );
-    if (
-      isBotSeerAlive &&
-      result.seerInspection &&
-      result.seerInspection.isWerewolf &&
-      !knownWolfIds.includes(result.seerInspection.playerId)
-    ) {
-      setKnownWolfIds((prev) =>
-        prev.includes(result.seerInspection!.playerId)
-          ? prev
-          : [...prev, result.seerInspection!.playerId]
-      );
+    const isBotSeerAlive = Boolean(livingBotSeer);
+    if (livingBotSeer && result.seerInspection) {
+      if (aiBrainRef.current) {
+        recordBotSeerInspection(
+          aiBrainRef.current,
+          livingBotSeer.id,
+          result.seerInspection.playerId,
+          result.seerInspection.isWerewolf
+        );
+      }
+      if (
+        result.seerInspection.isWerewolf &&
+        !knownWolfIds.includes(result.seerInspection.playerId)
+      ) {
+        setKnownWolfIds((prev) =>
+          prev.includes(result.seerInspection!.playerId)
+            ? prev
+            : [...prev, result.seerInspection!.playerId]
+        );
+      }
     }
 
     let effectivePlayers = updatedPlayers;
@@ -2466,7 +2741,8 @@ export default function App() {
           effectivePlayers,
           hunterPlayer,
           knownWolfIds,
-          chatSignals
+          chatSignals,
+          aiBrainRef.current
         );
         if (shotTarget) {
           const afterShot = resolveHunterShot(
@@ -2640,27 +2916,49 @@ export default function App() {
       );
     }
 
-    // AI Bots actively discuss clues & suspects during Day Discussion using ONLY public dawn victims & bot Seer's own info
+    // Smart AI Bots discuss clues & suspects in staggered beats across Day Discussion using strictly public Dawn facts + private Seer memory
+    const dawnVictimIds = dawnAnnouncement.victims.map((v) => v.id);
     const publicKilledNames = dawnAnnouncement.victims.map((v) => v.name);
-    const botDiscussionLines = buildBotDayDiscussionLines(
-      effectivePlayers,
-      publicKilledNames,
-      lang,
-      isBotSeerAlive ? result.seerInspection : null,
-      round
-    );
-    if (botDiscussionLines.length > 0) {
-      const now = Date.now();
-      setMessages((prev) => [
-        ...prev,
-        ...botDiscussionLines.map((line, idx) => ({
-          id: `bot_chat_${now}_${idx}`,
-          senderId: line.senderId,
-          senderName: line.senderName,
-          text: line.text,
-          timestamp: now + idx + 1,
-        })),
-      ]);
+    if (gameMode !== 'online' && aiBrainRef.current) {
+      recordRoundPublicOutcome(aiBrainRef.current, {
+        round,
+        dawnDeaths: dawnVictimIds,
+        mayorTransferredToId: mayorCheck.transferredToName ? mayorCheck.nextMayorId : null,
+      });
+      const scheduledBeats = generateScheduledDiscussionBeats(aiBrainRef.current, {
+        players: effectivePlayers,
+        round,
+        lang,
+        killedNames: publicKilledNames,
+        killedIds: dawnVictimIds,
+        dayDiscussSec: timerConfig.dayDiscussSec,
+        mayorId: mayorCheck.nextMayorId ?? mayorId,
+        mayorTransferredFromName: mayorCheck.transferredFromName ?? null,
+        mayorTransferredToName: mayorCheck.transferredToName ?? null,
+        seerInspection: isBotSeerAlive ? result.seerInspection : null,
+      });
+      scheduleBotBeats(scheduledBeats, ['day_discussion'], matchInstanceIdRef.current);
+    } else if (gameMode !== 'online') {
+      const botDiscussionLines = buildBotDayDiscussionLines(
+        effectivePlayers,
+        publicKilledNames,
+        lang,
+        isBotSeerAlive ? result.seerInspection : null,
+        round
+      );
+      if (botDiscussionLines.length > 0) {
+        const now = Date.now();
+        setMessages((prev) => [
+          ...prev,
+          ...botDiscussionLines.map((line, idx) => ({
+            id: `bot_chat_${now}_${idx}`,
+            senderId: line.senderId,
+            senderName: line.senderName,
+            text: line.text,
+            timestamp: now + idx + 1,
+          })),
+        ]);
+      }
     }
 
     // Visual 3D prop teasing & expressive Agrou campfire emote between bots
@@ -2709,6 +3007,7 @@ export default function App() {
     handleTriggerEmote,
     getPublicSuspectedIds,
     enrichDawnCupidNotices,
+    scheduleBotBeats,
     timerConfig,
     t,
     lang,
@@ -2725,7 +3024,7 @@ export default function App() {
     const nextIdx = nightStepIndex + 1;
     if (nextIdx < nightSchedule.length) {
       const nextStep = nightSchedule[nextIdx] || null;
-      const nextTimer = getStepInitialTimerSeconds(nextStep, myNightStepIdx, nextIdx);
+      const nextTimer = getStepInitialTimerSeconds(nextStep, myNightStepIdx, nextIdx, !me.isAlive);
       setHasClosedEyesTonight(false);
       setSelectedTargetId(null);
       setTimerSeconds(nextTimer);
@@ -2733,9 +3032,19 @@ export default function App() {
     } else {
       handleResolveNight();
     }
-  }, [phase, gameMode, me.isHost, roomId, nightStepIndex, nightSchedule, myNightStepIdx, handleResolveNight]);
+  }, [
+    phase,
+    gameMode,
+    me.isHost,
+    me.isAlive,
+    roomId,
+    nightStepIndex,
+    nightSchedule,
+    myNightStepIdx,
+    handleResolveNight,
+  ]);
 
-  // Confirm Night Action (Server-authoritative `confirm_done` in Online mode; local resolve in AI Practice)
+  // Confirm Night Action (Plays 3D skill cast cutscene first without ever short-circuiting resolveNightActions!)
   const handleConfirmNightAction = useCallback(() => {
     if (
       phase === 'night' &&
@@ -2752,10 +3061,45 @@ export default function App() {
       );
       return;
     }
+
+    const currentHumanActions: NightActions = {
+      wolfTargetId:
+        me.roleId === 'werewolf' || me.roleId === 'wolf_pup'
+          ? tonightWolfVictimId || selectedTargetId
+          : tonightWolfVictimId,
+      secondWolfTargetId,
+      guardTargetId:
+        me.roleId === 'bodyguard' && !me.hasUsedPower
+          ? guardTargetTonightId || selectedTargetId
+          : guardTargetTonightId,
+      witchHealTargetId: witchHealTargetTonightId,
+      witchPoisonTargetId,
+      seerTargetId:
+        seerTargetTonightId || (me.roleId === 'seer' && !me.hasUsedPower ? selectedTargetId : null),
+      cupidLovers,
+      doppelgangerTargetId:
+        doppelgangerTargetId || (me.roleId === 'doppelganger' ? selectedTargetId : null),
+    };
+
     if (gameMode === 'online') {
       if (onlineMatchView?.hasConfirmedNightStep) return;
       sound.playCardFlip();
       realtimeClient.sendNightAction(roomId, { actionType: 'confirm_done' });
+      if (me.isAlive && currentNightStep && currentNightStep.key !== 'seer') {
+        const confirmCutscenes = buildNightSkillCutsceneForStep({
+          stepKey: currentNightStep.key,
+          players,
+          actions: currentHumanActions,
+          round,
+          wolfPupFrenzy,
+          includeSeerAlignment: false,
+          lang,
+        }).filter((ev) => !playedLocalCutscenesRef.current.has(ev.id));
+        if (confirmCutscenes.length > 0) {
+          confirmCutscenes.forEach((ev) => playedLocalCutscenesRef.current.add(ev.id));
+          enqueueSkillCutscenes(confirmCutscenes);
+        }
+      }
       setEventBanner(
         lang === 'vi'
           ? '✓ Đã xác nhận — đang chờ người chơi khác...'
@@ -2763,18 +3107,52 @@ export default function App() {
       );
       return;
     }
+
+    if (pendingNightAdvanceRef.current !== null) return;
+
+    if (phase === 'night' && me.isAlive && currentNightStep) {
+      const cutscenes = buildNightSkillCutsceneForStep({
+        stepKey: currentNightStep.key,
+        players,
+        actions: currentHumanActions,
+        round,
+        wolfPupFrenzy,
+        includeSeerAlignment: me.roleId === 'seer' && currentNightStep.key === 'seer',
+        lang,
+      }).filter((ev) => !playedLocalCutscenesRef.current.has(ev.id));
+      if (cutscenes.length > 0) {
+        cutscenes.forEach((ev) => playedLocalCutscenesRef.current.add(ev.id));
+        pendingNightAdvanceRef.current = 'resolve_night';
+        enqueueSkillCutscenes(cutscenes);
+        return;
+      }
+    }
+
     handleResolveNight();
   }, [
     phase,
     me.isAlive,
     me.roleId,
-    currentNightStep?.key,
+    me.hasUsedPower,
+    currentNightStep,
+    players,
+    round,
+    wolfPupFrenzy,
+    tonightWolfVictimId,
+    selectedTargetId,
+    secondWolfTargetId,
+    guardTargetTonightId,
+    witchHealTargetTonightId,
+    witchPoisonTargetId,
+    seerTargetTonightId,
     cupidLovers,
+    doppelgangerTargetId,
     showActionWarning,
     gameMode,
     onlineMatchView?.hasConfirmedNightStep,
     roomId,
     lang,
+    enqueueSkillCutscenes,
     handleResolveNight,
   ]);
 
@@ -2818,6 +3196,7 @@ export default function App() {
             humanPlayerId: me.id,
             knownWolfIdsByBotSeer: knownWolfIds,
             suspectedIds,
+            brain: aiBrainRef.current,
           }
         );
         if (botAct.wolfTargetId) simWolfTarget = botAct.wolfTargetId;
@@ -2883,6 +3262,7 @@ export default function App() {
       return;
     }
     sound.playGavel();
+    clearScheduledBotChats();
     isResolvingVoteRef.current = false;
     setActivePropTool(null);
     setActiveToolPopover('none');
@@ -2911,15 +3291,56 @@ export default function App() {
         return;
       }
       const currentPlayers = playersRef.current;
+      const existingVotes = votesRef.current;
+      const humanVoteTarget = existingVotes.find((v) => v.voterId === me.id)?.targetId ?? null;
       const chatSignals = extractChatVoteSignals(messagesRef.current, currentPlayers);
-      const botVotes = computeSmartBotDayVotes(currentPlayers, knownWolfIds, null, chatSignals);
+      const botVotes = computeSmartBotDayVotes(
+        currentPlayers,
+        knownWolfIds,
+        humanVoteTarget,
+        chatSignals,
+        aiBrainRef.current,
+        { currentVotes: existingVotes, mayorId, round }
+      );
       const botIdSet = new Set(currentPlayers.filter((p) => p.isBot).map((p) => p.id));
-      setVotes((prev) => [
-        ...prev.filter((v) => !botIdSet.has(v.voterId)),
+      const mergedVotes = [
+        ...existingVotes.filter((v) => !botIdSet.has(v.voterId)),
         ...botVotes,
-      ]);
+      ];
+      setVotes(mergedVotes);
+
+      if (aiBrainRef.current && gallowsDefenseScheduledRoundRef.current !== round) {
+        gallowsDefenseScheduledRoundRef.current = round;
+        const defenseBeat = generateGallowsDefenseBeat(aiBrainRef.current, {
+          players: currentPlayers,
+          votes: mergedVotes,
+          mayorId,
+          round,
+          lang,
+        });
+        if (defenseBeat) {
+          scheduleBotBeats(
+            [{ ...defenseBeat, delayMs: 2200 }],
+            ['day_voting'],
+            scheduledMatchId
+          );
+        }
+      }
     }, 900);
-  }, [gameMode, me.isHost, roomId, t, round, lang, knownWolfIds, timerConfig.dayVoteSec]);
+  }, [
+    gameMode,
+    me.isHost,
+    me.id,
+    mayorId,
+    roomId,
+    t,
+    round,
+    lang,
+    knownWolfIds,
+    timerConfig.dayVoteSec,
+    clearScheduledBotChats,
+    scheduleBotBeats,
+  ]);
 
   // Clear human player's current day vote so they can choose a different suspect
   const handleClearMyVote = useCallback(() => {
@@ -2999,8 +3420,16 @@ export default function App() {
       if (botVoteTimeoutRef.current !== null) {
         window.clearTimeout(botVoteTimeoutRef.current);
         botVoteTimeoutRef.current = null;
+        const humanVoteTarget = activeVotes.find((v) => v.voterId === me.id)?.targetId ?? null;
         const chatSignals = extractChatVoteSignals(messagesRef.current, beforeVotePlayers);
-        const botVotes = computeSmartBotDayVotes(beforeVotePlayers, knownWolfIds, null, chatSignals);
+        const botVotes = computeSmartBotDayVotes(
+          beforeVotePlayers,
+          knownWolfIds,
+          humanVoteTarget,
+          chatSignals,
+          aiBrainRef.current,
+          { currentVotes: activeVotes, mayorId, round }
+        );
         const botIdSet = new Set(beforeVotePlayers.filter((p) => p.isBot).map((p) => p.id));
         activeVotes = [
           ...activeVotes.filter((v) => !botIdSet.has(v.voterId)),
@@ -3012,6 +3441,14 @@ export default function App() {
       const playerTargetVotes = activeVotes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID);
 
       if (tally.isTie || !tally.targetId) {
+        if (aiBrainRef.current) {
+          recordRoundPublicOutcome(aiBrainRef.current, {
+            round,
+            votes: playerTargetVotes,
+            lynchedId: null,
+            lynchedRoleId: null,
+          });
+        }
         const tieAnnouncement = enrichDuskAnnouncementVotes(
           buildDuskGMAnnouncement({
             round,
@@ -3116,6 +3553,14 @@ export default function App() {
           const hunter = effectivePlayers.find((p) => p.id === nextHunterId);
           if (!hunter || hunter.hasUsedPower) continue;
           if (!hunter.isBot) {
+            if (aiBrainRef.current) {
+              recordRoundPublicOutcome(aiBrainRef.current, {
+                round,
+                votes: playerTargetVotes,
+                lynchedId: victim.id,
+                lynchedRoleId: victim.roleId,
+              });
+            }
             setPlayers(effectivePlayers);
             if (nextFrenzy) setWolfPupFrenzy(true);
             setPendingDuskBeforePlayers(beforeVotePlayers);
@@ -3129,11 +3574,16 @@ export default function App() {
             return;
           }
           const chatSignals = extractChatVoteSignals(messagesRef.current, effectivePlayers);
+          const lynchVoters = playerTargetVotes
+            .filter((v) => v.targetId === hunter.id)
+            .map((v) => v.voterId);
           const target = pickSmartBotHunterTarget(
             effectivePlayers,
             hunter,
             knownWolfIds,
-            chatSignals
+            chatSignals,
+            aiBrainRef.current,
+            { lynchVoters }
           );
           if (target) {
             const shotRes = resolveHunterShot(effectivePlayers, hunter.id, target.id, {
@@ -3164,6 +3614,16 @@ export default function App() {
           ...p,
           isMayor: Boolean(mayorCheck.nextMayorId && p.id === mayorCheck.nextMayorId),
         }));
+      }
+
+      if (aiBrainRef.current) {
+        recordRoundPublicOutcome(aiBrainRef.current, {
+          round,
+          votes: playerTargetVotes,
+          lynchedId: victim.id,
+          lynchedRoleId: victim.roleId,
+          mayorTransferredToId: mayorCheck.transferredToName ? mayorCheck.nextMayorId : null,
+        });
       }
 
       setPlayers(effectivePlayers);
@@ -3286,6 +3746,299 @@ export default function App() {
     }
   }, [gameMode, pendingNightTransition, beginNewNight]);
 
+  // Resolve a Solo AI Hunter revenge shot AFTER its 3D musket cutscene finishes (or is skipped)
+  const resolveLocalHunterRevengeShot = useCallback(
+    (hunterId: string, targetId: string) => {
+      const shooter =
+        activeHunter && activeHunter.id === hunterId
+          ? activeHunter
+          : players.find((p) => p.id === hunterId) || null;
+      if (!shooter) return;
+
+      sound.playDeath();
+      const {
+        updatedPlayers: shotPlayers,
+        victimName,
+        extraVictimId,
+        wolfPupTriggeredNextNight,
+        triggeredHunterIds: chainedHunterIds,
+      } = resolveHunterShot(players, shooter.id, targetId, { elderSealActive });
+      let updatedPlayers = shotPlayers;
+      let nextFrenzyAfterShot = Boolean(wolfPupTriggeredNextNight || wolfPupFrenzy);
+
+      // Chained Hunter death cascade: resolve secondary Hunter(s) before evaluating Win Condition!
+      if (chainedHunterIds.length > 0) {
+        const chainQueue: string[] = [...chainedHunterIds].sort((a, b) => {
+          const pa = updatedPlayers.find((p) => p.id === a);
+          const pb = updatedPlayers.find((p) => p.id === b);
+          return Number(!pa?.isBot) - Number(!pb?.isBot);
+        });
+        const processedChains = new Set<string>([shooter.id]);
+        let chainGuard = 0;
+        while (chainQueue.length > 0 && chainGuard < 6) {
+          chainGuard++;
+          const nextChainId = chainQueue.shift()!;
+          if (processedChains.has(nextChainId)) continue;
+          processedChains.add(nextChainId);
+          const chainedHunter = updatedPlayers.find((p) => p.id === nextChainId);
+          if (!chainedHunter || chainedHunter.hasUsedPower) continue;
+          if (!chainedHunter.isBot) {
+            setPlayers(updatedPlayers);
+            if (nextFrenzyAfterShot) setWolfPupFrenzy(true);
+            setActiveHunter(chainedHunter);
+            setSelectedTargetId(null);
+            setTimerSeconds(timerConfig.hunterShotSec);
+            setEventBanner(
+              lang === 'vi'
+                ? `🎯 Chuỗi Thợ Săn! Bạn (${chainedHunter.name}) bị kéo theo — hãy chọn 1 người để nổ súng hoặc Giữ súng!`
+                : `🎯 Chained Hunter! You (${chainedHunter.name}) were hit — pick 1 target or Hold Fire!`
+            );
+            return;
+          }
+          const chainSignals = extractChatVoteSignals(messagesRef.current, updatedPlayers);
+          const chainTarget = pickSmartBotHunterTarget(
+            updatedPlayers,
+            chainedHunter,
+            knownWolfIds,
+            chainSignals,
+            aiBrainRef.current
+          );
+          if (chainTarget) {
+            const chainRes = resolveHunterShot(updatedPlayers, chainedHunter.id, chainTarget.id, {
+              elderSealActive,
+            });
+            updatedPlayers = chainRes.updatedPlayers;
+            if (chainRes.wolfPupTriggeredNextNight) nextFrenzyAfterShot = true;
+            for (const nextId of chainRes.triggeredHunterIds) {
+              if (!processedChains.has(nextId)) chainQueue.push(nextId);
+            }
+          }
+        }
+      }
+
+      const hunterMayorCheck = mayorId
+        ? resolveNextMayorIfNeeded(updatedPlayers, mayorId)
+        : { nextMayorId: null };
+      if (hunterMayorCheck.nextMayorId !== mayorId) {
+        setMayorId(hunterMayorCheck.nextMayorId);
+        updatedPlayers = updatedPlayers.map((p) => ({
+          ...p,
+          isMayor: Boolean(
+            hunterMayorCheck.nextMayorId && p.id === hunterMayorCheck.nextMayorId
+          ),
+        }));
+      }
+      setPlayers(updatedPlayers);
+      if (nextFrenzyAfterShot) setWolfPupFrenzy(true);
+      setActiveHunter(null);
+      setSelectedTargetId(null);
+      const winCheck = checkWinCondition(updatedPlayers);
+      if (winCheck.isOver) {
+        finishGame(winCheck.winner || 'villagers', winCheck.reason, updatedPlayers, round);
+      } else if (hunterOriginPhase === 'night') {
+        const hunterSeat = updatedPlayers.findIndex((p) => p.id === shooter.id) + 1;
+        const targetSeat = updatedPlayers.findIndex((p) => p.id === targetId) + 1;
+        const extraLover = extraVictimId
+          ? updatedPlayers.find((p) => p.id === extraVictimId)
+          : null;
+        const dawnCtx = pendingDawnContext;
+        const dawnAfterShot = buildDawnGMAnnouncement({
+          round,
+          beforePlayers: dawnCtx?.beforePlayers || players,
+          afterPlayers: updatedPlayers,
+          nightKilledIds: dawnCtx?.nightKilledIds || [shooter.id],
+          hunterShotEvent: {
+            hunterName: shooter.name,
+            hunterSeat,
+            targetId,
+            targetName: victimName,
+            targetSeat,
+            extraLoverName: extraLover?.name,
+            extraLoverSeat: extraLover
+              ? updatedPlayers.findIndex((p) => p.id === extraLover.id) + 1
+              : undefined,
+          },
+          humanPlayerId: me.id,
+          lang,
+        });
+        setPendingDawnContext(null);
+        setNotebook((prevNb) => {
+          let nextNb = appendNotebookTimelineEvent(prevNb, {
+            round,
+            phaseLabel: lang === 'vi' ? `Bình Minh #${round}` : `Dawn #${round}`,
+            text: dawnAfterShot.dayBarSummary,
+            tone: dawnAfterShot.victims.length > 0 ? 'death' : 'info',
+          });
+          if (hunterMayorCheck.transferredToName) {
+            nextNb = appendNotebookTimelineEvent(nextNb, {
+              round,
+              phaseLabel: lang === 'vi' ? 'Thị Trưởng' : 'Mayor',
+              text:
+                lang === 'vi'
+                  ? `👑 Vương miện chuyển sang ${hunterMayorCheck.transferredToName} (x2 phiếu).`
+                  : `👑 Mayor crown passed to ${hunterMayorCheck.transferredToName} (x2 vote).`,
+              tone: 'mayor',
+            });
+          }
+          return nextNb;
+        });
+        const livingBotSeerInDawn = updatedPlayers.find(
+          (p) => p.roleId === 'seer' && Boolean(p.isBot) && p.isAlive
+        );
+        if (livingBotSeerInDawn && dawnCtx?.seerInspection && aiBrainRef.current) {
+          recordBotSeerInspection(
+            aiBrainRef.current,
+            livingBotSeerInDawn.id,
+            dawnCtx.seerInspection.playerId,
+            dawnCtx.seerInspection.isWerewolf
+          );
+        }
+        const nowTs = Date.now();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `sys_dawn_hunter_${nowTs}`,
+            senderId: 'sys',
+            senderName: lang === 'vi' ? '🎙️ Quản Trò AI' : '🎙️ AI Game Master',
+            text: dawnAfterShot.chatMessageText,
+            timestamp: nowTs,
+            isSystem: true,
+          },
+        ]);
+        setPhase('day_discussion');
+        setTimerSeconds(timerConfig.dayDiscussSec);
+        setEventBanner(`☀️ ${t.dayDiscussTitle(round)}: ${dawnAfterShot.dayBarSummary}`);
+        setLastDawnAnnouncement(dawnAfterShot);
+        setGmAnnouncement(dawnAfterShot);
+        sound.playGMAnnouncement('dawn', true, dawnAfterShot.spokenNarration, lang);
+
+        const dawnVictimIds = dawnAfterShot.victims.map((v) => v.id);
+        const dawnKilledNames = dawnAfterShot.victims.map((v) => v.name);
+        if (aiBrainRef.current) {
+          recordRoundPublicOutcome(aiBrainRef.current, {
+            round,
+            dawnDeaths: dawnVictimIds,
+            mayorTransferredToId: hunterMayorCheck.transferredToName
+              ? hunterMayorCheck.nextMayorId
+              : null,
+          });
+          const beats = generateScheduledDiscussionBeats(aiBrainRef.current, {
+            players: updatedPlayers,
+            round,
+            lang,
+            killedNames: dawnKilledNames,
+            killedIds: dawnVictimIds,
+            dayDiscussSec: timerConfig.dayDiscussSec,
+            mayorId: hunterMayorCheck.nextMayorId ?? mayorId,
+            mayorTransferredFromName: hunterMayorCheck.transferredFromName ?? null,
+            mayorTransferredToName: hunterMayorCheck.transferredToName ?? null,
+            seerInspection: livingBotSeerInDawn ? dawnCtx?.seerInspection ?? null : null,
+          });
+          scheduleBotBeats(beats, ['day_discussion'], matchInstanceIdRef.current);
+        }
+      } else {
+        const hunterSeat = updatedPlayers.findIndex((p) => p.id === shooter.id) + 1;
+        const targetSeat = updatedPlayers.findIndex((p) => p.id === targetId) + 1;
+        const duskBefore = pendingDuskBeforePlayers || players;
+        const duskAfterShot = enrichDuskAnnouncementVotes(
+          buildDuskGMAnnouncement({
+            round,
+            beforePlayers: duskBefore,
+            afterPlayers: updatedPlayers,
+            lynchedVictim: shooter,
+            voteCounts: tallyVotesWithMayor(votes, mayorId).counts,
+            votes: votes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID),
+            isTie: false,
+            hunterShotEvent: {
+              hunterName: shooter.name,
+              hunterSeat,
+              targetId,
+              targetName: victimName,
+              targetSeat,
+            },
+            humanPlayerId: me.id,
+            lang,
+          }),
+          votes,
+          duskBefore,
+          mayorId,
+          lang
+        );
+        setPendingDuskBeforePlayers(null);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `sys_dusk_hunter_${Date.now()}`,
+            senderId: 'sys',
+            senderName: lang === 'vi' ? '🎙️ Quản Trò AI' : '🎙️ AI Game Master',
+            text: duskAfterShot.chatMessageText,
+            timestamp: Date.now(),
+            isSystem: true,
+          },
+        ]);
+        setPendingNightTransition({
+          nextPlayers: updatedPlayers,
+          nextRound: round + 1,
+          nextFrenzy: nextFrenzyAfterShot,
+        });
+        setGmAnnouncement(duskAfterShot);
+        sound.playGMAnnouncement('dusk', true, duskAfterShot.spokenNarration, lang);
+      }
+    },
+    [
+      activeHunter,
+      players,
+      elderSealActive,
+      wolfPupFrenzy,
+      timerConfig.hunterShotSec,
+      timerConfig.dayDiscussSec,
+      lang,
+      knownWolfIds,
+      mayorId,
+      finishGame,
+      round,
+      hunterOriginPhase,
+      pendingDawnContext,
+      pendingDuskBeforePlayers,
+      me.id,
+      t,
+      votes,
+      enrichDuskAnnouncementVotes,
+      scheduleBotBeats,
+    ]
+  );
+
+  // Drain deferred Solo AI night step / night resolve / Hunter shot once active skill cutscene queue empties
+  useEffect(() => {
+    if (skillCutsceneQueue.length > 0) return;
+    if (pendingNightAdvanceRef.current) {
+      const action = pendingNightAdvanceRef.current;
+      pendingNightAdvanceRef.current = null;
+      if (shellState === 'playing' && phase === 'night') {
+        if (action === 'resolve_night') {
+          handleResolveNight();
+        } else if (action === 'advance_night_step') {
+          handleAdvanceNightStep();
+        }
+      }
+      return;
+    }
+    if (pendingHunterShotRef.current) {
+      const pending = pendingHunterShotRef.current;
+      pendingHunterShotRef.current = null;
+      if (shellState === 'playing' && phase === 'hunter_revenge') {
+        resolveLocalHunterRevengeShot(pending.hunterId, pending.targetId);
+      }
+    }
+  }, [
+    skillCutsceneQueue.length,
+    shellState,
+    phase,
+    handleResolveNight,
+    handleAdvanceNightStep,
+    resolveLocalHunterRevengeShot,
+  ]);
+
   // Handle clicking a 3D character in the Village Circle or Bottom Dock
   const handleSelect3DPlayer = useCallback(
     (targetId: string) => {
@@ -3312,223 +4065,27 @@ export default function App() {
 
       if (phase === 'hunter_revenge' && activeHunter) {
         if (targetId === activeHunter.id) return;
+        const shotCutscene: NightSkillCutsceneEvent = {
+          id: `cutscene_r${round}_hunter_shot_${activeHunter.id}_${targetId}_${Date.now()}`,
+          kind: 'hunter_shot',
+          actorIds: [activeHunter.id],
+          primaryTargetId: targetId,
+          durationMs: 1850,
+          label: lang === 'vi' ? '🎯 Phát Súng Thợ Săn' : '🎯 Hunter’s Revenge Shot',
+        };
         if (gameMode === 'online') {
           if (!onlineMatchView?.isMyHunterTurn) return;
           sound.playShotgunCock();
           setSelectedTargetId(targetId);
+          enqueueSkillCutscenes([shotCutscene]);
           realtimeClient.sendHunterShot(roomId, targetId);
           return;
         }
+        if (pendingHunterShotRef.current) return;
         sound.playShotgunCock();
-        sound.playDeath();
-        const {
-          updatedPlayers: shotPlayers,
-          victimName,
-          extraVictimId,
-          wolfPupTriggeredNextNight,
-          triggeredHunterIds: chainedHunterIds,
-        } = resolveHunterShot(players, activeHunter.id, targetId, { elderSealActive });
-        let updatedPlayers = shotPlayers;
-        let nextFrenzyAfterShot = Boolean(wolfPupTriggeredNextNight || wolfPupFrenzy);
-
-        // Chained Hunter death cascade: resolve secondary Hunter(s) before evaluating Win Condition!
-        if (chainedHunterIds.length > 0) {
-          const chainQueue: string[] = [...chainedHunterIds].sort((a, b) => {
-            const pa = updatedPlayers.find((p) => p.id === a);
-            const pb = updatedPlayers.find((p) => p.id === b);
-            return Number(!pa?.isBot) - Number(!pb?.isBot);
-          });
-          const processedChains = new Set<string>([activeHunter.id]);
-          let chainGuard = 0;
-          while (chainQueue.length > 0 && chainGuard < 6) {
-            chainGuard++;
-            const nextChainId = chainQueue.shift()!;
-            if (processedChains.has(nextChainId)) continue;
-            processedChains.add(nextChainId);
-            const chainedHunter = updatedPlayers.find((p) => p.id === nextChainId);
-            if (!chainedHunter || chainedHunter.hasUsedPower) continue;
-            if (!chainedHunter.isBot) {
-              setPlayers(updatedPlayers);
-              if (nextFrenzyAfterShot) setWolfPupFrenzy(true);
-              setActiveHunter(chainedHunter);
-              setSelectedTargetId(null);
-              setTimerSeconds(timerConfig.hunterShotSec);
-              setEventBanner(
-                lang === 'vi'
-                  ? `🎯 Chuỗi Thợ Săn! Bạn (${chainedHunter.name}) bị kéo theo — hãy chọn 1 người để nổ súng hoặc Giữ súng!`
-                  : `🎯 Chained Hunter! You (${chainedHunter.name}) were hit — pick 1 target or Hold Fire!`
-              );
-              return;
-            }
-            const chainSignals = extractChatVoteSignals(messagesRef.current, updatedPlayers);
-            const chainTarget = pickSmartBotHunterTarget(
-              updatedPlayers,
-              chainedHunter,
-              knownWolfIds,
-              chainSignals
-            );
-            if (chainTarget) {
-              const chainRes = resolveHunterShot(updatedPlayers, chainedHunter.id, chainTarget.id, {
-                elderSealActive,
-              });
-              updatedPlayers = chainRes.updatedPlayers;
-              if (chainRes.wolfPupTriggeredNextNight) nextFrenzyAfterShot = true;
-              for (const nextId of chainRes.triggeredHunterIds) {
-                if (!processedChains.has(nextId)) chainQueue.push(nextId);
-              }
-            }
-          }
-        }
-
-        const hunterMayorCheck = mayorId
-          ? resolveNextMayorIfNeeded(updatedPlayers, mayorId)
-          : { nextMayorId: null };
-        if (hunterMayorCheck.nextMayorId !== mayorId) {
-          setMayorId(hunterMayorCheck.nextMayorId);
-          updatedPlayers = updatedPlayers.map((p) => ({
-            ...p,
-            isMayor: Boolean(
-              hunterMayorCheck.nextMayorId && p.id === hunterMayorCheck.nextMayorId
-            ),
-          }));
-        }
-        setPlayers(updatedPlayers);
-        if (nextFrenzyAfterShot) setWolfPupFrenzy(true);
-        setActiveHunter(null);
-        setSelectedTargetId(null);
-        const winCheck = checkWinCondition(updatedPlayers);
-        if (winCheck.isOver) {
-          finishGame(winCheck.winner || 'villagers', winCheck.reason, updatedPlayers, round);
-        } else if (hunterOriginPhase === 'night') {
-          const hunterSeat = updatedPlayers.findIndex((p) => p.id === activeHunter.id) + 1;
-          const targetSeat = updatedPlayers.findIndex((p) => p.id === targetId) + 1;
-          const extraLover = extraVictimId
-            ? updatedPlayers.find((p) => p.id === extraVictimId)
-            : null;
-          const dawnCtx = pendingDawnContext;
-          const dawnAfterShot = buildDawnGMAnnouncement({
-            round,
-            beforePlayers: dawnCtx?.beforePlayers || players,
-            afterPlayers: updatedPlayers,
-            nightKilledIds: dawnCtx?.nightKilledIds || [activeHunter.id],
-            hunterShotEvent: {
-              hunterName: activeHunter.name,
-              hunterSeat,
-              targetId,
-              targetName: victimName,
-              targetSeat,
-              extraLoverName: extraLover?.name,
-              extraLoverSeat: extraLover
-                ? updatedPlayers.findIndex((p) => p.id === extraLover.id) + 1
-                : undefined,
-            },
-            humanPlayerId: me.id,
-            lang,
-          });
-          setPendingDawnContext(null);
-          setNotebook((prevNb) => {
-            let nextNb = appendNotebookTimelineEvent(prevNb, {
-              round,
-              phaseLabel: lang === 'vi' ? `Bình Minh #${round}` : `Dawn #${round}`,
-              text: dawnAfterShot.dayBarSummary,
-              tone: dawnAfterShot.victims.length > 0 ? 'death' : 'info',
-            });
-            if (hunterMayorCheck.transferredToName) {
-              nextNb = appendNotebookTimelineEvent(nextNb, {
-                round,
-                phaseLabel: lang === 'vi' ? 'Thị Trưởng' : 'Mayor',
-                text:
-                  lang === 'vi'
-                    ? `👑 Vương miện chuyển sang ${hunterMayorCheck.transferredToName} (x2 phiếu).`
-                    : `👑 Mayor crown passed to ${hunterMayorCheck.transferredToName} (x2 vote).`,
-                tone: 'mayor',
-              });
-            }
-            return nextNb;
-          });
-          const isBotSeerInDawn = updatedPlayers.some(
-            (p) => p.roleId === 'seer' && Boolean(p.isBot) && p.isAlive
-          );
-          const botLines = buildBotDayDiscussionLines(
-            updatedPlayers,
-            dawnAfterShot.victims.map((v) => v.name),
-            lang,
-            isBotSeerInDawn ? dawnCtx?.seerInspection ?? null : null,
-            round
-          );
-          const nowTs = Date.now();
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `sys_dawn_hunter_${nowTs}`,
-              senderId: 'sys',
-              senderName: lang === 'vi' ? '🎙️ Quản Trò AI' : '🎙️ AI Game Master',
-              text: dawnAfterShot.chatMessageText,
-              timestamp: nowTs,
-              isSystem: true,
-            },
-            ...botLines.map((line, idx) => ({
-              id: `bot_chat_h_${nowTs}_${idx}`,
-              senderId: line.senderId,
-              senderName: line.senderName,
-              text: line.text,
-              timestamp: nowTs + idx + 1,
-            })),
-          ]);
-          setPhase('day_discussion');
-          setTimerSeconds(timerConfig.dayDiscussSec);
-          setEventBanner(`☀️ ${t.dayDiscussTitle(round)}: ${dawnAfterShot.dayBarSummary}`);
-          setLastDawnAnnouncement(dawnAfterShot);
-          setGmAnnouncement(dawnAfterShot);
-          sound.playGMAnnouncement('dawn', true, dawnAfterShot.spokenNarration, lang);
-        } else {
-          const hunterSeat = updatedPlayers.findIndex((p) => p.id === activeHunter.id) + 1;
-          const targetSeat = updatedPlayers.findIndex((p) => p.id === targetId) + 1;
-          const duskBefore = pendingDuskBeforePlayers || players;
-          const duskAfterShot = enrichDuskAnnouncementVotes(
-            buildDuskGMAnnouncement({
-              round,
-              beforePlayers: duskBefore,
-              afterPlayers: updatedPlayers,
-              lynchedVictim: activeHunter,
-              voteCounts: tallyVotesWithMayor(votes, mayorId).counts,
-              votes: votes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID),
-              isTie: false,
-              hunterShotEvent: {
-                hunterName: activeHunter.name,
-                hunterSeat,
-                targetId,
-                targetName: victimName,
-                targetSeat,
-              },
-              humanPlayerId: me.id,
-              lang,
-            }),
-            votes,
-            duskBefore,
-            mayorId,
-            lang
-          );
-          setPendingDuskBeforePlayers(null);
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `sys_dusk_hunter_${Date.now()}`,
-              senderId: 'sys',
-              senderName: lang === 'vi' ? '🎙️ Quản Trò AI' : '🎙️ AI Game Master',
-              text: duskAfterShot.chatMessageText,
-              timestamp: Date.now(),
-              isSystem: true,
-            },
-          ]);
-          setPendingNightTransition({
-            nextPlayers: updatedPlayers,
-            nextRound: round + 1,
-            nextFrenzy: nextFrenzyAfterShot,
-          });
-          setGmAnnouncement(duskAfterShot);
-          sound.playGMAnnouncement('dusk', true, duskAfterShot.spokenNarration, lang);
-        }
+        setSelectedTargetId(targetId);
+        pendingHunterShotRef.current = { hunterId: activeHunter.id, targetId };
+        enqueueSkillCutscenes([shotCutscene]);
         return;
       }
 
@@ -3740,17 +4297,9 @@ export default function App() {
       witchPoisonTargetId,
       cupidLovers,
       round,
-      hunterOriginPhase,
-      pendingDawnContext,
-      pendingDuskBeforePlayers,
-      elderSealActive,
-      knownWolfIds,
-      finishGame,
       handleThrowProp,
       showActionWarning,
-      enrichDuskAnnouncementVotes,
-      timerConfig.dayDiscussSec,
-      timerConfig.hunterShotSec,
+      enqueueSkillCutscenes,
       mayorId,
       t,
       lang,
@@ -3820,6 +4369,18 @@ export default function App() {
     });
     setSeerInspectResult(resText);
     setEventBanner(`🔮 ${resText}`);
+    const seerCutscenes = buildNightSkillCutsceneForStep({
+      stepKey: 'seer',
+      players,
+      actions: { seerTargetId: targetId },
+      round,
+      includeSeerAlignment: true,
+      lang,
+    }).filter((ev) => !playedLocalCutscenesRef.current.has(ev.id));
+    if (seerCutscenes.length > 0) {
+      seerCutscenes.forEach((ev) => playedLocalCutscenesRef.current.add(ev.id));
+      enqueueSkillCutscenes(seerCutscenes);
+    }
   }, [
     phase,
     me,
@@ -3834,6 +4395,7 @@ export default function App() {
     gameMode,
     roomId,
     triggerNightRoleCallout,
+    enqueueSkillCutscenes,
   ]);
 
   // Hunter Hold-Fire ("Giữ súng") option — skip revenge shot cleanly (BUG-24)
@@ -3882,16 +4444,17 @@ export default function App() {
           tone: dawnAfterSkip.victims.length > 0 ? 'death' : 'info',
         })
       );
-      const isBotSeerInDawn = updatedAfterSkip.some(
+      const livingBotSeerInDawn = updatedAfterSkip.find(
         (p) => p.roleId === 'seer' && Boolean(p.isBot) && p.isAlive
       );
-      const botLines = buildBotDayDiscussionLines(
-        updatedAfterSkip,
-        dawnAfterSkip.victims.map((v) => v.name),
-        lang,
-        isBotSeerInDawn ? dawnCtx?.seerInspection ?? null : null,
-        round
-      );
+      if (livingBotSeerInDawn && dawnCtx?.seerInspection && aiBrainRef.current) {
+        recordBotSeerInspection(
+          aiBrainRef.current,
+          livingBotSeerInDawn.id,
+          dawnCtx.seerInspection.playerId,
+          dawnCtx.seerInspection.isWerewolf
+        );
+      }
       const nowTs = Date.now();
       setMessages((prev) => [
         ...prev,
@@ -3903,13 +4466,6 @@ export default function App() {
           timestamp: nowTs,
           isSystem: true,
         },
-        ...botLines.map((line, idx) => ({
-          id: `bot_chat_hs_${nowTs}_${idx}`,
-          senderId: line.senderId,
-          senderName: line.senderName,
-          text: line.text,
-          timestamp: nowTs + idx + 1,
-        })),
       ]);
       setPhase('day_discussion');
       setTimerSeconds(timerConfig.dayDiscussSec);
@@ -3917,6 +4473,26 @@ export default function App() {
       setLastDawnAnnouncement(dawnAfterSkip);
       setGmAnnouncement(dawnAfterSkip);
       sound.playGMAnnouncement('dawn', dawnAfterSkip.victims.length > 0, dawnAfterSkip.spokenNarration, lang);
+
+      const dawnVictimIds = dawnAfterSkip.victims.map((v) => v.id);
+      const dawnKilledNames = dawnAfterSkip.victims.map((v) => v.name);
+      if (aiBrainRef.current) {
+        recordRoundPublicOutcome(aiBrainRef.current, {
+          round,
+          dawnDeaths: dawnVictimIds,
+        });
+        const beats = generateScheduledDiscussionBeats(aiBrainRef.current, {
+          players: updatedAfterSkip,
+          round,
+          lang,
+          killedNames: dawnKilledNames,
+          killedIds: dawnVictimIds,
+          dayDiscussSec: timerConfig.dayDiscussSec,
+          mayorId,
+          seerInspection: livingBotSeerInDawn ? dawnCtx?.seerInspection ?? null : null,
+        });
+        scheduleBotBeats(beats, ['day_discussion'], matchInstanceIdRef.current);
+      }
     } else {
       const duskBefore = pendingDuskBeforePlayers || updatedAfterSkip;
       const duskAfterSkip = enrichDuskAnnouncementVotes(
@@ -3977,6 +4553,7 @@ export default function App() {
     roomId,
     onlineMatchView?.isMyHunterTurn,
     enrichDuskAnnouncementVotes,
+    scheduleBotBeats,
   ]);
 
   // Fast-Forward / Advance Phase Handler (Host-only server advance in Online mode; jumps to human turn in AI Practice)
@@ -4117,7 +4694,8 @@ export default function App() {
       showMyRoleModal ||
       isBeginnerUiPaused ||
       Boolean(gmAnnouncement) ||
-      Boolean(nightDeathCinematic)
+      Boolean(nightDeathCinematic) ||
+      Boolean(activeNightScene)
     )
       return;
     const timer = setInterval(() => {
@@ -4139,6 +4717,7 @@ export default function App() {
     activeDrawer,
     gmAnnouncement,
     nightDeathCinematic,
+    activeNightScene,
   ]);
 
   const isLastNightStep =
@@ -4161,7 +4740,8 @@ export default function App() {
     hasHumanVoted: hasVoted,
     isHumanHunterRevenge,
     isLastNightStep,
-    hasActiveGMAnnouncement: Boolean(gmAnnouncement) || Boolean(nightDeathCinematic),
+    hasActiveGMAnnouncement:
+      Boolean(gmAnnouncement) || Boolean(nightDeathCinematic) || Boolean(activeNightScene),
   });
 
   // Trigger step-by-step Auto-GM progression when timer reaches 0 (NEVER runs in server-authoritative Online mode!)
@@ -4252,6 +4832,8 @@ export default function App() {
         knownWolfIds,
         villageSize,
         preferredRole,
+        preferredStoryline,
+        aiBrain: aiBrainRef.current,
         eventBanner,
       };
       sessionStorage.setItem(ACTIVE_MATCH_SNAPSHOT_KEY, JSON.stringify(snap));
@@ -4288,6 +4870,7 @@ export default function App() {
     knownWolfIds,
     villageSize,
     preferredRole,
+    preferredStoryline,
     eventBanner,
   ]);
 
@@ -4303,6 +4886,11 @@ export default function App() {
     botWitchActedTonightRef.current = Boolean(
       restoredWitchHeal || savedMatchSnapshot.witchPoisonTargetId
     );
+    const restoredStoryline = savedMatchSnapshot.preferredStoryline || preferredStoryline;
+    aiBrainRef.current =
+      savedMatchSnapshot.aiBrain ??
+      createAIMatchBrain(savedMatchSnapshot.players, restoredStoryline, currentUser.id);
+    gallowsDefenseScheduledRoundRef.current = -1;
     setGameMode('ai_practice');
     setOnlineMatchView(null);
     activeOnlineRoomCodeRef.current = null;
@@ -4333,10 +4921,13 @@ export default function App() {
     );
     setVillageSize(savedMatchSnapshot.villageSize || savedMatchSnapshot.players.length);
     setPreferredRole(savedMatchSnapshot.preferredRole || 'random');
+    if (savedMatchSnapshot.preferredStoryline) {
+      setPreferredStoryline(savedMatchSnapshot.preferredStoryline);
+    }
     setEventBanner(savedMatchSnapshot.eventBanner || '');
     setSavedMatchSnapshot(null);
     setShellState('playing');
-  }, [savedMatchSnapshot]);
+  }, [savedMatchSnapshot, preferredStoryline, currentUser.id]);
 
   const handleDismissSavedMatch = useCallback(() => {
     clearSavedAIMatchSnapshot();
@@ -4752,7 +5343,11 @@ export default function App() {
       isGhost: isGhostMsg,
     };
     setMessages((prev) => [...prev, nextMsg]);
-    if (gameMode === 'online') realtimeClient.sendChat(roomId, nextMsg);
+    if (gameMode === 'online') {
+      realtimeClient.sendChat(roomId, nextMsg);
+    } else if (!isGhostMsg) {
+      triggerSmartBotRepliesToHuman(text);
+    }
     setChatInput('');
   };
 
@@ -4874,11 +5469,85 @@ export default function App() {
     }
   };
 
+  const wakingActorIds: string[] = (() => {
+    if (gameMode === 'online' && !me.isAlive && onlineGhostNightState) {
+      return onlineGhostNightState.wakingActorIds;
+    }
+    if (phase === 'hunter_revenge' && activeHunter) {
+      return [activeHunter.id];
+    }
+    if (phase !== 'night' || !currentNightStep) return [];
+    if (!me.isAlive) {
+      return players
+        .filter((p) => isPlayerAwakeForNightStep(p, currentNightStep.key, round))
+        .map((p) => p.id);
+    }
+    if (isPlayerAwakeAtNight) {
+      if (currentNightStep.key === 'werewolf') {
+        return players
+          .filter((p) => isPlayerAwakeForNightStep(p, 'werewolf', round))
+          .map((p) => p.id);
+      }
+      return [me.id];
+    }
+    return [];
+  })();
+
+  const wakingActors: Player[] = wakingActorIds
+    .map((id) => players.find((p) => p.id === id))
+    .filter((p): p is Player => Boolean(p));
+
+  const effectiveGhostNightState: GhostNightSpectatorView | null = (() => {
+    if (me.isAlive) return null;
+    if (gameMode === 'online') return onlineGhostNightState;
+    if (phase !== 'night') return null;
+    const soloLiveActions: NightActions = {
+      wolfTargetId: tonightWolfVictimId,
+      secondWolfTargetId,
+      guardTargetId: guardTargetTonightId,
+      witchHealTargetId: witchHealTargetTonightId,
+      witchPoisonTargetId,
+      seerTargetId: seerTargetTonightId,
+      cupidLovers,
+      doppelgangerTargetId,
+    };
+    const ghostDyingIds = getDyingWolfVictimsForWitch(
+      players,
+      {
+        wolfTargetId: tonightWolfVictimId,
+        secondWolfTargetId,
+        guardTargetId: guardTargetTonightId,
+      },
+      wolfPupFrenzy
+    );
+    const seerPlayer = players.find((p) => p.isAlive && p.roleId === 'seer' && !p.hasUsedPower);
+    const seerTargetPlayer = seerTargetTonightId
+      ? players.find((p) => p.id === seerTargetTonightId)
+      : null;
+    return {
+      wakingActorIds,
+      liveActions: soloLiveActions,
+      wolfPackPicks: {},
+      dyingWolfVictimIds: ghostDyingIds,
+      seerInspectionTonight:
+        seerPlayer && seerTargetPlayer
+          ? {
+              seerId: seerPlayer.id,
+              targetId: seerTargetPlayer.id,
+              roleId: seerTargetPlayer.roleId,
+              isWerewolf:
+                seerTargetPlayer.roleId === 'werewolf' || seerTargetPlayer.roleId === 'wolf_pup',
+            }
+          : null,
+      skillCutscenes: skillCutsceneQueue,
+    };
+  })();
+
   const canUseVirtualDpad =
     shellState === 'playing' &&
     !isNightBlindfolded &&
     !nightDeathCinematic &&
-    ((phase === 'night' && isPlayerAwakeAtNight) || !me.isAlive || isDirectLookCam);
+    (!me.isAlive || phase === 'day_discussion');
 
   // Reset mobile D-Pad / turn / ghost vertical rates whenever controls disable or phase changes (BUG-06)
   useEffect(() => {
@@ -5110,6 +5779,8 @@ export default function App() {
         mayorId={mayorId}
         emoteEvents={emoteEvents}
         deathCinematic={nightDeathCinematic}
+        activeNightScene={activeNightScene}
+        wakingActorIds={wakingActorIds}
         returnToSeatTrigger={returnToSeatTrigger}
         onPointerLockChange={handlePointerLockChange}
         onAimedPlayerChange={setAimedPlayerId}
@@ -5317,6 +5988,7 @@ export default function App() {
           currentUser={currentUser}
           villageSize={villageSize}
           preferredRole={preferredRole}
+          preferredStoryline={preferredStoryline}
           timerConfig={timerConfig}
           showFactionHints={showFactionHints}
           isTitleMenuMinimized={isTitleMenuMinimized}
@@ -5360,6 +6032,7 @@ export default function App() {
             ]);
           }}
           onChangePreferredRole={setPreferredRole}
+          onChangePreferredStoryline={setPreferredStoryline}
           onUpdateTimerConfig={handleUpdateTimerConfig}
           onToggleFactionHints={() => setShowFactionHints((v) => !v)}
           onOpenAccountModal={(tab) => {
@@ -5491,6 +6164,12 @@ export default function App() {
                 isSeerInspectPending={isSeerInspectPending}
                 canAdvanceBotStep={gameMode !== 'online' || Boolean(me.isHost)}
                 wolfPackPicks={gameMode === 'online' ? onlineMatchView?.wolfPackPicks ?? null : null}
+                ghostNightState={effectiveGhostNightState}
+                wakingActors={wakingActors}
+                onSkipStepFast={() => {
+                  clearSkillCutscenes();
+                  handleAdvanceNightStep();
+                }}
                 onSelectWitchHealTarget={(victimId) => {
                   sound.playWitchCauldron();
                   setWitchHealTargetTonightId(victimId);
@@ -5506,6 +6185,24 @@ export default function App() {
                 onAdvanceBotStep={handleAdvanceNightStep}
                 onCloseEyes={() => setHasClosedEyesTonight(true)}
               />
+            )}
+
+            {/* Compact Non-Blocking Floating Pill During Active 3D Skill Cutscene */}
+            {activeNightScene && !nightDeathCinematic && !gmAnnouncement && !isNightBlindfolded && (
+              <div
+                data-testid="active-skill-cutscene-pill"
+                className="pointer-events-auto flex items-center gap-2 px-3 py-1 rounded-full bg-[#1b1126]/95 border border-[#e89c3e] text-[11px] sm:text-xs font-extrabold text-[#fef3c7] shadow-2xl max-w-[92vw]"
+              >
+                <span className="truncate">{activeNightScene.label || activeNightScene.kind}</span>
+                <button
+                  type="button"
+                  data-testid="skip-skill-cutscene-btn"
+                  onClick={skipActiveSkillCutscene}
+                  className="px-2.5 py-0.5 rounded-full bg-[#b84b10] hover:bg-[#d15916] border border-[#fbc266]/70 text-white text-[10px] sm:text-[11px] font-black cursor-pointer shrink-0"
+                >
+                  {t.skipCutsceneBtn}
+                </button>
+              </div>
             )}
 
             {phase !== 'night' && !nightDeathCinematic && (
@@ -5691,13 +6388,11 @@ export default function App() {
                 className="lg:hidden fixed bottom-16 right-2 sm:right-auto sm:bottom-20 sm:left-3 z-30 pointer-events-auto touch-none select-none flex flex-col items-center gap-1 agrou-wood-panel p-1.5 rounded-xl shadow-lg"
               >
                 <span className="text-[10px] font-mono uppercase text-[#f2be6b] font-bold leading-tight">
-                  {isDirectLookCam && me.isAlive
-                    ? cameraPreset === 'third_person'
-                      ? t.behindCamShort
-                      : t.dpadWalkFpv
-                    : me.isAlive
-                    ? t.dpadWalkNight
-                    : t.dpadFlyGhost}
+                  {!me.isAlive
+                    ? t.dpadFlyGhost
+                    : cameraPreset === 'third_person'
+                    ? t.behindCamShort
+                    : t.dpadWalkFpv}
                 </span>
                 <div className="flex items-center gap-1">
                   {showTurnBtns && (
@@ -5862,8 +6557,8 @@ export default function App() {
           {/* UNIFIED COLLAPSIBLE BOTTOM CONTROL DOCK (Hidden while Night Blindfolded or Night Death Cinematic active) */}
           {!isNightBlindfolded && !nightDeathCinematic && (
           <div className="mx-auto w-full max-w-[1220px] pointer-events-auto flex flex-col items-center">
-            {/* Subtle Desktop Movement Controls Legend (Living players only — Ghost has single top banner, BUG-14/BUG-40) */}
-            {!isDirectLookCam && !showOnboardingTour && me.isAlive && (
+            {/* Subtle Desktop Movement Controls Legend (Living players during Day Discussion only) */}
+            {!isDirectLookCam && !showOnboardingTour && me.isAlive && phase === 'day_discussion' && (
               <div
                 data-testid="movement-controls-legend"
                 className="hidden md:flex items-center gap-2 mb-1 px-2.5 py-0.5 rounded-full bg-[#19110b]/88 border border-[#5e4128]/70 text-[10px] text-[#e4cda9] font-semibold shadow"
@@ -5958,6 +6653,8 @@ export default function App() {
                         setMessages((prev) => [...prev, speechMsg]);
                         if (gameMode === 'online') {
                           realtimeClient.sendChat(roomId, speechMsg);
+                        } else {
+                          triggerSmartBotRepliesToHuman(transcript);
                         }
                       }}
                       lang={lang}
@@ -6468,6 +7165,8 @@ export default function App() {
                     setMessages((prev) => [...prev, speechMsg]);
                     if (gameMode === 'online') {
                       realtimeClient.sendChat(roomId, speechMsg);
+                    } else {
+                      triggerSmartBotRepliesToHuman(transcript);
                     }
                   }}
                   lang={lang}

@@ -1115,3 +1115,178 @@ export function shouldApplyCameraLook(params: {
   return isPointerLocked || isDraggingCanvas;
 }
 
+export type EnvObstacle =
+  | { kind: 'circle'; x: number; z: number; r: number }
+  | { kind: 'obb'; x: number; z: number; hx: number; hz: number; rotY: number };
+
+/**
+ * Resolves 2D circle-vs-circle and circle-vs-OBB environment/stool collisions using
+ * 2-iteration penetration push-out for smooth tangential sliding without corner jitter.
+ */
+export function resolveObstaclesCollision(
+  x: number,
+  z: number,
+  playerRadius: number,
+  obstacles: readonly EnvObstacle[]
+): { x: number; z: number } {
+  let px = x;
+  let pz = z;
+  const rPad = Math.max(0.05, playerRadius);
+
+  for (let iter = 0; iter < 2; iter++) {
+    for (let i = 0; i < obstacles.length; i++) {
+      const ob = obstacles[i];
+      if (ob.kind === 'circle') {
+        const dx = px - ob.x;
+        const dz = pz - ob.z;
+        const minDist = ob.r + rPad;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < minDist * minDist) {
+          if (distSq < 1e-8) {
+            px = ob.x + minDist;
+          } else {
+            const dist = Math.sqrt(distSq);
+            const push = minDist - dist;
+            px += (dx / dist) * push;
+            pz += (dz / dist) * push;
+          }
+        }
+      } else {
+        // Transform player center into OBB local frame via Ry(-rotY)
+        const dx = px - ob.x;
+        const dz = pz - ob.z;
+        const cosR = Math.cos(ob.rotY);
+        const sinR = Math.sin(ob.rotY);
+        const lx = dx * cosR - dz * sinR;
+        const lz = dx * sinR + dz * cosR;
+
+        const clx = Math.max(-ob.hx, Math.min(ob.hx, lx));
+        const clz = Math.max(-ob.hz, Math.min(ob.hz, lz));
+        const rx = lx - clx;
+        const rz = lz - clz;
+        const distSq = rx * rx + rz * rz;
+
+        if (distSq < rPad * rPad) {
+          let pushLx = 0;
+          let pushLz = 0;
+          if (distSq > 1e-10) {
+            const dist = Math.sqrt(distSq);
+            const push = rPad - dist;
+            pushLx = (rx / dist) * push;
+            pushLz = (rz / dist) * push;
+          } else {
+            // Center is inside OBB: eject along shallowest axis
+            const penX = ob.hx - Math.abs(lx);
+            const penZ = ob.hz - Math.abs(lz);
+            if (penX <= penZ) {
+              pushLx = (lx >= 0 ? 1 : -1) * (ob.hx + rPad) - lx;
+            } else {
+              pushLz = (lz >= 0 ? 1 : -1) * (ob.hz + rPad) - lz;
+            }
+          }
+          // Rotate local push back to world via Ry(+rotY)
+          px += pushLx * cosR + pushLz * sinR;
+          pz += -pushLx * sinR + pushLz * cosR;
+        }
+      }
+    }
+  }
+
+  return { x: px, z: pz };
+}
+
+/**
+ * Clamps a Third-Person camera ray from `(pivotX, pivotZ)` to `(camX, camZ)` against static
+ * environment obstacles, returning a fraction `t` in `[minFraction, 1]` so the camera smoothly
+ * pulls forward instead of clipping inside tents or boulders.
+ */
+export function clampCameraRayAgainstObstacles(
+  pivotX: number,
+  pivotZ: number,
+  camX: number,
+  camZ: number,
+  obstacles: readonly EnvObstacle[],
+  margin = 0.35,
+  minFraction = 0.22
+): number {
+  const rdx = camX - pivotX;
+  const rdz = camZ - pivotZ;
+  const segLenSq = rdx * rdx + rdz * rdz;
+  if (segLenSq < 1e-6) return 1;
+
+  let bestT = 1;
+  for (let i = 0; i < obstacles.length; i++) {
+    const ob = obstacles[i];
+    if (ob.kind === 'circle') {
+      const fx = pivotX - ob.x;
+      const fz = pivotZ - ob.z;
+      const rr = ob.r + margin;
+      const b = 2 * (fx * rdx + fz * rdz);
+      const c = fx * fx + fz * fz - rr * rr;
+      const disc = b * b - 4 * segLenSq * c;
+      if (disc < 0) continue;
+      const tHit = (-b - Math.sqrt(disc)) / (2 * segLenSq);
+      if (tHit >= 0.02 && tHit < bestT) bestT = tHit;
+    } else {
+      const cosR = Math.cos(ob.rotY);
+      const sinR = Math.sin(ob.rotY);
+      const ox = pivotX - ob.x;
+      const oz = pivotZ - ob.z;
+      const lx0 = ox * cosR - oz * sinR;
+      const lz0 = ox * sinR + oz * cosR;
+      const dlx = rdx * cosR - rdz * sinR;
+      const dlz = rdx * sinR + rdz * cosR;
+      const ex = ob.hx + margin;
+      const ez = ob.hz + margin;
+
+      let tMin = 0;
+      let tMax = 1;
+      if (Math.abs(dlx) < 1e-7) {
+        if (lx0 < -ex || lx0 > ex) continue;
+      } else {
+        let t1 = (-ex - lx0) / dlx;
+        let t2 = (ex - lx0) / dlx;
+        if (t1 > t2) {
+          const tmp = t1;
+          t1 = t2;
+          t2 = tmp;
+        }
+        tMin = Math.max(tMin, t1);
+        tMax = Math.min(tMax, t2);
+        if (tMin > tMax) continue;
+      }
+      if (Math.abs(dlz) < 1e-7) {
+        if (lz0 < -ez || lz0 > ez) continue;
+      } else {
+        let t1 = (-ez - lz0) / dlz;
+        let t2 = (ez - lz0) / dlz;
+        if (t1 > t2) {
+          const tmp = t1;
+          t1 = t2;
+          t2 = tmp;
+        }
+        tMin = Math.max(tMin, t1);
+        tMax = Math.min(tMax, t2);
+        if (tMin > tMax) continue;
+      }
+      if (tMin >= 0.02 && tMin < bestT) bestT = tMin;
+    }
+  }
+
+  return Math.max(minFraction, Math.min(1, bestT));
+}
+
+/**
+ * Pure helper computing river wading physics in the Riverside Meadow ('autumn') stream:
+ * applies 0.62x drag and limits crouch depth so the adventurer never ducks underwater.
+ */
+export function computeRiverWadingState(
+  biome: 'forest' | 'frostpeak' | 'autumn',
+  groundY: number
+): { isWading: boolean; speedMultiplier: number; maxCrouchBlend: number } {
+  if (biome === 'autumn' && groundY < -0.26) {
+    return { isWading: true, speedMultiplier: 0.62, maxCrouchBlend: 0.22 };
+  }
+  return { isWading: false, speedMultiplier: 1.0, maxCrouchBlend: 1.0 };
+}
+

@@ -427,3 +427,333 @@ test('Cupid/Doppelganger projection privacy, Seer Traitor stealth, and Hunter re
   assert.equal(tickAfterHunter.changed, true);
   assert.equal(mgr.getMatchState('EDGE-04')?.phase, 'day_discussion');
 });
+
+test('Zero-Leak & Omniscient Ghost Night Projection: living/unknown get null, dead Ghost sees live night telemetry and skillCutscenes', () => {
+  const mgr = new RealtimeRoomManager();
+  const t0 = 1_700_400_000_000;
+
+  mgr.createOrJoinRoom('GHOST-05', { id: 'u_ghost', name: 'Hồn Ma', avatar: '👻', elo: 1500 }, { villageSize: 8 });
+  mgr.createOrJoinRoom('GHOST-05', { id: 'u_doppel', name: 'Nhân Bản', avatar: '🪞', elo: 1500 });
+  mgr.createOrJoinRoom('GHOST-05', { id: 'u_cupid', name: 'Cupid', avatar: '💘', elo: 1500 });
+  mgr.createOrJoinRoom('GHOST-05', { id: 'u_guard', name: 'Bảo Vệ', avatar: '🛡️', elo: 1500 });
+  mgr.createOrJoinRoom('GHOST-05', { id: 'u_wolf', name: 'Ma Sói', avatar: '🐺', elo: 1500 });
+  mgr.createOrJoinRoom('GHOST-05', { id: 'u_witch', name: 'Phù Thủy', avatar: '🧪', elo: 1500 });
+  mgr.createOrJoinRoom('GHOST-05', { id: 'u_seer', name: 'Tiên Tri', avatar: '🔮', elo: 1500 });
+  mgr.createOrJoinRoom('GHOST-05', { id: 'u_vil', name: 'Dân Làng', avatar: '🧑‍🌾', elo: 1500 });
+
+  assert.equal(
+    mgr.startMatch('GHOST-05', 'u_ghost', {
+      now: t0,
+      customRoles: {
+        u_ghost: 'villager',
+        u_doppel: 'doppelganger',
+        u_cupid: 'cupid',
+        u_guard: 'bodyguard',
+        u_wolf: 'werewolf',
+        u_witch: 'witch',
+        u_seer: 'seer',
+        u_vil: 'villager',
+      },
+    }).ok,
+    true
+  );
+
+  // Zero-leak check BEFORE any death: living Villager, Werewolf, Seer, and unknown viewer ALL get null
+  for (const viewerId of ['u_ghost', 'u_vil', 'u_wolf', 'u_seer', 'u_witch', 'u_guard', 'u_unknown_stranger']) {
+    const view = mgr.getMatchViewForUser('GHOST-05', viewerId, t0)!;
+    assert.equal(view.ghostNightState, null, `${viewerId} must receive ghostNightState === null`);
+  }
+
+  // Mark u_ghost dead to verify full Round 1 Ghost omniscient telemetry across all waking roles
+  const match = mgr.getMatchState('GHOST-05')!;
+  match.players.find((p) => p.id === 'u_ghost')!.isAlive = false;
+
+  // Step 0: Doppelganger
+  let ghostView = mgr.getMatchViewForUser('GHOST-05', 'u_ghost', t0 + 100)!;
+  assert.ok(ghostView.ghostNightState);
+  assert.deepEqual(ghostView.ghostNightState.wakingActorIds, ['u_doppel']);
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_doppel', { actionType: 'doppelganger_pick', targetId: 'u_vil' }, t0 + 150).ok, true);
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_doppel', { actionType: 'confirm_done' }, t0 + 200).ok, true);
+
+  // Step 1: Cupid
+  ghostView = mgr.getMatchViewForUser('GHOST-05', 'u_ghost', t0 + 250)!;
+  assert.deepEqual(ghostView.ghostNightState?.wakingActorIds, ['u_cupid']);
+  assert.equal(
+    ghostView.ghostNightState?.skillCutscenes.some(
+      (c) => c.kind === 'doppelganger' && c.primaryTargetId === 'u_vil'
+    ),
+    true
+  );
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_cupid', { actionType: 'cupid_link', targetId: 'u_vil', secondTargetId: 'u_seer' }, t0 + 300).ok, true);
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_cupid', { actionType: 'confirm_done' }, t0 + 350).ok, true);
+
+  // Step 2: Bodyguard shields u_seer
+  ghostView = mgr.getMatchViewForUser('GHOST-05', 'u_ghost', t0 + 400)!;
+  assert.deepEqual(ghostView.ghostNightState?.wakingActorIds, ['u_guard']);
+  assert.deepEqual(ghostView.ghostNightState?.liveActions.cupidLovers, ['u_vil', 'u_seer']);
+  assert.equal(
+    ghostView.ghostNightState?.skillCutscenes.some(
+      (c) => c.kind === 'cupid' && c.primaryTargetId === 'u_vil' && c.secondaryTargetId === 'u_seer'
+    ),
+    true
+  );
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_guard', { actionType: 'guard', targetId: 'u_seer' }, t0 + 450).ok, true);
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_guard', { actionType: 'confirm_done' }, t0 + 500).ok, true);
+
+  // Step 3: Werewolf bites u_vil
+  ghostView = mgr.getMatchViewForUser('GHOST-05', 'u_ghost', t0 + 550)!;
+  assert.deepEqual(ghostView.ghostNightState?.wakingActorIds, ['u_wolf']);
+  assert.equal(
+    ghostView.ghostNightState?.skillCutscenes.some(
+      (c) => c.kind === 'bodyguard' && c.primaryTargetId === 'u_seer'
+    ),
+    true
+  );
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_wolf', { actionType: 'wolf_bite', targetId: 'u_vil' }, t0 + 600).ok, true);
+
+  // Live mid-step check: Ghost sees wolfPackPicks & lethal dyingWolfVictimIds; living roles STILL get null!
+  ghostView = mgr.getMatchViewForUser('GHOST-05', 'u_ghost', t0 + 620)!;
+  assert.equal(ghostView.ghostNightState?.wolfPackPicks.u_wolf?.targetId, 'u_vil');
+  assert.deepEqual(ghostView.ghostNightState?.dyingWolfVictimIds, ['u_vil']);
+  assert.equal(mgr.getMatchViewForUser('GHOST-05', 'u_vil', t0 + 620)!.ghostNightState, null);
+  assert.equal(mgr.getMatchViewForUser('GHOST-05', 'u_wolf', t0 + 620)!.ghostNightState, null);
+  assert.equal(mgr.getMatchViewForUser('GHOST-05', 'u_seer', t0 + 620)!.ghostNightState, null);
+  assert.equal(mgr.getMatchViewForUser('GHOST-05', 'u_unknown_stranger', t0 + 620)!.ghostNightState, null);
+
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_wolf', { actionType: 'confirm_done' }, t0 + 650).ok, true);
+
+  // Step 4: Witch heals u_vil AND poisons u_guard
+  ghostView = mgr.getMatchViewForUser('GHOST-05', 'u_ghost', t0 + 700)!;
+  assert.deepEqual(ghostView.ghostNightState?.wakingActorIds, ['u_witch']);
+  assert.equal(
+    ghostView.ghostNightState?.skillCutscenes.some(
+      (c) => c.kind === 'werewolf' && c.actorIds.includes('u_wolf') && c.primaryTargetId === 'u_vil'
+    ),
+    true
+  );
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_witch', { actionType: 'witch_heal', targetId: 'u_vil' }, t0 + 750).ok, true);
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_witch', { actionType: 'witch_poison', targetId: 'u_guard' }, t0 + 780).ok, true);
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_witch', { actionType: 'confirm_done' }, t0 + 800).ok, true);
+
+  // Step 5: Seer inspects u_wolf -> Ghost immediately sees seerInspectionTonight & seer cutscene BEFORE confirm_done!
+  ghostView = mgr.getMatchViewForUser('GHOST-05', 'u_ghost', t0 + 850)!;
+  assert.deepEqual(ghostView.ghostNightState?.wakingActorIds, ['u_seer']);
+  assert.equal(
+    ghostView.ghostNightState?.skillCutscenes.some(
+      (c) => c.kind === 'witch_heal' && c.primaryTargetId === 'u_vil'
+    ),
+    true
+  );
+  assert.equal(
+    ghostView.ghostNightState?.skillCutscenes.some(
+      (c) => c.kind === 'witch_poison' && c.primaryTargetId === 'u_guard'
+    ),
+    true
+  );
+  assert.equal(ghostView.ghostNightState?.seerInspectionTonight, null);
+
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_seer', { actionType: 'seer_inspect', targetId: 'u_wolf' }, t0 + 900).ok, true);
+  ghostView = mgr.getMatchViewForUser('GHOST-05', 'u_ghost', t0 + 920)!;
+  assert.deepEqual(ghostView.ghostNightState?.seerInspectionTonight, {
+    seerId: 'u_seer',
+    targetId: 'u_wolf',
+    roleId: 'werewolf',
+    isWerewolf: true,
+  });
+  const seerCutscene = ghostView.ghostNightState?.skillCutscenes.find((c) => c.kind === 'seer');
+  assert.ok(seerCutscene);
+  assert.equal(seerCutscene.primaryTargetId, 'u_wolf');
+  assert.equal(seerCutscene.seerIsWolf, true);
+  // Living Seer still never receives ghostNightState
+  assert.equal(mgr.getMatchViewForUser('GHOST-05', 'u_seer', t0 + 920)!.ghostNightState, null);
+
+  // Seer confirms -> Dawn (day_discussion): ghostNightState becomes null during daytime, and Night 2 clears skillCutscenes!
+  assert.equal(mgr.submitNightAction('GHOST-05', 'u_seer', { actionType: 'confirm_done' }, t0 + 950).ok, true);
+  const dawnGhost = mgr.getMatchViewForUser('GHOST-05', 'u_ghost', t0 + 950)!;
+  const newlyDeadGuard = mgr.getMatchViewForUser('GHOST-05', 'u_guard', t0 + 950)!;
+  assert.equal(dawnGhost.phase, 'day_discussion');
+  assert.equal(dawnGhost.ghostNightState, null);
+  assert.equal(newlyDeadGuard.players.find((p) => p.id === 'u_guard')?.isAlive, false);
+  assert.equal(newlyDeadGuard.ghostNightState, null);
+
+  // Advance Day 1 (discussion -> voting -> Night 2 with no lynch)
+  assert.equal(mgr.advancePhase('GHOST-05', 'u_ghost', t0 + 1500).ok, true);
+  assert.equal(mgr.advancePhase('GHOST-05', 'u_ghost', t0 + 2000).ok, true);
+  const night2GuardGhost = mgr.getMatchViewForUser('GHOST-05', 'u_guard', t0 + 2000)!;
+  assert.equal(night2GuardGhost.phase, 'night');
+  assert.equal(night2GuardGhost.round, 2);
+  assert.ok(night2GuardGhost.ghostNightState, 'Naturally killed player receives ghostNightState on Night 2');
+  assert.deepEqual(
+    night2GuardGhost.ghostNightState.skillCutscenes,
+    [],
+    'nightSkillEvents must be cleared at the start of every new Night'
+  );
+});
+
+test('Save-Preservation Invariant: werewolf skillCutscene NEVER overrides Bodyguard shield or Witch heal at Dawn', () => {
+  const mgr = new RealtimeRoomManager();
+  const t0 = 1_700_500_000_000;
+
+  // Case A: Bodyguard shields u_vil, then Werewolf bites u_vil & confirms -> u_vil wakes up ALIVE with no deathCinematic
+  mgr.createOrJoinRoom('SAVE-BG', { id: 'u_guard', name: 'Bảo Vệ', avatar: '🛡️', elo: 1500 }, { villageSize: 5 });
+  mgr.createOrJoinRoom('SAVE-BG', { id: 'u_wolf', name: 'Sói', avatar: '🐺', elo: 1500 });
+  mgr.createOrJoinRoom('SAVE-BG', { id: 'u_witch', name: 'Phù Thủy', avatar: '🧪', elo: 1500 });
+  mgr.createOrJoinRoom('SAVE-BG', { id: 'u_vil', name: 'Dân Làng', avatar: '🧑‍🌾', elo: 1500 });
+  mgr.createOrJoinRoom('SAVE-BG', { id: 'u_ghost', name: 'Hồn Ma', avatar: '👻', elo: 1500 });
+
+  assert.equal(
+    mgr.startMatch('SAVE-BG', 'u_guard', {
+      now: t0,
+      customRoles: {
+        u_guard: 'bodyguard',
+        u_wolf: 'werewolf',
+        u_witch: 'witch',
+        u_vil: 'villager',
+        u_ghost: 'villager',
+      },
+    }).ok,
+    true
+  );
+  mgr.getMatchState('SAVE-BG')!.players.find((p) => p.id === 'u_ghost')!.isAlive = false;
+
+  assert.equal(mgr.submitNightAction('SAVE-BG', 'u_guard', { actionType: 'guard', targetId: 'u_vil' }, t0 + 100).ok, true);
+  assert.equal(mgr.submitNightAction('SAVE-BG', 'u_guard', { actionType: 'confirm_done' }, t0 + 200).ok, true);
+  assert.equal(mgr.submitNightAction('SAVE-BG', 'u_wolf', { actionType: 'wolf_bite', targetId: 'u_vil' }, t0 + 300).ok, true);
+  assert.equal(mgr.submitNightAction('SAVE-BG', 'u_wolf', { actionType: 'confirm_done' }, t0 + 400).ok, true);
+
+  // During Witch step, Ghost sees BOTH bodyguard & werewolf cutscenes AND dyingWolfVictimIds is empty (blocked!)
+  const ghostMidBg = mgr.getMatchViewForUser('SAVE-BG', 'u_ghost', t0 + 450)!;
+  assert.equal(
+    ghostMidBg.ghostNightState?.skillCutscenes.some((c) => c.kind === 'werewolf' && c.primaryTargetId === 'u_vil'),
+    true
+  );
+  assert.deepEqual(ghostMidBg.ghostNightState?.dyingWolfVictimIds, []);
+
+  // Witch does nothing and confirms -> Dawn!
+  assert.equal(mgr.submitNightAction('SAVE-BG', 'u_witch', { actionType: 'confirm_done' }, t0 + 500).ok, true);
+  const vilAfterBg = mgr.getMatchViewForUser('SAVE-BG', 'u_vil', t0 + 500)!;
+  assert.equal(vilAfterBg.phase, 'day_discussion');
+  assert.equal(vilAfterBg.players.find((p) => p.id === 'u_vil')?.isAlive, true);
+  assert.equal(vilAfterBg.deathCinematic, null);
+
+  // Case B: Werewolf bites u_vil & confirms (recording werewolf cutscene), then Witch heals u_vil -> u_vil wakes up ALIVE!
+  mgr.createOrJoinRoom('SAVE-WT', { id: 'u_wolf', name: 'Sói', avatar: '🐺', elo: 1500 }, { villageSize: 5 });
+  mgr.createOrJoinRoom('SAVE-WT', { id: 'u_witch', name: 'Phù Thủy', avatar: '🧪', elo: 1500 });
+  mgr.createOrJoinRoom('SAVE-WT', { id: 'u_seer', name: 'Tiên Tri', avatar: '🔮', elo: 1500 });
+  mgr.createOrJoinRoom('SAVE-WT', { id: 'u_vil', name: 'Dân Làng', avatar: '🧑‍🌾', elo: 1500 });
+  mgr.createOrJoinRoom('SAVE-WT', { id: 'u_ghost', name: 'Hồn Ma', avatar: '👻', elo: 1500 });
+
+  assert.equal(
+    mgr.startMatch('SAVE-WT', 'u_wolf', {
+      now: t0,
+      customRoles: {
+        u_wolf: 'werewolf',
+        u_witch: 'witch',
+        u_seer: 'seer',
+        u_vil: 'villager',
+        u_ghost: 'villager',
+      },
+    }).ok,
+    true
+  );
+  mgr.getMatchState('SAVE-WT')!.players.find((p) => p.id === 'u_ghost')!.isAlive = false;
+
+  assert.equal(mgr.submitNightAction('SAVE-WT', 'u_wolf', { actionType: 'wolf_bite', targetId: 'u_vil' }, t0 + 100).ok, true);
+  assert.equal(mgr.submitNightAction('SAVE-WT', 'u_wolf', { actionType: 'confirm_done' }, t0 + 200).ok, true);
+
+  // Werewolf cutscene is recorded AND dyingWolfVictimIds shows u_vil before Witch heals
+  const ghostBeforeHeal = mgr.getMatchViewForUser('SAVE-WT', 'u_ghost', t0 + 250)!;
+  assert.equal(
+    ghostBeforeHeal.ghostNightState?.skillCutscenes.some((c) => c.kind === 'werewolf' && c.primaryTargetId === 'u_vil'),
+    true
+  );
+  assert.deepEqual(ghostBeforeHeal.ghostNightState?.dyingWolfVictimIds, ['u_vil']);
+
+  // Witch heals u_vil and confirms; Seer confirms -> Dawn!
+  assert.equal(mgr.submitNightAction('SAVE-WT', 'u_witch', { actionType: 'witch_heal', targetId: 'u_vil' }, t0 + 300).ok, true);
+  assert.equal(mgr.submitNightAction('SAVE-WT', 'u_witch', { actionType: 'confirm_done' }, t0 + 350).ok, true);
+  assert.equal(mgr.submitNightAction('SAVE-WT', 'u_seer', { actionType: 'confirm_done' }, t0 + 400).ok, true);
+
+  const vilAfterHeal = mgr.getMatchViewForUser('SAVE-WT', 'u_vil', t0 + 400)!;
+  assert.equal(vilAfterHeal.phase, 'day_discussion');
+  assert.equal(vilAfterHeal.players.find((p) => p.id === 'u_vil')?.isAlive, true);
+  assert.equal(vilAfterHeal.deathCinematic, null);
+});
+
+test('Bot night steps emit deduplicated skillCutscenes and pending Hunter cannot peek ghostNightState before shooting', () => {
+  const mgr = new RealtimeRoomManager();
+  let clock = 1_700_600_000_000;
+
+  mgr.createOrJoinRoom('BOT-GHOST', { id: 'u_ghost', name: 'Hồn Ma', avatar: '👻', elo: 1500 }, { villageSize: 5 });
+  mgr.createOrJoinRoom('BOT-GHOST', { id: 'u_hunter', name: 'Thợ Săn', avatar: '🎯', elo: 1500 });
+  mgr.fillBots('BOT-GHOST', 'u_ghost');
+  const bots = mgr.getRoom('BOT-GHOST')!.participants.filter((p) => p.isBot).map((p) => p.id);
+
+  assert.equal(
+    mgr.startMatch('BOT-GHOST', 'u_ghost', {
+      now: clock,
+      customRoles: {
+        u_ghost: 'villager',
+        u_hunter: 'hunter',
+        [bots[0]]: 'werewolf',
+        [bots[1]]: 'bodyguard',
+        [bots[2]]: 'seer',
+      },
+    }).ok,
+    true
+  );
+
+  // Mark u_ghost dead to inspect live bot night cutscenes
+  const match = mgr.getMatchState('BOT-GHOST')!;
+  match.players.find((p) => p.id === 'u_ghost')!.isAlive = false;
+
+  // Step 0 is bot Bodyguard: bot immediately picked & emitted bodyguard cutscene
+  const ghostStep0 = mgr.getMatchViewForUser('BOT-GHOST', 'u_ghost', clock)!;
+  assert.equal(ghostStep0.currentNightStep?.key, 'bodyguard');
+  assert.equal(
+    ghostStep0.ghostNightState?.skillCutscenes.filter((c) => c.kind === 'bodyguard').length,
+    1
+  );
+
+  // Advance step 0 deadline -> step 1 (bot Werewolf); bodyguard cutscene must NOT duplicate!
+  clock = match.phaseEndsAt;
+  assert.equal(mgr.tickRoom('BOT-GHOST', clock).changed, true);
+  const ghostStep1 = mgr.getMatchViewForUser('BOT-GHOST', 'u_ghost', clock)!;
+  assert.equal(ghostStep1.currentNightStep?.key, 'werewolf');
+  assert.equal(
+    ghostStep1.ghostNightState?.skillCutscenes.filter((c) => c.kind === 'bodyguard').length,
+    1,
+    'Dedupe ID must prevent duplicate cutscenes when bot step finishes'
+  );
+  assert.equal(
+    ghostStep1.ghostNightState?.skillCutscenes.filter((c) => c.kind === 'werewolf').length,
+    1
+  );
+
+  // Force wolf target onto unshielded u_hunter so Dawn pauses in hunter_revenge
+  match.nightActions.guardTargetId = bots[2];
+  match.nightActions.wolfTargetId = 'u_hunter';
+  clock = match.phaseEndsAt;
+  assert.equal(mgr.tickRoom('BOT-GHOST', clock).changed, true); // -> seer
+  clock = match.phaseEndsAt;
+  assert.equal(mgr.tickRoom('BOT-GHOST', clock).changed, true); // -> hunter_revenge
+
+  assert.equal(match.phase, 'hunter_revenge');
+  // Dying pending Hunter MUST NOT get ghostNightState before pulling the trigger!
+  const hunterRevengeView = mgr.getMatchViewForUser('BOT-GHOST', 'u_hunter', clock)!;
+  assert.equal(hunterRevengeView.isMyHunterTurn, true);
+  assert.equal(hunterRevengeView.ghostNightState, null);
+
+  // Already-dead Ghost DOES see ghostNightState with activeHunterId in wakingActorIds
+  const ghostRevengeView = mgr.getMatchViewForUser('BOT-GHOST', 'u_ghost', clock)!;
+  assert.deepEqual(ghostRevengeView.ghostNightState?.wakingActorIds, ['u_hunter']);
+
+  // Hunter shoots bots[0] -> records hunter_shot cutscene cleanly
+  assert.equal(mgr.submitHunterShot('BOT-GHOST', 'u_hunter', bots[0], clock + 100).ok, true);
+  assert.equal(
+    match.nightSkillEvents.some(
+      (c) => c.kind === 'hunter_shot' && c.actorIds.includes('u_hunter') && c.primaryTargetId === bots[0]
+    ),
+    true
+  );
+});

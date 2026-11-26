@@ -219,3 +219,146 @@ test('in_match disconnect preserves participant as disconnected until all humans
   assert.equal(mgr.getRoom('ONL-8888'), null);
 });
 
+test('recordProp anti-cheat blocks dead Ghosts, Night throws, self-throws, and dead targets while allowing living Day throws', () => {
+  const mgr = new RealtimeRoomManager();
+  const t0 = 1_700_700_000_000;
+
+  mgr.createOrJoinRoom('PROP-SEC', { id: 'u_host', name: 'Host', avatar: '👑', elo: 1600 }, { villageSize: 5 });
+  mgr.createOrJoinRoom('PROP-SEC', { id: 'u_wolf', name: 'Wolf', avatar: '🐺', elo: 1550 });
+  mgr.createOrJoinRoom('PROP-SEC', { id: 'u_seer', name: 'Seer', avatar: '🔮', elo: 1550 });
+  mgr.createOrJoinRoom('PROP-SEC', { id: 'u_vil', name: 'Villager', avatar: '🧑‍🌾', elo: 1500 });
+  mgr.createOrJoinRoom('PROP-SEC', { id: 'u_victim', name: 'Victim', avatar: '🎯', elo: 1500 });
+
+  assert.equal(
+    mgr.startMatch('PROP-SEC', 'u_host', {
+      now: t0,
+      customRoles: {
+        u_host: 'villager',
+        u_wolf: 'werewolf',
+        u_seer: 'seer',
+        u_vil: 'villager',
+        u_victim: 'villager',
+      },
+    }).ok,
+    true
+  );
+
+  // Night 1: even living -> living is REJECTED at Night
+  const nightLivingProp = mgr.recordProp('PROP-SEC', {
+    id: 'p_night_living',
+    propType: 'tomato',
+    fromPlayerId: 'u_host',
+    targetPlayerId: 'u_seer',
+    timestamp: t0 + 100,
+  });
+  assert.equal(nightLivingProp.ok, false);
+  assert.equal(mgr.getRecentProps('PROP-SEC').length, 0);
+
+  // Kill u_victim on Night 1 -> Dawn (day_discussion)
+  assert.equal(mgr.submitNightAction('PROP-SEC', 'u_wolf', { actionType: 'wolf_bite', targetId: 'u_victim' }, t0 + 200).ok, true);
+  assert.equal(mgr.submitNightAction('PROP-SEC', 'u_wolf', { actionType: 'confirm_done' }, t0 + 250).ok, true);
+  assert.equal(mgr.submitNightAction('PROP-SEC', 'u_seer', { actionType: 'confirm_done' }, t0 + 300).ok, true);
+  assert.equal(mgr.getMatchState('PROP-SEC')?.phase, 'day_discussion');
+
+  // Day Discussion: dead Ghost MUST NOT throw props
+  assert.equal(
+    mgr.recordProp('PROP-SEC', {
+      id: 'p_ghost_day',
+      propType: 'tomato',
+      fromPlayerId: 'u_victim',
+      targetPlayerId: 'u_wolf',
+      timestamp: t0 + 400,
+    }).ok,
+    false
+  );
+
+  // Day Discussion: living player MUST NOT throw at dead tombstone or at self
+  assert.equal(
+    mgr.recordProp('PROP-SEC', {
+      id: 'p_to_dead',
+      propType: 'rose',
+      fromPlayerId: 'u_host',
+      targetPlayerId: 'u_victim',
+      timestamp: t0 + 410,
+    }).ok,
+    false
+  );
+  assert.equal(
+    mgr.recordProp('PROP-SEC', {
+      id: 'p_self',
+      propType: 'egg',
+      fromPlayerId: 'u_host',
+      targetPlayerId: 'u_host',
+      timestamp: t0 + 420,
+    }).ok,
+    false
+  );
+
+  // Day Discussion: living -> other living SUCCEEDS
+  assert.equal(
+    mgr.recordProp('PROP-SEC', {
+      id: 'p_day_discuss_ok',
+      propType: 'rose',
+      fromPlayerId: 'u_host',
+      targetPlayerId: 'u_seer',
+      timestamp: t0 + 430,
+    }).ok,
+    true
+  );
+
+  // Day Voting: dead Ghost rejected, living -> living succeeds
+  assert.equal(mgr.advancePhase('PROP-SEC', 'u_host', t0 + 500).ok, true);
+  assert.equal(mgr.getMatchState('PROP-SEC')?.phase, 'day_voting');
+
+  assert.equal(
+    mgr.recordProp('PROP-SEC', {
+      id: 'p_ghost_vote',
+      propType: 'water',
+      fromPlayerId: 'u_victim',
+      targetPlayerId: 'u_wolf',
+      timestamp: t0 + 510,
+    }).ok,
+    false
+  );
+  assert.equal(
+    mgr.recordProp('PROP-SEC', {
+      id: 'p_day_vote_ok',
+      propType: 'water',
+      fromPlayerId: 'u_seer',
+      targetPlayerId: 'u_host',
+      timestamp: t0 + 520,
+    }).ok,
+    true
+  );
+
+  // Advance to Night 2: dead Ghost and living players BOTH rejected during Night
+  assert.equal(mgr.advancePhase('PROP-SEC', 'u_host', t0 + 600).ok, true);
+  assert.equal(mgr.getMatchState('PROP-SEC')?.phase, 'night');
+  assert.equal(
+    mgr.recordProp('PROP-SEC', {
+      id: 'p_ghost_night2',
+      propType: 'tomato',
+      fromPlayerId: 'u_victim',
+      targetPlayerId: 'u_host',
+      timestamp: t0 + 610,
+    }).ok,
+    false
+  );
+  assert.equal(
+    mgr.recordProp('PROP-SEC', {
+      id: 'p_living_night2',
+      propType: 'tomato',
+      fromPlayerId: 'u_host',
+      targetPlayerId: 'u_seer',
+      timestamp: t0 + 620,
+    }).ok,
+    false
+  );
+
+  // Only the 2 legal Day props were recorded
+  assert.deepEqual(
+    mgr.getRecentProps('PROP-SEC').map((p) => p.id),
+    ['p_day_discuss_ok', 'p_day_vote_ok']
+  );
+});
+

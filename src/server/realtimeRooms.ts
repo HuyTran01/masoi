@@ -833,6 +833,31 @@ export class RealtimeRoomManager {
     const code = normalizeRoomCode(rawCode);
     const room = this.rooms.get(code);
     if (!room) return { ok: false, error: 'Phòng không tồn tại.' };
+
+    const match = this.matchStates.get(code);
+    if (room.status === 'in_match' && match && match.phase !== 'game_over') {
+      if (match.phase !== 'day_discussion' && match.phase !== 'day_voting') {
+        return {
+          ok: false,
+          error: 'Chỉ có thể ném đạo cụ vào Ban Ngày (Thảo Luận / Bỏ Phiếu).',
+        };
+      }
+      const senderPlayer = match.players.find((p) => p.id === event.fromPlayerId);
+      if (!senderPlayer?.isAlive) {
+        return {
+          ok: false,
+          error: 'Bạn đã thành Hồn Ma — không thể ném đạo cụ tương tác với người sống!',
+        };
+      }
+      const targetPlayer = match.players.find((p) => p.id === event.targetPlayerId);
+      if (!targetPlayer?.isAlive || senderPlayer.id === targetPlayer.id) {
+        return {
+          ok: false,
+          error: 'Chỉ có thể ném đạo cụ vào người chơi khác còn sống.',
+        };
+      }
+    }
+
     let list = this.recentProps.get(code);
     if (!list) {
       list = [];

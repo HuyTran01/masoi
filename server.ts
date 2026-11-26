@@ -709,10 +709,14 @@ async function startServer() {
             id: String(ev.id || `prop_${Date.now()}`),
             propType: ev.propType,
             fromPlayerId: meta.userId!,
-            targetPlayerId: String(ev.targetPlayerId),
+            targetPlayerId: String(ev.targetPlayerId).slice(0, 64),
             timestamp: Date.now(),
           };
-          roomManager.recordProp(code, propEvent);
+          const res = roomManager.recordProp(code, propEvent);
+          if (!res.ok) {
+            sendJson(ws, { type: 'error', message: res.error });
+            return;
+          }
           broadcastToRoom(code, { type: 'room:prop', code, event: propEvent });
           return;
         }

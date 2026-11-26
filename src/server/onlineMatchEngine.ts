@@ -1,7 +1,9 @@
 import type {
+  GhostNightSpectatorView,
   NightActions,
   NightDeathCinematicState,
   NightResult,
+  NightSkillCutsceneEvent,
   Phase,
   Player,
   RoleId,
@@ -118,6 +120,7 @@ export interface OnlineMatchState {
   nightSchedule: AutoGMNightStep[];
   nightStepIndex: number;
   nightActions: NightActions;
+  nightSkillEvents: NightSkillCutsceneEvent[];
   wolfPackPicks: Record<string, { primary?: string; secondary?: string }>;
   stepConfirmedBy: Record<string, boolean>;
   seerInspectionsByPlayer: Record<string, OnlineSeerInspection>;
@@ -188,6 +191,7 @@ export interface OnlinePlayerMatchView {
   isMyHunterTurn: boolean;
   announcement: GMAnnouncementData | null;
   deathCinematic: NightDeathCinematicState | null;
+  ghostNightState: GhostNightSpectatorView | null;
   gameResult: {
     winner: 'villagers' | 'werewolves' | 'lovers' | 'tanner' | 'draw';
     reason: string;
@@ -238,6 +242,14 @@ function syncVotesMap(match: OnlineMatchState, ctx: MatchRoomBridge): void {
   }
 }
 
+function getLivingActorsForStep(
+  match: OnlineMatchState,
+  step: AutoGMNightStep | null
+): Player[] {
+  if (!step) return [];
+  return match.players.filter((p) => isPlayerAwakeForNightStep(p, step.key, match.round));
+}
+
 function getLivingHumanActorsForStep(
   match: OnlineMatchState,
   step: AutoGMNightStep | null
@@ -260,6 +272,132 @@ function getLivingBotActorsForStep(
 
 function isWolfRole(roleId: RoleId): boolean {
   return roleId === 'werewolf' || roleId === 'wolf_pup';
+}
+
+function appendNightSkillCutscene(
+  match: OnlineMatchState,
+  stepKey: string,
+  event: Omit<NightSkillCutsceneEvent, 'id'>
+): NightSkillCutsceneEvent {
+  if (!Array.isArray(match.nightSkillEvents)) {
+    match.nightSkillEvents = [];
+  }
+  const actorKey = [...event.actorIds].sort().join(',');
+  const id = `nsc_${match.matchId}_r${match.round}_${stepKey}_${event.kind}_${actorKey}_${event.primaryTargetId ?? 'none'}_${event.secondaryTargetId ?? 'none'}`;
+  const existing = match.nightSkillEvents.find((e) => e.id === id);
+  if (existing) return existing;
+
+  const fullEvent: NightSkillCutsceneEvent = {
+    id,
+    ...event,
+    actorIds: [...event.actorIds],
+  };
+  match.nightSkillEvents.push(fullEvent);
+  return fullEvent;
+}
+
+/**
+ * Records pure visual NightSkillCutsceneEvents for confirmed/executed night steps.
+ * INVARIANT: Never mutates player liveness or resolveNightActions outcomes.
+ */
+function recordStepSkillCutscenes(
+  match: OnlineMatchState,
+  step: AutoGMNightStep | null
+): void {
+  if (!step) return;
+  const actorIds = getLivingActorsForStep(match, step).map((p) => p.id);
+  if (actorIds.length === 0) return;
+
+  switch (step.key) {
+    case 'doppelganger': {
+      const targetId = match.nightActions.doppelgangerTargetId ?? null;
+      if (targetId) {
+        appendNightSkillCutscene(match, step.key, {
+          kind: 'doppelganger',
+          actorIds,
+          primaryTargetId: targetId,
+          secondaryTargetId: null,
+        });
+      }
+      break;
+    }
+    case 'cupid': {
+      const lovers = match.nightActions.cupidLovers;
+      if (lovers && lovers.length === 2 && lovers[0] && lovers[1]) {
+        appendNightSkillCutscene(match, step.key, {
+          kind: 'cupid',
+          actorIds,
+          primaryTargetId: lovers[0],
+          secondaryTargetId: lovers[1],
+        });
+      }
+      break;
+    }
+    case 'bodyguard': {
+      const targetId = match.nightActions.guardTargetId ?? null;
+      if (targetId) {
+        appendNightSkillCutscene(match, step.key, {
+          kind: 'bodyguard',
+          actorIds,
+          primaryTargetId: targetId,
+          secondaryTargetId: null,
+        });
+      }
+      break;
+    }
+    case 'werewolf': {
+      const primaryId = match.nightActions.wolfTargetId ?? null;
+      const secondaryId = match.wolfPupFrenzy
+        ? (match.nightActions.secondWolfTargetId ?? null)
+        : null;
+      if (primaryId || secondaryId) {
+        appendNightSkillCutscene(match, step.key, {
+          kind: 'werewolf',
+          actorIds,
+          primaryTargetId: primaryId,
+          secondaryTargetId: secondaryId,
+        });
+      }
+      break;
+    }
+    case 'witch': {
+      const healId = match.nightActions.witchHealTargetId ?? null;
+      const poisonId = match.nightActions.witchPoisonTargetId ?? null;
+      if (healId) {
+        appendNightSkillCutscene(match, step.key, {
+          kind: 'witch_heal',
+          actorIds,
+          primaryTargetId: healId,
+          secondaryTargetId: null,
+        });
+      }
+      if (poisonId) {
+        appendNightSkillCutscene(match, step.key, {
+          kind: 'witch_poison',
+          actorIds,
+          primaryTargetId: poisonId,
+          secondaryTargetId: null,
+        });
+      }
+      break;
+    }
+    case 'seer': {
+      const targetId = match.nightActions.seerTargetId ?? null;
+      if (targetId) {
+        const target = match.players.find((p) => p.id === targetId);
+        if (target) {
+          appendNightSkillCutscene(match, step.key, {
+            kind: 'seer',
+            actorIds,
+            primaryTargetId: target.id,
+            secondaryTargetId: null,
+            seerIsWolf: isWolfRole(target.roleId),
+          });
+        }
+      }
+      break;
+    }
+  }
 }
 
 function computeWolfConsensus(
@@ -343,6 +481,22 @@ function runBotActionsForCurrentNightStep(
   }
 
   Object.assign(match.nightActions, botUpdates);
+
+  if (
+    step.key === 'werewolf' &&
+    (match.nightActions.wolfTargetId || match.nightActions.secondWolfTargetId)
+  ) {
+    for (const botWolf of livingBots) {
+      if (!match.wolfPackPicks[botWolf.id]) {
+        match.wolfPackPicks[botWolf.id] = {
+          primary: match.nightActions.wolfTargetId ?? undefined,
+          secondary: match.nightActions.secondWolfTargetId ?? undefined,
+        };
+      }
+    }
+  }
+
+  recordStepSkillCutscenes(match, step);
 }
 
 function setupCurrentNightStep(
@@ -379,6 +533,7 @@ export function beginNewNight(
   match.nightSchedule = buildAutoGMNightSchedule(match.players, round, timers);
   match.nightStepIndex = 0;
   match.nightActions = {};
+  match.nightSkillEvents = [];
   match.wolfPackPicks = {};
   match.stepConfirmedBy = {};
   match.botWitchActedTonight = false;
@@ -448,6 +603,7 @@ export function createOnlineMatchState(
     nightSchedule: [],
     nightStepIndex: 0,
     nightActions: {},
+    nightSkillEvents: [],
     wolfPackPicks: {},
     stepConfirmedBy: {},
     seerInspectionsByPlayer: {},
@@ -767,6 +923,16 @@ function resolveHunterQueueOrContinue(
         elderSealActive: match.elderSealActive,
       });
       match.players = shotRes.updatedPlayers;
+      appendNightSkillCutscene(
+        match,
+        match.hunterOriginPhase === 'day_voting' ? 'day_hunter_revenge' : 'hunter_revenge',
+        {
+          kind: 'hunter_shot',
+          actorIds: [hunter.id],
+          primaryTargetId: target.id,
+          secondaryTargetId: shotRes.extraVictimId ?? null,
+        }
+      );
       if (shotRes.wolfPupTriggeredNextNight) {
         match.wolfPupFrenzy = true;
       }
@@ -822,6 +988,9 @@ function advanceNightStepOrResolveDawn(
 ): EloUpdateEntry[] | undefined {
   // Ensure any living bot wolf fills missing prey if human wolves timed out without picking
   runBotActionsForCurrentNightStep(match, ctx, { wolfTimeoutFallbackOnly: true });
+
+  // Record finalized visual skill cutscenes for the finishing step (never alters resolveNightActions!)
+  recordStepSkillCutscenes(match, match.nightSchedule[match.nightStepIndex] ?? null);
 
   if (match.nightStepIndex + 1 < match.nightSchedule.length) {
     match.nightStepIndex += 1;
@@ -1094,6 +1263,7 @@ export function applyOnlineNightAction(
         isWerewolf,
         round: match.round,
       };
+      recordStepSkillCutscenes(match, currentStep);
       return { ok: true };
     }
 
@@ -1242,6 +1412,16 @@ export function applyOnlineHunterShot(
     elderSealActive: match.elderSealActive,
   });
   match.players = shotRes.updatedPlayers;
+  appendNightSkillCutscene(
+    match,
+    match.hunterOriginPhase === 'day_voting' ? 'day_hunter_revenge' : 'hunter_revenge',
+    {
+      kind: 'hunter_shot',
+      actorIds: [hunter.id],
+      primaryTargetId: target.id,
+      secondaryTargetId: shotRes.extraVictimId ?? null,
+    }
+  );
   if (shotRes.wolfPupTriggeredNextNight) {
     match.wolfPupFrenzy = true;
   }
@@ -1382,6 +1562,105 @@ function buildPersonalizedAnnouncement(
   }
 
   return null;
+}
+
+function buildGhostNightSpectatorView(
+  match: OnlineMatchState,
+  rawStep: AutoGMNightStep | null,
+  activeHunterId: string | null
+): GhostNightSpectatorView {
+  const isDayOriginHunter =
+    match.phase === 'hunter_revenge' && match.hunterOriginPhase === 'day_voting';
+
+  const wakingActorIds =
+    match.phase === 'hunter_revenge'
+      ? activeHunterId
+        ? [activeHunterId]
+        : []
+      : getLivingActorsForStep(match, rawStep).map((p) => p.id);
+
+  if (isDayOriginHunter) {
+    return {
+      wakingActorIds,
+      liveActions: {},
+      wolfPackPicks: {},
+      dyingWolfVictimIds: [],
+      seerInspectionTonight: null,
+      skillCutscenes: (match.nightSkillEvents || [])
+        .filter((ev) => ev.kind === 'hunter_shot' && ev.id.includes('_day_hunter_revenge_'))
+        .map((ev) => ({ ...ev, actorIds: [...ev.actorIds] })),
+    };
+  }
+
+  const liveActions: NightActions = {
+    ...match.nightActions,
+    ...(match.nightActions.cupidLovers
+      ? {
+          cupidLovers: [
+            match.nightActions.cupidLovers[0],
+            match.nightActions.cupidLovers[1],
+          ] as [string, string],
+        }
+      : {}),
+  };
+
+  const wolfPackPicks: GhostNightSpectatorView['wolfPackPicks'] = Object.fromEntries(
+    Object.entries(match.wolfPackPicks).map(([wolfId, pick]) => [
+      wolfId,
+      {
+        targetId: pick.primary ?? null,
+        secondTargetId: pick.secondary ?? null,
+      },
+    ])
+  );
+
+  const playersForLethality =
+    match.phase === 'hunter_revenge'
+      ? (match.pendingDawnBeforePlayers ?? match.players)
+      : match.players;
+  const dyingWolfVictimIds = getDyingWolfVictimsForWitch(
+    playersForLethality,
+    match.nightActions,
+    match.wolfPupFrenzy
+  );
+
+  let seerInspectionTonight: GhostNightSpectatorView['seerInspectionTonight'] = null;
+  if (match.nightActions.seerTargetId) {
+    const roundInspectionEntry = Object.entries(match.seerInspectionsByPlayer).find(
+      ([, insp]) => insp.round === match.round && insp.playerId === match.nightActions.seerTargetId
+    );
+    const seerId =
+      roundInspectionEntry?.[0] ??
+      match.players.find((p) => isPlayerAwakeForNightStep(p, 'seer', match.round))?.id ??
+      playersForLethality.find((p) => p.isAlive && p.roleId === 'seer')?.id ??
+      playersForLethality.find((p) => p.roleId === 'seer')?.id ??
+      null;
+    const target = playersForLethality.find((p) => p.id === match.nightActions.seerTargetId);
+    if (seerId && target) {
+      seerInspectionTonight = {
+        seerId,
+        targetId: target.id,
+        roleId: roundInspectionEntry ? roundInspectionEntry[1].roleId : target.roleId,
+        isWerewolf: roundInspectionEntry
+          ? roundInspectionEntry[1].isWerewolf
+          : isWolfRole(target.roleId),
+      };
+    }
+  }
+
+  const skillCutscenes = (match.nightSkillEvents || []).map((ev) => ({
+    ...ev,
+    actorIds: [...ev.actorIds],
+  }));
+
+  return {
+    wakingActorIds,
+    liveActions,
+    wolfPackPicks,
+    dyingWolfVictimIds,
+    seerInspectionTonight,
+    skillCutscenes,
+  };
 }
 
 /**
@@ -1531,6 +1810,17 @@ export function buildPlayerMatchView(
   const deathCinematic =
     match.phase === 'day_discussion' ? (match.deathCinematicByPlayer[viewerId] ?? null) : null;
 
+  // STRICT ZERO-LEAK GATE: only verified dead Ghosts (excluding pending Hunters mid-shot) see night omniscience
+  const isVerifiedDeadGhost = Boolean(
+    viewer &&
+      !viewer.isAlive &&
+      !(match.phase === 'hunter_revenge' && match.pendingHunterIds.includes(viewer.id))
+  );
+  const ghostNightState: GhostNightSpectatorView | null =
+    isVerifiedDeadGhost && (match.phase === 'night' || match.phase === 'hunter_revenge')
+      ? buildGhostNightSpectatorView(match, rawStep, activeHunterId)
+      : null;
+
   return {
     matchId: match.matchId,
     phase: match.phase,
@@ -1556,6 +1846,7 @@ export function buildPlayerMatchView(
     isMyHunterTurn: Boolean(activeHunterId && activeHunterId === viewerId),
     announcement,
     deathCinematic: deathCinematic ? { ...deathCinematic } : null,
+    ghostNightState,
     gameResult: match.gameResult
       ? {
           ...match.gameResult,

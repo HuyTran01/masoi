@@ -1,9 +1,13 @@
 import * as THREE from 'three';
 import { AGROU_BIOMES, AgrouMapBiome } from '../../game/agrouMechanics';
+import type { EnvObstacle } from '../../game/fpvCamera';
+
+export type { EnvObstacle };
 
 export interface AgrouEnvironmentHandle {
   campfireHitbox: THREE.Mesh;
   fireLight: THREE.PointLight;
+  getObstacles: (biome: AgrouMapBiome) => readonly EnvObstacle[];
   update: (params: {
     biomeKey: AgrouMapBiome;
     isDay: boolean;
@@ -209,7 +213,11 @@ function createFernClusterGeometry(): THREE.BufferGeometry {
 }
 
 // Build an authentic Agrou low-poly A-frame canvas expedition tent (Image 2 & 4)
-function createCanvasTent(variant: 'light' | 'dark'): THREE.Group {
+function createCanvasTent(variant: 'light' | 'dark'): {
+  tent: THREE.Group;
+  leftFlap: THREE.Mesh;
+  rightFlap: THREE.Mesh;
+} {
   const tent = new THREE.Group();
   const canvasColor = variant === 'light' ? 0xdad5c7 : 0xcfcfc2;
   const sideWallColor = variant === 'light' ? 0x4b4642 : 0x353c45;
@@ -360,7 +368,7 @@ function createCanvasTent(variant: 'light' | 'dark'): THREE.Group {
     tent.add(stake);
   }
 
-  return tent;
+  return { tent, leftFlap, rightFlap };
 }
 
 // Build a monumental ancient gnarled hilltop oak tree with wide umbrella canopy framed cleanly in sky (Matches Image 1 & 3!)
@@ -1028,6 +1036,9 @@ export function buildAgrouEnvironment(
   redwoodCampGroup.add(canopyInst);
 
   // 5b. 6 Pitched Canvas A-Frame Expedition Tents encircling the expanded clearing
+  const redwoodObstacles: EnvObstacle[] = [];
+  const meadowObstacles: EnvObstacle[] = [];
+  const tentFlaps: Array<{ mesh: THREE.Mesh; baseRotY: number; phase: number }> = [];
   const tentSpecs: Array<{ x: number; z: number; rotY: number; variant: 'light' | 'dark' }> = [
     { x: -13.6, z: 10.6, rotY: 0.72, variant: 'dark' },
     { x: 12.8, z: 10.4, rotY: -0.78, variant: 'light' },
@@ -1036,13 +1047,25 @@ export function buildAgrouEnvironment(
     { x: 5.6, z: -15.8, rotY: -2.75, variant: 'light' },
     { x: 15.2, z: -8.8, rotY: -1.95, variant: 'light' },
   ];
-  for (const ts of tentSpecs) {
-    const tent = createCanvasTent(ts.variant);
+  tentSpecs.forEach((ts, idx) => {
+    const { tent, leftFlap, rightFlap } = createCanvasTent(ts.variant);
     const ty = sampleTerrainHeight(ts.x, ts.z, 'forest');
     tent.position.set(ts.x, ty - 0.03, ts.z);
     tent.rotation.y = ts.rotY;
     redwoodCampGroup.add(tent);
-  }
+    tentFlaps.push(
+      { mesh: leftFlap, baseRotY: 0.32, phase: idx * 1.1 },
+      { mesh: rightFlap, baseRotY: -0.32, phase: idx * 1.1 + 1.5 }
+    );
+    redwoodObstacles.push({
+      kind: 'obb',
+      x: ts.x,
+      z: ts.z,
+      hx: ts.variant === 'light' ? 1.32 : 1.5,
+      hz: ts.variant === 'light' ? 1.85 : 2.05,
+      rotY: ts.rotY,
+    });
+  });
 
   // 5c. Stacked Cut Timber Log Pile near foreground clearing edge (Exact prop from Image 2!)
   const timberPile = new THREE.Group();
@@ -1071,6 +1094,7 @@ export function buildAgrouEnvironment(
   timberPile.position.set(-3.4, 0, 14.4);
   timberPile.rotation.y = 0.72;
   redwoodCampGroup.add(timberPile);
+  redwoodObstacles.push({ kind: 'obb', x: -3.4, z: 14.4, hx: 0.96, hz: 2.38, rotY: 0.72 });
 
   // 5d. Expedition Camp Props: Supply Barrels, Banded Chest, Camp Table with Bottles, Hide Drying Rack!
   const barrelWoodMat = trackMat(
@@ -1092,6 +1116,7 @@ export function buildAgrouEnvironment(
     }
     bg.position.set(x, sampleTerrainHeight(x, z, 'forest'), z);
     redwoodCampGroup.add(bg);
+    redwoodObstacles.push({ kind: 'circle', x, z, r: 0.5 });
   };
   createBarrel(14.2, -2.6);
   createBarrel(13.4, -3.5);
@@ -1117,6 +1142,7 @@ export function buildAgrouEnvironment(
   campTable.position.set(14.6, sampleTerrainHeight(14.6, 2.2, 'forest'), 2.2);
   campTable.rotation.y = -1.2;
   redwoodCampGroup.add(campTable);
+  redwoodObstacles.push({ kind: 'obb', x: 14.6, z: 2.2, hx: 0.9, hz: 0.52, rotY: -1.2 });
 
   const supplyChest = new THREE.Group();
   const chestBox = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(1.25, 0.82, 0.82)), darkIronMat);
@@ -1128,6 +1154,7 @@ export function buildAgrouEnvironment(
   supplyChest.position.set(15.8, sampleTerrainHeight(15.8, 3.2, 'forest'), 3.2);
   supplyChest.rotation.y = -0.35;
   redwoodCampGroup.add(supplyChest);
+  redwoodObstacles.push({ kind: 'obb', x: 15.8, z: 3.2, hx: 0.68, hz: 0.46, rotY: -0.35 });
 
   // Wooden Hide-Drying Rack with stretched pelt (Exact prop from left of Image 2!)
   const dryingRack = new THREE.Group();
@@ -1151,6 +1178,7 @@ export function buildAgrouEnvironment(
   dryingRack.position.set(-11.6, sampleTerrainHeight(-11.6, 3.8, 'forest'), 3.8);
   dryingRack.rotation.y = 0.95;
   redwoodCampGroup.add(dryingRack);
+  redwoodObstacles.push({ kind: 'obb', x: -11.6, z: 3.8, hx: 0.82, hz: 0.3, rotY: 0.95 });
 
   // 5e. Mossy Stepped Rock Ledges & Giant Fallen Hollow Logs framing the outer glade
   const mossyRockMat = trackMat(
@@ -1179,6 +1207,7 @@ export function buildAgrouEnvironment(
 
     lg.position.set(rl.x, sampleTerrainHeight(rl.x, rl.z, 'forest') - 0.5, rl.z);
     redwoodCampGroup.add(lg);
+    redwoodObstacles.push({ kind: 'circle', x: rl.x, z: rl.z, r: Math.max(rl.sx, rl.sz) * 0.82 });
   }
 
   // Dramatic angled fallen redwood trunk resting against the back mossy cliff (Exact detail from center-back of Image 2!)
@@ -1189,6 +1218,7 @@ export function buildAgrouEnvironment(
   fallenTrunk.position.set(2.8, 2.4, -19.8);
   fallenTrunk.rotation.set(0.32, 0.48, 0.98);
   redwoodCampGroup.add(fallenTrunk);
+  redwoodObstacles.push({ kind: 'obb', x: 2.8, z: -19.8, hx: 4.6, hz: 0.92, rotY: 0.48 });
 
   const fallenTrunk2 = new THREE.Mesh(
     trackGeo(new THREE.CylinderGeometry(0.48, 0.72, 9.5, 7)),
@@ -1197,6 +1227,7 @@ export function buildAgrouEnvironment(
   fallenTrunk2.position.set(-18.2, 0.9, -12.5);
   fallenTrunk2.rotation.set(0.05, 0.4, Math.PI / 2 - 0.08);
   redwoodCampGroup.add(fallenTrunk2);
+  redwoodObstacles.push({ kind: 'obb', x: -18.2, z: -12.5, hx: 4.6, hz: 0.78, rotY: 0.4 });
 
   // 5f. Instanced Lush Oversized Forest Ferns (~80 clusters around tents, logs, and rocks!)
   const FERN_COUNT = isSoftwareGl ? 56 : 82;
@@ -1265,15 +1296,19 @@ export function buildAgrouEnvironment(
       emissiveIntensity: 0.35,
       roughness: 0.16,
       metalness: 0.25,
+      transparent: true,
+      opacity: 0.8,
+      depthWrite: false,
       flatShading: true,
     })
   );
   const riverMesh = new THREE.Mesh(riverGeo, riverMat);
+  riverMesh.renderOrder = 1;
   meadowCampGroup.add(riverMesh);
 
   // Shimmering foam / water highlight strips along the river
   const shimmerMat = trackMat(
-    new THREE.MeshBasicMaterial({ color: 0xbce6ff, transparent: true, opacity: 0.45 })
+    new THREE.MeshBasicMaterial({ color: 0xbce6ff, transparent: true, opacity: 0.45, depthWrite: false })
   );
   const shimmerStrips: THREE.Mesh[] = [];
   for (let s = 0; s < 14; s++) {
@@ -1282,6 +1317,7 @@ export function buildAgrouEnvironment(
     const strip = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(2.1, 0.22)), shimmerMat);
     strip.rotation.x = -Math.PI / 2;
     strip.position.set(sx, -0.19, sz);
+    strip.renderOrder = 2;
     meadowCampGroup.add(strip);
     shimmerStrips.push(strip);
   }
@@ -1305,6 +1341,7 @@ export function buildAgrouEnvironment(
     rock.position.set(bx, -0.05, bz);
     rock.rotation.y = bx * 0.7;
     meadowCampGroup.add(rock);
+    meadowObstacles.push({ kind: 'circle', x: bx, z: bz, r: rb.s * 1.12 });
   }
 
   // Instanced Cattail Reeds along riverbanks
@@ -1381,6 +1418,10 @@ export function buildAgrouEnvironment(
   let lastBuiltIsDay: boolean | null = null;
   let lastBuiltBlind: boolean | null = null;
 
+  // Pre-allocated campfire warm-color endpoints (zero GC)
+  const fireWarmLow = new THREE.Color(0xff7b1a);
+  const fireWarmHigh = new THREE.Color(0xffb347);
+
   const update = (params: {
     biomeKey: AgrouMapBiome;
     isDay: boolean;
@@ -1404,7 +1445,6 @@ export function buildAgrouEnvironment(
       hoveredCampfire,
       elapsed,
       simDt,
-      isSoftwareGl: swGl,
     } = params;
 
     // Rebuild vertex-colored terrain, grass height/colors & sky dome only on biome or day/night transitions
@@ -1491,9 +1531,19 @@ export function buildAgrouEnvironment(
       pebbleInst.visible = true;
     }
 
-    // Campfire Flame, Ground Light Pool & PointLight Flicker
+    // Shared Coherent Wind Vector driving flames, smoke drift, tent flaps & alpine snowfall slant
+    const windStrength =
+      (biomeKey === 'frostpeak' ? 1.15 : biomeKey === 'autumn' ? 0.72 : 0.88) *
+      (0.75 + 0.35 * Math.sin(elapsed * 0.65) + 0.2 * Math.sin(elapsed * 1.9));
+    const windAngle = 0.45 + Math.sin(elapsed * 0.22) * 0.28;
+    const windX = Math.cos(windAngle) * windStrength;
+    const windZ = Math.sin(windAngle) * windStrength;
+
+    // Campfire Flame, Ground Light Pool & Dynamic PointLight Dance
     const flicker = Math.sin(elapsed * 11.5) * 0.11 + Math.cos(elapsed * 17.3) * 0.07;
     const baseScale = isNightBlindfolded ? 0.92 : isDay && !isTitleScreen ? 0.92 : 1.08;
+    flameGroup.rotation.z = -windX * 0.14;
+    flameGroup.rotation.x = windZ * 0.14;
     flameOuter.scale.set(
       baseScale * (1 + flicker * 0.35),
       baseScale * (1 + flicker * 0.95),
@@ -1513,12 +1563,27 @@ export function buildAgrouEnvironment(
     const poolScale = (isNightBlindfolded ? 0.82 : 1) + flicker * 0.12;
     fireGlowPool.scale.set(poolScale, poolScale, 1);
 
+    fireLight.position.set(
+      Math.sin(elapsed * 9.3) * 0.08,
+      1.55 + Math.cos(elapsed * 13.7) * 0.05,
+      Math.cos(elapsed * 11.1) * 0.08
+    );
+    fireLight.color.lerpColors(fireWarmLow, fireWarmHigh, THREE.MathUtils.clamp(0.5 + flicker * 2.6, 0, 1));
     fireLight.intensity =
       (isNightBlindfolded ? 10.5 : isDay ? 12.5 : 18.5) +
       flicker * (isNightBlindfolded ? 2.4 : 4.2);
     fireLight.distance = isNightBlindfolded ? 9.5 : 34;
 
-    // Rising faceted heat-smoke & ember cubes right above campfire (keep warm embers drifting even when blindfolded!)
+    // Flutter expedition tent entrance flaps with the shared wind
+    if (redwoodCampGroup.visible) {
+      for (let f = 0; f < tentFlaps.length; f++) {
+        const flap = tentFlaps[f];
+        flap.mesh.rotation.y =
+          flap.baseRotY + Math.sin(elapsed * 3.4 + flap.phase) * 0.09 * windStrength;
+      }
+    }
+
+    // Rising faceted heat-smoke & ember cubes right above campfire (drifting downwind!)
     for (let i = 0; i < FIRE_SMOKE_COUNT; i++) {
       const sp = fireSmokeData[i];
       sp.y += sp.vy * simDt;
@@ -1527,12 +1592,13 @@ export function buildAgrouEnvironment(
         sp.x = (hash2(i, Math.floor(elapsed * 3) + 1) - 0.5) * 0.55;
         sp.z = (hash2(i, Math.floor(elapsed * 3) + 7) - 0.5) * 0.55;
       }
-      const life = 1 - (sp.y - 0.32) / 2.13;
+      const rise = sp.y - 0.32;
+      const life = 1 - rise / 2.13;
       const sc = Math.max(0.15, life * (isNightBlindfolded ? 0.72 : 1.15));
       dummy.position.set(
-        sp.x + Math.sin(elapsed * 3.8 + sp.phase) * 0.12,
+        sp.x + windX * rise * 0.28 + Math.sin(elapsed * 3.8 + sp.phase) * 0.1,
         sp.y,
-        sp.z + Math.cos(elapsed * 3.2 + sp.phase) * 0.12
+        sp.z + windZ * rise * 0.28 + Math.cos(elapsed * 3.2 + sp.phase) * 0.1
       );
       dummy.rotation.set(elapsed * 1.5 + sp.phase, elapsed * 2.1, 0);
       dummy.scale.setScalar(sc);
@@ -1553,7 +1619,7 @@ export function buildAgrouEnvironment(
 
     // Ambient Biome Particles:
     // - Meadow ('autumn'): Golden Fireflies drifting serenely across clearing, river & hills (Image 1!)
-    // - Frostpeak ('frostpeak'): Soft falling alpine snow
+    // - Frostpeak ('frostpeak'): Soft falling alpine snow slanted by coherent wind
     // - Redwood ('forest'): Warm glowing embers + forest firefly motes
     const isSnow = biomeKey === 'frostpeak';
     const isMeadow = biomeKey === 'autumn';
@@ -1561,13 +1627,19 @@ export function buildAgrouEnvironment(
       const p = particleData[i];
       if (isSnow) {
         p.y -= 1.2 * p.vy * simDt;
+        p.x += windX * 0.95 * simDt;
+        p.z += windZ * 0.95 * simDt;
+        if (p.x > 16) p.x -= 32;
+        if (p.x < -16) p.x += 32;
+        if (p.z > 10) p.z -= 28;
+        if (p.z < -18) p.z += 28;
         if (p.y < 0.15) {
           p.y = 9.5 + (i % 4) * 1.4;
         }
         dummy.position.set(
-          p.x + Math.sin(elapsed * 1.4 + p.phase) * 0.6,
+          p.x + Math.sin(elapsed * 1.4 + p.phase) * 0.45,
           p.y,
-          p.z + Math.cos(elapsed * 1.1 + p.phase) * 0.5
+          p.z + Math.cos(elapsed * 1.1 + p.phase) * 0.4
         );
         dummy.scale.setScalar(1.0);
       } else if (isMeadow) {
@@ -1597,11 +1669,6 @@ export function buildAgrouEnvironment(
       particleInst.setMatrixAt(i, dummy.matrix);
     }
     particleInst.instanceMatrix.needsUpdate = true;
-
-    // Gentle breeze sway on grass mesh (skip per-frame transform on software WebGL for speed)
-    if (!swGl) {
-      grassInst.rotation.y = Math.sin(elapsed * 0.9) * 0.004;
-    }
   };
 
   // Run initial build immediately
@@ -1619,6 +1686,9 @@ export function buildAgrouEnvironment(
     isSoftwareGl,
   });
 
+  const getObstacles = (biome: AgrouMapBiome): readonly EnvObstacle[] =>
+    biome === 'autumn' ? meadowObstacles : redwoodObstacles;
+
   const dispose = () => {
     for (const g of disposableGeos) g.dispose();
     for (const m of disposableMats) m.dispose();
@@ -1628,6 +1698,7 @@ export function buildAgrouEnvironment(
   return {
     campfireHitbox,
     fireLight,
+    getObstacles,
     update,
     dispose,
   };

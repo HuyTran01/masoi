@@ -13,9 +13,10 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import { Language, RoleId } from '../types/game';
+import { Language, RoleId, StorylineId } from '../types/game';
 import { getRoleBadge, ROLES } from '../game/roles';
 import { CustomTimerConfig, DEFAULT_TIMER_CONFIG } from '../game/autoGM';
+import { STORYLINE_CATALOG, STORYLINE_LIST } from '../game/smartAI';
 import {
   AGROU_BIOMES,
   AGROU_HATS,
@@ -34,6 +35,7 @@ interface TitleScreenOverlayProps {
   currentUser: UserProfileData;
   villageSize: number;
   preferredRole: RoleId | 'random';
+  preferredStoryline?: StorylineId;
   timerConfig: CustomTimerConfig;
   showFactionHints: boolean;
   isTitleMenuMinimized: boolean;
@@ -45,6 +47,7 @@ interface TitleScreenOverlayProps {
   onChangeLanguage: (lang: Language) => void;
   onChangeVillageSize: (size: number) => void;
   onChangePreferredRole: (role: RoleId | 'random') => void;
+  onChangePreferredStoryline?: (id: StorylineId) => void;
   onUpdateTimerConfig: (next: CustomTimerConfig) => void;
   onToggleFactionHints: () => void;
   onOpenAccountModal: (tab: AccountModalTab) => void;
@@ -139,6 +142,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
   currentUser,
   villageSize,
   preferredRole,
+  preferredStoryline = 'random_dramatic',
   timerConfig,
   showFactionHints,
   isTitleMenuMinimized,
@@ -150,6 +154,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
   onChangeLanguage,
   onChangeVillageSize,
   onChangePreferredRole,
+  onChangePreferredStoryline,
   onUpdateTimerConfig,
   onToggleFactionHints,
   onOpenAccountModal,
@@ -584,6 +589,35 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                     </div>
                   </div>
                 </div>
+
+                {/* AI Storyline Selector (8 Selectable Dramatic Storylines) */}
+                {onChangePreferredStoryline && (
+                  <div className="border-t border-[#5a3d25] pt-2.5">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-[#f5b82e] block mb-1">
+                      🎭 {t.storylineLabel}
+                    </label>
+                    <select
+                      data-testid="storyline-select"
+                      aria-label={t.storylineLabel}
+                      value={preferredStoryline}
+                      onChange={(e) => {
+                        sound.playCardFlip();
+                        onChangePreferredStoryline(e.target.value as StorylineId);
+                      }}
+                      className="w-full bg-[#2a1c12] border border-[#785334] rounded-lg px-2.5 py-1.5 text-xs font-bold text-[#f6ebd8]"
+                    >
+                      {STORYLINE_LIST.map((st) => (
+                        <option key={st.id} value={st.id}>
+                          {st.label[lang] || st.label.vi}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-[#d6bfa2] mt-1 leading-snug">
+                      {STORYLINE_CATALOG[preferredStoryline]?.description[lang] ||
+                        STORYLINE_CATALOG[preferredStoryline]?.description.vi}
+                    </p>
+                  </div>
+                )}
 
                 {/* Phase Timers */}
                 <div className="border-t border-[#5a3d25] pt-2.5 flex flex-wrap items-center justify-between gap-2">

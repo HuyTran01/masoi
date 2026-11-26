@@ -224,7 +224,6 @@ export const Village2DFallback: React.FC<Village2DFallbackProps> = ({
                 const isMe = p.id === userPlayerId;
                 const isMayor = Boolean(mayorId && p.id === mayorId && p.isAlive);
                 const isSelected = selectedTargetId === p.id || secondaryTargetId === p.id;
-                const voteCount = votesMap[p.id] || 0;
                 const isSpeaking = activeSpeakers.includes(p.name) && p.isAlive;
                 const isWolf = p.roleId === 'werewolf' || p.roleId === 'wolf_pup';
                 const showRole =
@@ -245,7 +244,9 @@ export const Village2DFallback: React.FC<Village2DFallbackProps> = ({
                       !p.isAlive
                         ? 'bg-[#131f28]/85 border-cyan-500/50 text-cyan-200 opacity-75'
                         : isSelected
-                        ? 'bg-[#6e1f17]/95 border-[#f5b82e] ring-2 ring-[#f5b82e]/80 text-white'
+                        ? phase === 'day_voting'
+                          ? 'bg-[#362312]/95 border-[#f5b82e] ring-2 ring-[#f5b82e]/80 text-[#fef3c7]'
+                          : 'bg-[#6e1f17]/95 border-[#f5b82e] ring-2 ring-[#f5b82e]/80 text-white'
                         : isMe
                         ? 'bg-[#1c3245]/95 border-sky-400 text-sky-50'
                         : 'bg-[#2a1c12]/92 border-[#9c7248] text-[#f6ebd8]'
@@ -257,11 +258,6 @@ export const Village2DFallback: React.FC<Village2DFallbackProps> = ({
                         {isMayor && <span title="Mayor">👑</span>}
                         {isSpeaking && <span className="text-emerald-400 text-xs">🔊</span>}
                       </span>
-                      {voteCount > 0 && (
-                        <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-mono font-black">
-                          {voteCount}
-                        </span>
-                      )}
                     </div>
                     <div className="mt-1 text-[11px] font-extrabold truncate flex items-center gap-1">
                       <span className="text-[#f5b82e] font-mono">#{idx + 1}</span>
@@ -341,7 +337,6 @@ export const Village2DFallback: React.FC<Village2DFallbackProps> = ({
             const isMe = p.id === userPlayerId;
             const isMayor = Boolean(mayorId && p.id === mayorId && p.isAlive);
             const isSelected = selectedTargetId === p.id || secondaryTargetId === p.id;
-            const voteCount = votesMap[p.id] || 0;
             const isSpeaking = activeSpeakers.includes(p.name) && p.isAlive;
             const isWolf = p.roleId === 'werewolf' || p.roleId === 'wolf_pup';
             const showRole =
@@ -367,7 +362,9 @@ export const Village2DFallback: React.FC<Village2DFallbackProps> = ({
                   !p.isAlive
                     ? 'bg-[#131f28]/85 border-cyan-500/50 text-cyan-200 opacity-75'
                     : isSelected
-                    ? 'bg-[#6e1f17]/95 border-[#f5b82e] ring-2 ring-[#f5b82e]/80 text-white scale-105'
+                    ? phase === 'day_voting'
+                      ? 'bg-[#362312]/95 border-[#f5b82e] ring-2 ring-[#f5b82e]/80 text-[#fef3c7] scale-105'
+                      : 'bg-[#6e1f17]/95 border-[#f5b82e] ring-2 ring-[#f5b82e]/80 text-white scale-105'
                     : isMe
                     ? 'bg-[#1c3245]/95 border-sky-400 text-sky-50'
                     : 'bg-[#2a1c12]/92 border-[#9c7248] text-[#f6ebd8]'
@@ -377,11 +374,6 @@ export const Village2DFallback: React.FC<Village2DFallbackProps> = ({
                   <span>{p.isAlive ? p.avatar : '👻'}</span>
                   {isMayor && <span title="Mayor">👑</span>}
                   {isSpeaking && <span className="text-emerald-400 text-xs">🔊</span>}
-                  {voteCount > 0 && (
-                    <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[10px] font-mono font-black">
-                      {voteCount}
-                    </span>
-                  )}
                 </div>
                 <div className="mt-0.5 text-[11px] font-extrabold whitespace-nowrap flex items-center justify-center gap-1">
                   <span className="text-[#f5b82e] font-mono">#{idx + 1}</span>

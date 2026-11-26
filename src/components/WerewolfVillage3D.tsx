@@ -10,6 +10,7 @@ import {
   Language,
   VoteRecord,
   NightDeathCinematicState,
+  NightSkillCutsceneEvent,
 } from '../types/game';
 import { ROLES } from '../game/roles';
 import { UI_TEXT } from '../utils/i18n';
@@ -25,6 +26,7 @@ import {
 } from '../game/agrouMechanics';
 import {
   CameraViewPreset,
+  EnvObstacle,
   computeCampfireCircleRadius,
   computeDefaultFpvYawFromSeatAngle,
   computeFpvYawTowardOrigin,
@@ -42,9 +44,28 @@ import {
   computeBotGhostWanderStep,
   computeDragEdgePanRate,
   shouldApplyCameraLook,
+  resolveObstaclesCollision,
+  clampCameraRayAgainstObstacles,
+  computeRiverWadingState,
 } from '../game/fpvCamera';
 import { buildAgrouEnvironment, sampleTerrainHeight } from './village3d/buildAgrouEnvironment';
 import { buildAgrouAdventurerPool, applyAdventurerBodyPose } from './village3d/buildAgrouAdventurer';
+import { createNightActionDirector } from './village3d/nightActionDirector';
+
+type FootstepSurface = 'dirt' | 'grass' | 'snow' | 'water';
+
+function getFootstepSurface(
+  biome: AgrouMapBiome,
+  x: number,
+  z: number,
+  groundY: number
+): FootstepSurface {
+  if (biome === 'autumn' && groundY < -0.26) return 'water';
+  const r = Math.hypot(x, z);
+  if (biome === 'frostpeak' && r >= 11.4) return 'snow';
+  if (biome !== 'frostpeak' && r >= 11.4) return 'grass';
+  return 'dirt';
+}
 
 interface WerewolfVillage3DProps {
   players: Player[];
@@ -71,6 +92,8 @@ interface WerewolfVillage3DProps {
   mayorId?: string | null;
   emoteEvents?: AgrouEmoteEvent[];
   deathCinematic?: NightDeathCinematicState | null;
+  activeNightScene?: NightSkillCutsceneEvent | null;
+  wakingActorIds?: string[];
   returnToSeatTrigger?: number;
   returnToSeatSeq?: number;
   jumpTriggerSeq?: number;
@@ -92,12 +115,15 @@ interface WerewolfVillage3DProps {
 interface ActiveProjectile3D {
   id: string;
   group: THREE.Group;
+  trailGroup: THREE.Group;
   trailParticles: THREE.Mesh[];
   startPos: THREE.Vector3;
   endPos: THREE.Vector3;
   targetSeatIndex: number;
   propType: PropType;
   progress: number;
+  flightDuration: number;
+  apexHeight: number;
 }
 
 interface SplatParticle {
@@ -115,6 +141,7 @@ interface ActiveSplatEffect3D {
   particles: SplatParticle[];
   puddleMesh: THREE.Group;
   bodySplatMesh: THREE.Group;
+  attachedParent: THREE.Object3D | null;
   targetSeatIndex: number;
   age: number;
   maxAge: number;
@@ -133,6 +160,17 @@ const _scratchColor = new THREE.Color();
 const _ghostBaseTint = new THREE.Color(0x7ee8fa);
 const _ghostEmissiveTint = new THREE.Color(0x22d3ee);
 const _arcPos = new THREE.Vector3();
+const _arcPrevPos = new THREE.Vector3();
+const _velVec = new THREE.Vector3();
+const _earPos = new THREE.Vector3();
+const _earFwd = new THREE.Vector3();
+const _earUp = new THREE.Vector3();
+const _activeObstacles: EnvObstacle[] = [];
+const _stoolObstaclePool: Array<{ kind: 'circle'; x: number; z: number; r: number }> = Array.from(
+  { length: MAX_SEATS },
+  () => ({ kind: 'circle', x: 0, z: 0, r: 0.52 })
+);
+const _vfxColor = new THREE.Color();
 
 const PROP_STYLE_MAP: Record<PropType, { icon: string; bg: string }> = {
   tomato: {
@@ -167,7 +205,6 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
   secondaryTargetId,
   cupidLovers,
   votesMap,
-  votersByTarget,
   votes = [],
   activeSpeakers,
   revealAllRoles,
@@ -178,6 +215,8 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
   mayorId = null,
   emoteEvents = [],
   deathCinematic = null,
+  activeNightScene = null,
+  wakingActorIds = [],
   returnToSeatTrigger = 0,
   returnToSeatSeq = 0,
   jumpTriggerSeq = 0,
@@ -228,6 +267,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     mayorId,
     emoteEvents,
     deathCinematic,
+    activeNightScene,
+    wakingActorIds,
+    needsDawnReset: false,
     returnToSeatTrigger,
     returnToSeatSeq,
     jumpTriggerSeq,
@@ -321,6 +363,8 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       mayorId,
       emoteEvents,
       deathCinematic,
+      activeNightScene,
+      wakingActorIds,
       returnToSeatTrigger,
       returnToSeatSeq,
       jumpTriggerSeq,
@@ -395,7 +439,8 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       jumpTriggerSeq > 0 &&
       jumpTriggerSeq !== prevJumpSeq &&
       !isTitleScreen &&
-      !isUiOverlayOpen
+      !isUiOverlayOpen &&
+      phase === 'day_discussion'
     ) {
       const meP = players.find((p) => p.id === userPlayerId);
       if (meP?.isAlive) {
@@ -450,27 +495,14 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       stateRef.current.isUserRoaming = false;
       stateRef.current.dashTargetPos = null;
       stateRef.current.crouchToggled = false;
+      if (
+        (prevPhase === 'night' && phase === 'day_discussion') ||
+        (prevPhase === 'hunter_revenge' && phase !== 'hunter_revenge')
+      ) {
+        stateRef.current.needsDawnReset = true;
+      }
       if (phase !== prevPhase && isDirectLookCameraPreset(cameraPreset)) {
         stateRef.current.resetDirectLookAnchor = true;
-      }
-    }
-
-    if (
-      selectedTargetId &&
-      selectedTargetId !== prevSelected &&
-      phase === 'night' &&
-      isPlayerAwakeAtNight
-    ) {
-      const targetIdx = players.findIndex((p) => p.id === selectedTargetId);
-      if (targetIdx !== -1 && players.length > 0) {
-        const angle = Math.PI / 2 + (targetIdx / players.length) * Math.PI * 2;
-        const r = Math.max(3.6, computeCampfireCircleRadius(players.length) - 1.35);
-        stateRef.current.dashTargetPos = new THREE.Vector3(
-          Math.cos(angle) * r,
-          0,
-          Math.sin(angle) * r
-        );
-        stateRef.current.isUserRoaming = true;
       }
     }
 
@@ -504,6 +536,8 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     mayorId,
     emoteEvents,
     deathCinematic,
+    activeNightScene,
+    wakingActorIds,
     returnToSeatTrigger,
     returnToSeatSeq,
     jumpTriggerSeq,
@@ -717,24 +751,124 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     rimLight.position.set(-14, 12, -18);
     scene.add(rimLight);
 
-    // 5. Build Modular Agrou Environment & Seated Adventurer Pool
+    // 5. Build Modular Agrou Environment, Night Action Director & Seated Adventurer Pool
     const clickables: THREE.Object3D[] = [];
     const envHandle = buildAgrouEnvironment(scene, clickables, initialBiome, isSoftwareGl);
     const adventurerPool = buildAgrouAdventurerPool(scene, clickables, MAX_SEATS, isSoftwareGl);
     const seats = adventurerPool.seats;
+    const nightDirector = createNightActionDirector(scene);
 
-    // 6. Flowing 3D Vote/Accusation Arcs (Instanced glowing beads arcing from voter to suspect!)
-    const MAX_VOTE_ARCS = 20;
-    const VOTE_BEADS_PER_ARC = 7;
-    const voteArcGeo = new THREE.OctahedronGeometry(0.085, 0);
-    const voteArcMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const voteArcInst = new THREE.InstancedMesh(
-      voteArcGeo,
-      voteArcMat,
-      MAX_VOTE_ARCS * VOTE_BEADS_PER_ARC
-    );
-    voteArcInst.visible = false;
-    scene.add(voteArcInst);
+    // 6. Pooled Surface VFX (28 slots: dirt dust puffs, 8s snow footprints, frost breath & river splashes)
+    const SURFACE_VFX_COUNT = 28;
+    const surfaceVfxGeo = new THREE.DodecahedronGeometry(0.11, 0);
+    const surfaceVfxMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+    });
+    const surfaceVfxInst = new THREE.InstancedMesh(surfaceVfxGeo, surfaceVfxMat, SURFACE_VFX_COUNT);
+    surfaceVfxInst.frustumCulled = false;
+    scene.add(surfaceVfxInst);
+
+    type SurfaceVfxKind = 'dust' | 'snowprint' | 'frost' | 'splash';
+    interface SurfaceVfxSlot {
+      active: boolean;
+      kind: SurfaceVfxKind;
+      x: number;
+      y: number;
+      z: number;
+      vx: number;
+      vy: number;
+      vz: number;
+      rotY: number;
+      age: number;
+      maxAge: number;
+      baseScale: number;
+    }
+    const surfaceVfxSlots: SurfaceVfxSlot[] = Array.from({ length: SURFACE_VFX_COUNT }, () => ({
+      active: false,
+      kind: 'dust',
+      x: 0,
+      y: -50,
+      z: 0,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      rotY: 0,
+      age: 0,
+      maxAge: 1,
+      baseScale: 1,
+    }));
+    let surfaceVfxCursor = 0;
+
+    const spawnSurfaceVfx = (
+      kind: SurfaceVfxKind,
+      x: number,
+      y: number,
+      z: number,
+      vx: number,
+      vy: number,
+      vz: number,
+      rotY: number,
+      maxAge: number,
+      baseScale: number
+    ) => {
+      let chosenIdx = -1;
+      for (let i = 0; i < SURFACE_VFX_COUNT; i++) {
+        if (!surfaceVfxSlots[i].active) {
+          chosenIdx = i;
+          break;
+        }
+      }
+      if (chosenIdx === -1) {
+        chosenIdx = surfaceVfxCursor % SURFACE_VFX_COUNT;
+        surfaceVfxCursor = (surfaceVfxCursor + 1) % SURFACE_VFX_COUNT;
+      }
+      const slot = surfaceVfxSlots[chosenIdx];
+      slot.active = true;
+      slot.kind = kind;
+      slot.x = x;
+      slot.y = y;
+      slot.z = z;
+      slot.vx = vx;
+      slot.vy = vy;
+      slot.vz = vz;
+      slot.rotY = rotY;
+      slot.age = 0;
+      slot.maxAge = maxAge;
+      slot.baseScale = baseScale;
+    };
+
+    // Pooled flat expanding river water ripple rings (y = -0.22m in 'autumn' stream)
+    const RIPPLE_COUNT = 8;
+    const rippleGeo = new THREE.RingGeometry(0.14, 0.24, 18);
+    rippleGeo.rotateX(-Math.PI / 2);
+    const waterRipples = Array.from({ length: RIPPLE_COUNT }, () => {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xdbf4ff,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(rippleGeo, mat);
+      mesh.visible = false;
+      mesh.renderOrder = 3;
+      scene.add(mesh);
+      return { mesh, mat, active: false, age: 0, maxAge: 0.85 };
+    });
+    let rippleCursor = 0;
+    const spawnWaterRipple = (x: number, z: number) => {
+      const r = waterRipples[rippleCursor % RIPPLE_COUNT];
+      rippleCursor = (rippleCursor + 1) % RIPPLE_COUNT;
+      r.active = true;
+      r.age = 0;
+      r.mesh.position.set(x, -0.22, z);
+      r.mesh.scale.setScalar(1);
+      r.mesh.visible = true;
+      r.mat.opacity = 0.65;
+    };
 
     // 6B. Night Death Cinematic 3D VFX Rig (Werewolf Claw Slash, Witch Poison Mist, Cupid Shattered Heart, Spotlight)
     const deathVfxGroup = new THREE.Group();
@@ -814,8 +948,8 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     });
     const stinkGasMat = new THREE.MeshBasicMaterial({ color: 0x84cc16, transparent: true, opacity: 0.65 });
     const rosePetalMat = new THREE.MeshStandardMaterial({ color: 0xe11d48, roughness: 0.4 });
+    const roseHeartMat = new THREE.MeshBasicMaterial({ color: 0xf472b6, transparent: true, opacity: 0.9 });
     const roseWrapMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.6 });
-    const bucketMetalMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.28, metalness: 0.78 });
     const waterLiquidMat = new THREE.MeshStandardMaterial({
       color: 0x38bdf8,
       emissive: 0x0284c7,
@@ -824,18 +958,26 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       transparent: true,
       opacity: 0.86,
     });
+    const waterFoamMat = new THREE.MeshBasicMaterial({
+      color: 0xe0f2fe,
+      transparent: true,
+      opacity: 0.72,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
     const propGoldMat = new THREE.MeshStandardMaterial({ color: 0xeab308, metalness: 0.7, roughness: 0.3 });
 
     const unitSphereGeo = new THREE.SphereGeometry(1, 10, 10);
     const unitConeGeo = new THREE.ConeGeometry(1, 1, 7);
-    const unitCylGeo = new THREE.CylinderGeometry(1, 0.8, 1, 10);
     const unitTorusGeo = new THREE.TorusGeometry(1, 0.14, 6, 16);
     const splatChunkGeo = new THREE.DodecahedronGeometry(0.085, 0);
+    const heartPetalGeo = new THREE.OctahedronGeometry(0.075, 0);
 
     const createCompositePropGroup = (
       propType: PropType
-    ): { group: THREE.Group; trailParticles: THREE.Mesh[] } => {
+    ): { group: THREE.Group; trailGroup: THREE.Group; trailParticles: THREE.Mesh[] } => {
       const g = new THREE.Group();
+      const trailGroup = new THREE.Group();
       const trailParticles: THREE.Mesh[] = [];
 
       if (propType === 'tomato') {
@@ -851,10 +993,10 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           leaf.rotation.x = Math.sin(a) * 0.8;
           g.add(leaf);
         }
-        for (let t = 0; t < 3; t++) {
+        for (let t = 0; t < 4; t++) {
           const drop = new THREE.Mesh(splatChunkGeo, tomatoSkinMat);
-          drop.scale.setScalar(0.55);
-          g.add(drop);
+          drop.scale.setScalar(0.55 - t * 0.08);
+          trailGroup.add(drop);
           trailParticles.push(drop);
         }
       } else if (propType === 'egg') {
@@ -867,8 +1009,8 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         g.add(stinkRing);
         for (let t = 0; t < 4; t++) {
           const puff = new THREE.Mesh(splatChunkGeo, stinkGasMat);
-          puff.scale.setScalar(0.75);
-          g.add(puff);
+          puff.scale.setScalar(0.75 - t * 0.1);
+          trailGroup.add(puff);
           trailParticles.push(puff);
         }
       } else if (propType === 'rose') {
@@ -892,32 +1034,35 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           bud.position.set(bx, by, bz);
           g.add(bud);
         });
-        for (let t = 0; t < 3; t++) {
-          const petal = new THREE.Mesh(splatChunkGeo, rosePetalMat);
-          petal.scale.set(0.7, 0.2, 0.7);
-          g.add(petal);
+        for (let t = 0; t < 4; t++) {
+          const petal = new THREE.Mesh(t % 2 === 0 ? splatChunkGeo : heartPetalGeo, t % 2 === 0 ? rosePetalMat : roseHeartMat);
+          petal.scale.set(0.75, 0.22, 0.75);
+          trailGroup.add(petal);
           trailParticles.push(petal);
         }
       } else {
-        const bucket = new THREE.Mesh(unitCylGeo, bucketMetalMat);
-        bucket.scale.set(0.22, 0.34, 0.22);
-        g.add(bucket);
-        const waterTop = new THREE.Mesh(unitCylGeo, waterLiquidMat);
-        waterTop.scale.set(0.2, 0.08, 0.2);
-        waterTop.position.y = 0.15;
-        g.add(waterTop);
-        const handle = new THREE.Mesh(unitTorusGeo, propGoldMat);
-        handle.scale.setScalar(0.22);
-        handle.position.y = 0.16;
-        g.add(handle);
-        for (let t = 0; t < 4; t++) {
-          const splash = new THREE.Mesh(splatChunkGeo, waterLiquidMat);
-          splash.scale.setScalar(0.8);
-          g.add(splash);
+        // Splashing liquid water arc + translucent curved splash sheet (replaces vanishing iron bucket!)
+        const splashSheet = new THREE.Mesh(unitSphereGeo, waterLiquidMat);
+        splashSheet.scale.set(0.26, 0.14, 0.46);
+        g.add(splashSheet);
+        const foamCrest = new THREE.Mesh(unitSphereGeo, waterFoamMat);
+        foamCrest.scale.set(0.32, 0.09, 0.28);
+        foamCrest.position.set(0, 0.07, 0.14);
+        g.add(foamCrest);
+        for (let d = 0; d < 4; d++) {
+          const lobe = new THREE.Mesh(splatChunkGeo, d % 2 === 0 ? waterLiquidMat : waterFoamMat);
+          lobe.scale.set(0.85, 0.55, 1.35);
+          lobe.position.set((d - 1.5) * 0.12, (d % 2) * 0.06, -0.14 - d * 0.06);
+          g.add(lobe);
+        }
+        for (let t = 0; t < 5; t++) {
+          const splash = new THREE.Mesh(splatChunkGeo, t % 2 === 0 ? waterLiquidMat : waterFoamMat);
+          splash.scale.setScalar(0.85 - t * 0.11);
+          trailGroup.add(splash);
           trailParticles.push(splash);
         }
       }
-      return { group: g, trailParticles };
+      return { group: g, trailGroup, trailParticles };
     };
 
     const spawnPropImpactEffect = (targetSeatIndex: number, propType: PropType) => {
@@ -928,34 +1073,40 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       scene.add(effectGroup);
 
       const particles: SplatParticle[] = [];
-      const particleCount = 14;
+      const particleCount = propType === 'rose' ? 16 : 14;
       for (let k = 0; k < particleCount; k++) {
         let pMat: THREE.Material = tomatoSkinMat;
+        let pGeo: THREE.BufferGeometry = splatChunkGeo;
         if (propType === 'tomato') {
           pMat = k % 4 === 0 ? tomatoSeedMat : k % 5 === 0 ? tomatoStemMat : tomatoSkinMat;
         } else if (propType === 'egg') {
           pMat = k % 3 === 0 ? eggShellMat : k % 3 === 1 ? eggYolkMat : stinkGasMat;
         } else if (propType === 'rose') {
-          pMat = k % 4 === 0 ? tomatoStemMat : rosePetalMat;
+          pMat = k % 3 === 0 ? roseHeartMat : k % 5 === 0 ? tomatoStemMat : rosePetalMat;
+          pGeo = k % 3 === 0 ? heartPetalGeo : splatChunkGeo;
         } else {
-          pMat = waterLiquidMat;
+          pMat = k % 3 === 0 ? waterFoamMat : waterLiquidMat;
         }
-        const m = new THREE.Mesh(splatChunkGeo, pMat);
+        const m = new THREE.Mesh(pGeo, pMat);
         const angle = (k / particleCount) * Math.PI * 2 + Math.random() * 0.4;
-        const speed = 1.3 + Math.random() * 2.2;
-        m.position.set(0, 1.25, 0.15);
+        const speed = propType === 'rose' ? 0.45 + Math.random() * 0.65 : 1.3 + Math.random() * 2.1;
+        m.position.set(
+          propType === 'rose' ? Math.cos(angle) * 0.35 : 0,
+          propType === 'rose' ? 1.55 + Math.random() * 0.45 : 1.25,
+          propType === 'rose' ? Math.sin(angle) * 0.35 : 0.15
+        );
         if (propType === 'rose') {
-          m.scale.set(0.95, 0.22, 0.95);
+          m.scale.set(k % 3 === 0 ? 0.9 : 0.95, k % 3 === 0 ? 0.9 : 0.2, 0.95);
         } else {
-          m.scale.setScalar(0.65 + Math.random() * 0.7);
+          m.scale.setScalar(0.65 + Math.random() * 0.65);
         }
         effectGroup.add(m);
         particles.push({
           mesh: m,
           vx: Math.cos(angle) * speed,
-          vy: propType === 'rose' ? 1.2 + Math.random() * 1.4 : 2.1 + Math.random() * 2.4,
+          vy: propType === 'rose' ? 0.8 + Math.random() * 0.7 : 2.0 + Math.random() * 2.2,
           vz: Math.sin(angle) * speed,
-          rotSpeed: (Math.random() - 0.5) * 14,
+          rotSpeed: propType === 'rose' ? (Math.random() - 0.5) * 4.5 : (Math.random() - 0.5) * 14,
           isFloatingGas: propType === 'egg' && k % 3 === 2,
           isFlutterPetal: propType === 'rose',
         });
@@ -963,8 +1114,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
       const puddleGroup = new THREE.Group();
       puddleGroup.position.set(0, 0.04, 0.25);
+      // Attach bodySplatGroup directly to seat.torsoGroup so pulp/yolk/droplets stick from every angle!
       const bodySplatGroup = new THREE.Group();
-      bodySplatGroup.position.set(0, 1.15, 0.28);
+      bodySplatGroup.position.set(0, 0.28, 0.24);
 
       if (propType === 'tomato') {
         for (let b = 0; b < 5; b++) {
@@ -973,10 +1125,10 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           blob.scale.set(r, 0.025, r);
           blob.position.set((Math.random() - 0.5) * 0.45, 0, (Math.random() - 0.5) * 0.45);
           puddleGroup.add(blob);
-          const faceBlob = new THREE.Mesh(unitSphereGeo, tomatoSkinMat);
-          faceBlob.scale.set(0.085, 0.085, 0.03);
-          faceBlob.position.set((Math.random() - 0.5) * 0.25, (Math.random() - 0.5) * 0.3, 0);
-          bodySplatGroup.add(faceBlob);
+          const chestBlob = new THREE.Mesh(unitSphereGeo, b % 3 === 0 ? tomatoSeedMat : tomatoSkinMat);
+          chestBlob.scale.set(0.085, 0.09, 0.032);
+          chestBlob.position.set((Math.random() - 0.5) * 0.22, (Math.random() - 0.5) * 0.24, 0);
+          bodySplatGroup.add(chestBlob);
         }
       } else if (propType === 'egg') {
         const eggWhite = new THREE.Mesh(unitSphereGeo, eggShellMat);
@@ -985,9 +1137,12 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         eggYolk.scale.set(0.15, 0.06, 0.15);
         eggYolk.position.y = 0.02;
         puddleGroup.add(eggWhite, eggYolk);
-        const headYolk = new THREE.Mesh(unitSphereGeo, eggYolkMat);
-        headYolk.scale.set(0.18, 0.12, 0.08);
-        bodySplatGroup.add(headYolk);
+        const chestWhite = new THREE.Mesh(unitSphereGeo, eggShellMat);
+        chestWhite.scale.set(0.16, 0.14, 0.03);
+        const chestYolk = new THREE.Mesh(unitSphereGeo, eggYolkMat);
+        chestYolk.scale.set(0.1, 0.1, 0.045);
+        chestYolk.position.z = 0.015;
+        bodySplatGroup.add(chestWhite, chestYolk);
       } else if (propType === 'rose') {
         for (let b = 0; b < 7; b++) {
           const a = (b / 7) * Math.PI * 2;
@@ -998,16 +1153,24 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         }
       } else {
         const waterPool = new THREE.Mesh(unitSphereGeo, waterLiquidMat);
-        waterPool.scale.set(0.52, 0.02, 0.52);
+        waterPool.scale.set(0.55, 0.02, 0.55);
         puddleGroup.add(waterPool);
+        for (let d = 0; d < 6; d++) {
+          const drop = new THREE.Mesh(unitSphereGeo, d % 2 === 0 ? waterLiquidMat : waterFoamMat);
+          drop.scale.set(0.045, 0.065, 0.03);
+          drop.position.set((Math.random() - 0.5) * 0.24, (Math.random() - 0.5) * 0.26, 0);
+          bodySplatGroup.add(drop);
+        }
       }
 
-      effectGroup.add(puddleGroup, bodySplatGroup);
+      effectGroup.add(puddleGroup);
+      seat.torsoGroup.add(bodySplatGroup);
       activeSplats.push({
         group: effectGroup,
         particles,
         puddleMesh: puddleGroup,
         bodySplatMesh: bodySplatGroup,
+        attachedParent: seat.torsoGroup,
         targetSeatIndex,
         age: 0,
         maxAge: 5.0,
@@ -1464,7 +1627,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       if (e.code === 'Space' && !st.isTitleScreen && !st.isUiOverlayOpen) {
         e.preventDefault();
         const me = st.players.find((p) => p.id === st.userPlayerId);
-        if (me?.isAlive) {
+        if (me?.isAlive && st.phase === 'day_discussion') {
           st.jumpQueued = true;
           st.isUserRoaming = true;
         }
@@ -1582,6 +1745,8 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     let frameId = 0;
     let elapsedTotal = 0;
     let lastLabelSync = 0;
+    let lastSpatialAudioSync = 0;
+    let lastFrostBreathTime = 0;
 
     function afterDraw(cb: () => void) {
       try {
@@ -1734,6 +1899,11 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         }
       }
 
+      if (st.needsDawnReset) {
+        st.needsDawnReset = false;
+        nightDirector.hardResetSeats(seats);
+      }
+
       // Spawn New Detailed Composite 3D Thrown Prop Projectiles (launched from right hand / FPV hand!)
       for (const propEv of st.thrownProps) {
         if (!processedPropsRef.current.has(propEv.id)) {
@@ -1746,7 +1916,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             if (isFromMe) {
               st.fpvThrowSwingTimer = 0.52;
             }
-            const { group: propGroup, trailParticles } = createCompositePropGroup(propEv.propType);
+            const { group: propGroup, trailGroup, trailParticles } = createCompositePropGroup(propEv.propType);
             let sPos: THREE.Vector3;
             if (isFromMe && st.cameraPreset === 'first_person') {
               const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -1761,49 +1931,103 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
                 : seats[fromIdx].currentPos.clone().add(new THREE.Vector3(0, 1.45, 0));
             }
             const ePos = seats[toIdx].currentPos.clone().add(new THREE.Vector3(0, 1.32, 0));
+            const horizDist = Math.max(1.0, Math.hypot(ePos.x - sPos.x, ePos.z - sPos.z));
+            seats[fromIdx].throwTargetYaw = Math.atan2(
+              ePos.x - seats[fromIdx].currentPos.x,
+              ePos.z - seats[fromIdx].currentPos.z
+            );
+            const flightDuration = 0.26 + horizDist * 0.032;
+            const apexHeight = Math.min(2.6, 0.45 + horizDist * 0.22);
             propGroup.position.copy(sPos);
             scene.add(propGroup);
+            scene.add(trailGroup);
+            sound.playThrowWhoosh(propEv.propType, { x: sPos.x, y: sPos.y, z: sPos.z });
             activeProjectiles.push({
               id: propEv.id,
               group: propGroup,
+              trailGroup,
               trailParticles,
               startPos: sPos,
               endPos: ePos,
               targetSeatIndex: toIdx,
               propType: propEv.propType,
               progress: 0,
+              flightDuration,
+              apexHeight,
             });
           }
         }
       }
 
-      // Animate Active Flying Projectiles
+      // Animate Active Flying Projectiles (distance-scaled arc + world-space velocity trails!)
       for (let i = activeProjectiles.length - 1; i >= 0; i--) {
         const proj = activeProjectiles[i];
-        proj.progress += simDt * 2.4;
+        const prevP = proj.progress;
+        proj.progress += simDt / proj.flightDuration;
         if (proj.progress >= 1) {
           scene.remove(proj.group);
+          scene.remove(proj.trailGroup);
           const hitSeat = seats[proj.targetSeatIndex];
+          const impactX = hitSeat ? hitSeat.currentPos.x : proj.endPos.x;
+          const impactY = hitSeat ? hitSeat.currentPos.y + 1.25 : proj.endPos.y;
+          const impactZ = hitSeat ? hitSeat.currentPos.z : proj.endPos.z;
           if (hitSeat) {
-            hitSeat.wobbleTimer = 0.95;
-            hitSeat.reactionType = proj.propType === 'rose' ? 'happy_dance' : 'angry';
+            const dx = proj.endPos.x - proj.startPos.x;
+            const dz = proj.endPos.z - proj.startPos.z;
+            const dLen = Math.hypot(dx, dz) || 1;
+            hitSeat.hitRecoilX = dx / dLen;
+            hitSeat.hitRecoilZ = dz / dLen;
+            hitSeat.hitRecoilTimer = 0.24;
+            hitSeat.wobbleTimer = 0.65;
+            hitSeat.reactionType =
+              proj.propType === 'rose'
+                ? 'happy_dance'
+                : proj.propType === 'egg'
+                ? 'egg_disgust'
+                : proj.propType === 'water'
+                ? 'water_shiver'
+                : 'tomato_splat';
             hitSeat.reactionTimer = 4.6;
+            if (proj.propType === 'water') {
+              hitSeat.wetTimer = 4.5;
+            }
           }
           spawnPropImpactEffect(proj.targetSeatIndex, proj.propType);
           st.trauma = Math.min(1, st.trauma + (proj.propType === 'rose' ? 0.15 : 0.35));
           st.hitstop = 0.04;
-          sound.playPropSplat(proj.propType);
+          const impactPos = { x: impactX, y: impactY, z: impactZ };
+          sound.playPropSplat(proj.propType, impactPos);
+          sound.playPropVictimReaction(proj.propType, impactPos);
           activeProjectiles.splice(i, 1);
         } else {
+          _arcPrevPos.lerpVectors(proj.startPos, proj.endPos, prevP);
+          _arcPrevPos.y += Math.sin(prevP * Math.PI) * proj.apexHeight;
           _arcPos.lerpVectors(proj.startPos, proj.endPos, proj.progress);
-          _arcPos.y += Math.sin(proj.progress * Math.PI) * 3.4;
+          _arcPos.y += Math.sin(proj.progress * Math.PI) * proj.apexHeight;
           proj.group.position.copy(_arcPos);
-          proj.group.rotation.x += simDt * 11;
-          proj.group.rotation.z += simDt * 8;
-          proj.trailParticles.forEach((tp, idx) => {
-            const lag = (idx + 1) * 0.14;
-            tp.position.set(Math.sin(elapsedTotal * 14 + idx) * 0.18, -lag, -lag * 1.2);
-          });
+          if (proj.propType === 'water') {
+            // Orient liquid splash sheet cleanly along velocity vector
+            _velVec.subVectors(_arcPos, _arcPrevPos);
+            if (_velVec.lengthSq() > 1e-6) {
+              proj.group.lookAt(_arcPos.x + _velVec.x, _arcPos.y + _velVec.y, _arcPos.z + _velVec.z);
+            }
+          } else {
+            proj.group.rotation.x += simDt * 11;
+            proj.group.rotation.z += simDt * 8;
+          }
+          // Trail particles follow smoothly behind along actual world flight trajectory
+          for (let idx = 0; idx < proj.trailParticles.length; idx++) {
+            const tp = proj.trailParticles[idx];
+            const tLag = Math.max(0, proj.progress - (idx + 1) * 0.065);
+            _arcPrevPos.lerpVectors(proj.startPos, proj.endPos, tLag);
+            _arcPrevPos.y += Math.sin(tLag * Math.PI) * proj.apexHeight;
+            tp.position.set(
+              _arcPrevPos.x + Math.sin(elapsedTotal * 12 + idx * 1.9) * 0.04,
+              _arcPrevPos.y + Math.cos(elapsedTotal * 10 + idx) * 0.03,
+              _arcPrevPos.z + Math.cos(elapsedTotal * 12 + idx * 1.9) * 0.04
+            );
+            tp.rotation.set(elapsedTotal * 5 + idx, elapsedTotal * 4, 0);
+          }
         }
       }
 
@@ -1816,19 +2040,20 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           splat.group.position.copy(targetSeat.currentPos);
         }
         if (splat.age >= splat.maxAge) {
+          splat.attachedParent?.remove(splat.bodySplatMesh);
           scene.remove(splat.group);
           activeSplats.splice(i, 1);
           continue;
         }
         for (const pt of splat.particles) {
           if (pt.isFloatingGas) {
-            pt.mesh.position.y += 0.9 * simDt;
-            pt.mesh.position.x += Math.sin(elapsedTotal * 5 + pt.vx) * 0.3 * simDt;
+            pt.mesh.position.y += 0.82 * simDt;
+            pt.mesh.position.x += Math.sin(elapsedTotal * 5 + pt.vx) * 0.28 * simDt;
           } else if (pt.isFlutterPetal) {
-            pt.vy = Math.max(-0.85, pt.vy - 3.5 * simDt);
-            pt.mesh.position.x += (pt.vx * 0.35 + Math.sin(elapsedTotal * 6 + pt.vz) * 0.35) * simDt;
+            pt.vy = Math.max(-0.52, pt.vy - 1.9 * simDt);
+            pt.mesh.position.x += (pt.vx * 0.28 + Math.sin(elapsedTotal * 4.5 + pt.vz) * 0.26) * simDt;
             pt.mesh.position.y = Math.max(0.06, pt.mesh.position.y + pt.vy * simDt);
-            pt.mesh.position.z += pt.vz * 0.35 * simDt;
+            pt.mesh.position.z += (pt.vz * 0.28 + Math.cos(elapsedTotal * 4.0 + pt.vx) * 0.22) * simDt;
           } else {
             pt.vy -= 9.8 * simDt;
             pt.mesh.position.x += pt.vx * simDt;
@@ -1963,16 +2188,40 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         }
       }
 
+      // Living actors only roam during Day Discussion; living night actors cast from stools while keeping 360° look (Ghosts keep free-flight 24/7!)
       const canUserRoamAlive =
         !st.isTitleScreen &&
         !st.isUiOverlayOpen &&
         !isNightBlindfolded &&
         !activeDeathCinematic &&
         Boolean(me?.isAlive) &&
-        (st.phase === 'day_discussion' ||
-          st.phase === 'day_voting' ||
-          (st.phase === 'night' && st.isPlayerAwakeAtNight) ||
-          isDirectLook);
+        st.phase === 'day_discussion';
+
+      // Build zero-GC per-frame collision list (static biome obstacles + seated villager/stool circles)
+      _activeObstacles.length = 0;
+      const staticEnvObstacles = envHandle.getObstacles(activeBiomeKey);
+      for (let oi = 0; oi < staticEnvObstacles.length; oi++) {
+        _activeObstacles.push(staticEnvObstacles[oi]);
+      }
+      const mySeatIdxNow = activePlayers.findIndex((pl) => pl.id === st.userPlayerId);
+      const mySeatNow = mySeatIdxNow !== -1 ? seats[mySeatIdxNow] : null;
+      for (let sj = 0; sj < count && sj < MAX_SEATS; sj++) {
+        const sAng = Math.PI / 2 + (sj / count) * Math.PI * 2;
+        const sx = Math.cos(sAng) * radius;
+        const sz = Math.sin(sAng) * radius;
+        // Skip own stool within 0.65m so standing up / sitting back down glides smoothly
+        if (
+          sj === mySeatIdxNow &&
+          mySeatNow &&
+          Math.hypot(mySeatNow.currentPos.x - sx, mySeatNow.currentPos.z - sz) < 0.65
+        ) {
+          continue;
+        }
+        const sOb = _stoolObstaclePool[sj];
+        sOb.x = sx;
+        sOb.z = sz;
+        _activeObstacles.push(sOb);
+      }
 
       // Update Adventurers, Stationary Stools, Articulated Stand/Walk/Jump/Crouch, Head Tracking & Spectral Ghosts
       for (let i = 0; i < MAX_SEATS; i++) {
@@ -2031,9 +2280,20 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.ghostPos.set(hx, 2.2, hz);
         }
 
+        const prevPosX = seat.currentPos.x;
+        const prevPosZ = seat.currentPos.z;
+        const prevWalkPhase = seat.walkPhase;
         let moveSpeedRatio = 0;
+        let landedThisFrame = false;
+
+        // Inward vector toward campfire so standing up steps 0.48m clear of the wooden stool top!
+        const inwardX = -Math.cos(angle);
+        const inwardZ = -Math.sin(angle);
 
         if (isMe && canUserRoamAlive) {
+          const curGroundY = sampleTerrainHeight(seat.currentPos.x, seat.currentPos.z, activeBiomeKey);
+          const wading = computeRiverWadingState(activeBiomeKey, curGroundY);
+
           // Step jump & crouch vertical physics
           const vPhys = stepCharacterVerticalPhysics({
             yOffset: seat.yOffset,
@@ -2049,15 +2309,17 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.yOffset = vPhys.yOffset;
           seat.vy = vPhys.vy;
           seat.isGrounded = vPhys.isGrounded;
-          seat.crouchBlend = vPhys.crouchBlend;
+          seat.crouchBlend = Math.min(vPhys.crouchBlend, wading.maxCrouchBlend);
           if (vPhys.landedThisFrame) {
+            landedThisFrame = true;
+            seat.landingCompress = 1.0;
             st.trauma = Math.min(0.4, st.trauma + 0.14);
           }
 
           if (hasMoveInput) {
             st.isUserRoaming = true;
             st.dashTargetPos = null;
-            const speedMult = isCrouching ? 0.56 : isSprinting ? 1.62 : 1.0;
+            const speedMult = (isCrouching ? 0.56 : isSprinting ? 1.62 : 1.0) * wading.speedMultiplier;
             const moveSpeed = 5.4 * speedMult;
             moveSpeedRatio = speedMult;
 
@@ -2072,8 +2334,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
                 currentZ: seat.currentPos.z,
                 maxRadius: 23.5,
               });
-              seat.currentPos.x = step.nextX;
-              seat.currentPos.z = step.nextZ;
+              const resolved = resolveObstaclesCollision(step.nextX, step.nextZ, 0.36, _activeObstacles);
+              seat.currentPos.x = resolved.x;
+              seat.currentPos.z = resolved.z;
               const targetBodyYaw = Math.atan2(step.moveWorldX, step.moveWorldZ) - seat.group.rotation.y;
               const diff = Math.atan2(
                 Math.sin(targetBodyYaw - seat.bodyGroup.rotation.y),
@@ -2097,8 +2360,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
                 minRadius: 1.9,
                 maxRadius: 23.5,
               });
-              seat.currentPos.x = nextX;
-              seat.currentPos.z = nextZ;
+              const resolved = resolveObstaclesCollision(nextX, nextZ, 0.36, _activeObstacles);
+              seat.currentPos.x = resolved.x;
+              seat.currentPos.z = resolved.z;
               const targetBodyYaw = Math.atan2(nx, nz) - seat.group.rotation.y;
               const diff = Math.atan2(
                 Math.sin(targetBodyYaw - seat.bodyGroup.rotation.y),
@@ -2111,16 +2375,25 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             const dz = st.dashTargetPos.z - seat.currentPos.z;
             const dDist = Math.hypot(dx, dz);
             if (dDist > 0.14) {
-              moveSpeedRatio = 1.25;
-              const stepAmt = Math.min(dDist, 7.2 * simDt);
-              seat.currentPos.x += (dx / dDist) * stepAmt;
-              seat.currentPos.z += (dz / dDist) * stepAmt;
-              const targetBodyYaw = Math.atan2(dx, dz) - seat.group.rotation.y;
-              const diff = Math.atan2(
-                Math.sin(targetBodyYaw - seat.bodyGroup.rotation.y),
-                Math.cos(targetBodyYaw - seat.bodyGroup.rotation.y)
-              );
-              seat.bodyGroup.rotation.y += diff * (1 - Math.exp(-10 * dt));
+              moveSpeedRatio = 1.25 * wading.speedMultiplier;
+              const stepAmt = Math.min(dDist, 7.2 * wading.speedMultiplier * simDt);
+              const rawX = seat.currentPos.x + (dx / dDist) * stepAmt;
+              const rawZ = seat.currentPos.z + (dz / dDist) * stepAmt;
+              const resolved = resolveObstaclesCollision(rawX, rawZ, 0.36, _activeObstacles);
+              const moved = Math.hypot(resolved.x - seat.currentPos.x, resolved.z - seat.currentPos.z);
+              seat.currentPos.x = resolved.x;
+              seat.currentPos.z = resolved.z;
+              if (moved < stepAmt * 0.18 && dDist < 1.35) {
+                // Target is inside an obstacle; stop cleanly at the perimeter
+                st.dashTargetPos = null;
+              } else {
+                const targetBodyYaw = Math.atan2(dx, dz) - seat.group.rotation.y;
+                const diff = Math.atan2(
+                  Math.sin(targetBodyYaw - seat.bodyGroup.rotation.y),
+                  Math.cos(targetBodyYaw - seat.bodyGroup.rotation.y)
+                );
+                seat.bodyGroup.rotation.y += diff * (1 - Math.exp(-10 * dt));
+              }
             } else {
               st.dashTargetPos = null;
             }
@@ -2143,14 +2416,28 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
               seat.bodyGroup.rotation.y = THREE.MathUtils.damp(seat.bodyGroup.rotation.y, 0, 7, dt);
             }
             seat.currentPos.lerp(seat.homePos, 1 - Math.exp(-6.5 * simDt));
-          } else if (isThirdPerson) {
-            // While standing idle in behind-the-back view, smoothly align character facing with aim yaw
-            const targetBodyYaw = st.fpvYaw - seat.group.rotation.y;
-            const diff = Math.atan2(
-              Math.sin(targetBodyYaw - seat.bodyGroup.rotation.y),
-              Math.cos(targetBodyYaw - seat.bodyGroup.rotation.y)
+          } else {
+            // Stool Stand-Up Step-In: clear wooden stool top (0.48m inward) when standing up in place!
+            const distFromHome = Math.hypot(
+              seat.currentPos.x - seat.homePos.x,
+              seat.currentPos.z - seat.homePos.z
             );
-            seat.bodyGroup.rotation.y += diff * (1 - Math.exp(-9 * dt));
+            if (seat.standFactor > 0.2 && distFromHome < 0.45) {
+              const stepInX = seat.homePos.x + inwardX * 0.48;
+              const stepInZ = seat.homePos.z + inwardZ * 0.48;
+              const stepLerp = 1 - Math.exp(-10 * simDt);
+              seat.currentPos.x += (stepInX - seat.currentPos.x) * stepLerp;
+              seat.currentPos.z += (stepInZ - seat.currentPos.z) * stepLerp;
+            }
+            if (isThirdPerson) {
+              // While standing idle in behind-the-back view, smoothly align character facing with aim yaw
+              const targetBodyYaw = st.fpvYaw - seat.group.rotation.y;
+              const diff = Math.atan2(
+                Math.sin(targetBodyYaw - seat.bodyGroup.rotation.y),
+                Math.cos(targetBodyYaw - seat.bodyGroup.rotation.y)
+              );
+              seat.bodyGroup.rotation.y += diff * (1 - Math.exp(-9 * dt));
+            }
           }
 
           if (isCrouching && !st.isUserRoaming) {
@@ -2190,9 +2477,11 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.vy = 0;
           seat.isGrounded = true;
           seat.crouchBlend = THREE.MathUtils.damp(seat.crouchBlend, 0, 8, dt);
-          seat.currentPos.lerp(seat.homePos, 1 - Math.exp(-6 * simDt));
-          if (seat.reactionTimer <= 0) {
-            seat.bodyGroup.rotation.y = THREE.MathUtils.damp(seat.bodyGroup.rotation.y, 0, 5, dt);
+          if (!seat.nightCutsceneOverride) {
+            seat.currentPos.lerp(seat.homePos, 1 - Math.exp(-6 * simDt));
+            if (seat.reactionTimer <= 0) {
+              seat.bodyGroup.rotation.y = THREE.MathUtils.damp(seat.bodyGroup.rotation.y, 0, 5, dt);
+            }
           }
         }
 
@@ -2201,6 +2490,31 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         seat.currentPos.y = groundY;
         seat.group.position.set(seat.currentPos.x, groundY, seat.currentPos.z);
         seat.group.rotation.y = -angle - Math.PI / 2;
+
+        // Slope-aligned Contact Shadows & Halo Rings on outer hills (r > 11.4m)
+        const charR = Math.hypot(seat.currentPos.x, seat.currentPos.z);
+        if (charR > 11.4) {
+          const eps = 0.35;
+          const dhdx =
+            (sampleTerrainHeight(seat.currentPos.x + eps, seat.currentPos.z, activeBiomeKey) -
+              sampleTerrainHeight(seat.currentPos.x - eps, seat.currentPos.z, activeBiomeKey)) /
+            (2 * eps);
+          const dhdz =
+            (sampleTerrainHeight(seat.currentPos.x, seat.currentPos.z + eps, activeBiomeKey) -
+              sampleTerrainHeight(seat.currentPos.x, seat.currentPos.z - eps, activeBiomeKey)) /
+            (2 * eps);
+          const cosG = Math.cos(seat.group.rotation.y);
+          const sinG = Math.sin(seat.group.rotation.y);
+          const localSlopeX = dhdx * cosG - dhdz * sinG;
+          const localSlopeZ = dhdx * sinG + dhdz * cosG;
+          const tiltX = -Math.PI / 2 - THREE.MathUtils.clamp(Math.atan(localSlopeZ), -0.45, 0.45);
+          const tiltY = THREE.MathUtils.clamp(Math.atan(localSlopeX), -0.45, 0.45);
+          seat.shadowDisc.rotation.set(tiltX, tiltY, 0);
+          seat.haloRing.rotation.set(tiltX, tiltY, 0);
+        } else {
+          seat.shadowDisc.rotation.set(-Math.PI / 2, 0, 0);
+          seat.haloRing.rotation.set(-Math.PI / 2, 0, 0);
+        }
 
         // Smooth Seated <-> Standing articulation: stool stays anchored while character stands up & walks!
         const distFromStool = Math.hypot(
@@ -2214,12 +2528,114 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             (st.isUserRoaming || distFromStool > 0.22 || seat.yOffset > 0.03 || seat.crouchBlend > 0.05));
         seat.standFactor = THREE.MathUtils.damp(seat.standFactor, shouldStand ? 1 : 0, 9.5, dt);
 
-        if (moveSpeedRatio > 0.04 && seat.isGrounded) {
-          seat.walkPhase += simDt * (moveSpeedRatio > 1.2 ? 14.5 : 10.2);
+        // Distance-Driven Stride (zero foot-skating!) + Spatial Footsteps + Surface VFX / River Ripples
+        const actualHorizDist = Math.hypot(seat.currentPos.x - prevPosX, seat.currentPos.z - prevPosZ);
+        if (actualHorizDist > 0.0005 && seat.isGrounded) {
+          seat.walkPhase += actualHorizDist * 4.1;
         } else {
-          // Settle walk phase smoothly to neutral
           seat.walkPhase = THREE.MathUtils.damp(seat.walkPhase, Math.round(seat.walkPhase / Math.PI) * Math.PI, 8, dt);
         }
+
+        if (isMe && canUserRoamAlive) {
+          const surface = getFootstepSurface(activeBiomeKey, seat.currentPos.x, seat.currentPos.z, groundY);
+          const steppedHalfStride =
+            seat.isGrounded &&
+            actualHorizDist > 0.002 &&
+            Math.floor(prevWalkPhase / Math.PI) !== Math.floor(seat.walkPhase / Math.PI);
+          const facingYaw = seat.group.rotation.y + seat.bodyGroup.rotation.y;
+
+          if (steppedHalfStride) {
+            sound.playFootstep(surface, isLivingSprinting, false);
+            if (surface === 'water') {
+              spawnWaterRipple(seat.currentPos.x, seat.currentPos.z);
+              for (let d = 0; d < 2; d++) {
+                const a = Math.random() * Math.PI * 2;
+                spawnSurfaceVfx(
+                  'splash',
+                  seat.currentPos.x,
+                  -0.18,
+                  seat.currentPos.z,
+                  Math.cos(a) * 1.1,
+                  1.5 + Math.random() * 0.8,
+                  Math.sin(a) * 1.1,
+                  a,
+                  0.45,
+                  0.65
+                );
+              }
+            } else if (surface === 'snow') {
+              const footSide = Math.floor(seat.walkPhase / Math.PI) % 2 === 0 ? -0.14 : 0.14;
+              spawnSurfaceVfx(
+                'snowprint',
+                seat.currentPos.x + Math.cos(facingYaw) * footSide,
+                groundY + 0.025,
+                seat.currentPos.z - Math.sin(facingYaw) * footSide,
+                0,
+                0,
+                0,
+                facingYaw,
+                8.0,
+                1.25
+              );
+            } else if (surface === 'dirt' && isLivingSprinting) {
+              for (let d = 0; d < 2; d++) {
+                spawnSurfaceVfx(
+                  'dust',
+                  seat.currentPos.x + (Math.random() - 0.5) * 0.25,
+                  groundY + 0.08,
+                  seat.currentPos.z + (Math.random() - 0.5) * 0.25,
+                  (Math.random() - 0.5) * 0.5,
+                  0.55 + Math.random() * 0.4,
+                  (Math.random() - 0.5) * 0.5,
+                  Math.random() * Math.PI,
+                  0.55,
+                  0.9
+                );
+              }
+            }
+          }
+
+          if (landedThisFrame) {
+            sound.playFootstep(surface, isLivingSprinting, true);
+            if (surface === 'water') {
+              spawnWaterRipple(seat.currentPos.x, seat.currentPos.z);
+              for (let d = 0; d < 4; d++) {
+                const a = (d / 4) * Math.PI * 2 + Math.random() * 0.5;
+                spawnSurfaceVfx(
+                  'splash',
+                  seat.currentPos.x,
+                  -0.18,
+                  seat.currentPos.z,
+                  Math.cos(a) * 1.6,
+                  2.1 + Math.random() * 0.7,
+                  Math.sin(a) * 1.6,
+                  a,
+                  0.5,
+                  0.85
+                );
+              }
+            } else {
+              for (let d = 0; d < 4; d++) {
+                const a = (d / 4) * Math.PI * 2 + Math.random() * 0.5;
+                spawnSurfaceVfx(
+                  surface === 'snow' ? 'frost' : 'dust',
+                  seat.currentPos.x + Math.cos(a) * 0.15,
+                  groundY + 0.08,
+                  seat.currentPos.z + Math.sin(a) * 0.15,
+                  Math.cos(a) * 1.1,
+                  0.65 + Math.random() * 0.4,
+                  Math.sin(a) * 1.1,
+                  a,
+                  0.6,
+                  1.05
+                );
+              }
+            }
+          }
+        }
+
+        // Decay jump landing squash spring cleanly
+        seat.landingCompress = THREE.MathUtils.damp(seat.landingCompress, 0, 12, dt);
 
         const standingHeadOffset = THREE.MathUtils.lerp(1.72, 2.02, seat.standFactor) - seat.crouchBlend * 0.25 + seat.yOffset;
         seat.worldPos.set(seat.currentPos.x, groundY + standingHeadOffset, seat.currentPos.z);
@@ -2227,13 +2643,22 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         // Hide own 3rd-person body mesh in First-Person View so camera is unobstructed
         seat.bodyGroup.visible = !(isMe && isFirstPerson);
 
-        // Sync Custom Agrou Hat, Cloak Color & Floating Golden Mayor Crown
+        // Sync Custom Agrou Hat, Cloak Color (with wet water sheen) & Floating Golden Mayor Crown
         const fallbackCosm = getBotCosmetics(i);
         const activeHat: AgrouHatId = p.hat ?? fallbackCosm.hat;
         (Object.keys(seat.hatVariants) as AgrouHatId[]).forEach((hk) => {
           seat.hatVariants[hk].visible = hk === activeHat;
         });
         seat.cloakMat.color.setHex(p.cloakColor ?? fallbackCosm.cloakColor);
+        if (seat.wetTimer > 0 && p.isAlive) {
+          seat.wetTimer = Math.max(0, seat.wetTimer - simDt);
+          const wetFactor = Math.min(1, seat.wetTimer / 1.0); // glossy for 3.5s, dries smoothly over final 1.0s
+          seat.cloakMat.roughness = THREE.MathUtils.lerp(seat.baseCloakRoughness, 0.2, wetFactor);
+          seat.cloakMat.color.multiplyScalar(THREE.MathUtils.lerp(1.0, 0.74, wetFactor));
+        } else {
+          seat.wetTimer = 0;
+          seat.cloakMat.roughness = seat.baseCloakRoughness;
+        }
 
         const isMayor = Boolean(st.mayorId && p.id === st.mayorId && p.isAlive);
         seat.mayorCrownGroup.visible = isMayor;
@@ -2242,7 +2667,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.mayorCrownGroup.position.y = 1.62 + Math.sin(elapsedTotal * 3.5) * 0.04;
         }
 
-        // Apply articulated leg & body pose (Seated on stool <-> Standing <-> Walk/Sprint <-> Crouch <-> Jump!)
+        // Apply articulated leg & body pose (Seated on stool <-> Standing <-> Walk/Sprint <-> Crouch <-> Jump + Landing Squash!)
         const targetKo = p.isAlive && !isDeathVictim ? 0 : isDeathVictim && st.deathCinematicElapsed < 0.9 ? 0 : 1;
         seat.koProgress = THREE.MathUtils.damp(seat.koProgress, targetKo, 6, dt);
         applyAdventurerBodyPose(seat, {
@@ -2251,6 +2676,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           moveSpeedRatio,
           crouchBlend: seat.crouchBlend,
           jumpHeight: seat.yOffset,
+          landingCompress: seat.landingCompress,
           koProgress: seat.koProgress,
         });
         seat.bodyGroup.rotation.x = -seat.koProgress * 1.15;
@@ -2258,13 +2684,29 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.bodyGroup.position.y -= seat.koProgress * 0.22;
         }
 
+        const isWakingActor = Boolean(
+          st.phase === 'night' &&
+            !isNightBlindfolded &&
+            !activeDeathCinematic &&
+            p.isAlive &&
+            st.wakingActorIds.includes(p.id)
+        );
+
         seat.tombstoneGroup.visible = !p.isAlive && !activeDeathCinematic && !(isMe && isFirstPerson);
-        seat.lanternMat.emissiveIntensity = p.isAlive ? (isNightBlindfolded ? 0.08 : 1.4) : 0.05;
+        seat.lanternMat.emissiveIntensity = p.isAlive
+          ? isNightBlindfolded
+            ? 0.08
+            : isWakingActor
+            ? 1.95
+            : 1.4
+          : 0.05;
 
         if (seat.reactionTimer > 0 && p.isAlive) {
           seat.reactionTimer = Math.max(0, seat.reactionTimer - simDt);
+          if (seat.reactionTimer === 0) seat.reactionType = 'none';
         } else if (!p.isAlive) {
           seat.reactionTimer = 0;
+          seat.reactionType = 'none';
         }
         if (seat.emoteTimer > 0 && p.isAlive) {
           seat.emoteTimer = Math.max(0, seat.emoteTimer - simDt);
@@ -2274,9 +2716,19 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.emoteType = null;
         }
 
-        const isAngryReacting = seat.reactionTimer > 0 && seat.reactionType === 'angry' && p.isAlive;
-        const isHappyDancing =
-          seat.reactionTimer > 0 && seat.reactionType === 'happy_dance' && p.isAlive;
+        // Un-shadowed hit recoil & wobble decay BEFORE reaction branching!
+        if (seat.hitRecoilTimer > 0) {
+          seat.hitRecoilTimer = Math.max(0, seat.hitRecoilTimer - simDt);
+        }
+        if (seat.wobbleTimer > 0) {
+          seat.wobbleTimer = Math.max(0, seat.wobbleTimer - simDt);
+        }
+
+        const isTomatoSplat = seat.reactionTimer > 0 && seat.reactionType === 'tomato_splat' && p.isAlive;
+        const isEggDisgust = seat.reactionTimer > 0 && seat.reactionType === 'egg_disgust' && p.isAlive;
+        const isWaterShiver = seat.reactionTimer > 0 && seat.reactionType === 'water_shiver' && p.isAlive;
+        const isHappyDancing = seat.reactionTimer > 0 && seat.reactionType === 'happy_dance' && p.isAlive;
+        const isAngryReacting = isTomatoSplat || isEggDisgust;
         const activeEmote = seat.emoteTimer > 0 && p.isAlive ? seat.emoteType : null;
 
         seat.angerAuraGroup.visible = isAngryReacting;
@@ -2302,10 +2754,14 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.musketSmoke.scale.setScalar(smokePulse);
         }
 
-        // Compute Exact Torso + Arm Aim toward Voted Suspect so Arm Points Directly at Them!
+        // Compute Exact Torso + Arm Aim toward Thrown Prop Target OR Voted Suspect!
         let targetTorsoYaw = 0;
         let targetArmAimYaw = 0;
-        if (isPointingVote && votedTargetId) {
+        if (seat.throwAnimTimer > 0) {
+          const relYaw = seat.throwTargetYaw - (seat.group.rotation.y + seat.bodyGroup.rotation.y);
+          const normYaw = Math.atan2(Math.sin(relYaw), Math.cos(relYaw));
+          targetTorsoYaw = THREE.MathUtils.clamp(normYaw, -1.15, 1.15);
+        } else if (isPointingVote && votedTargetId) {
           const tIdx = activePlayers.findIndex((pl) => pl.id === votedTargetId);
           if (tIdx !== -1 && seats[tIdx]) {
             const dx = seats[tIdx].currentPos.x - seat.currentPos.x;
@@ -2322,43 +2778,108 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         seat.torsoGroup.rotation.y = THREE.MathUtils.damp(
           seat.torsoGroup.rotation.y,
           targetTorsoYaw,
-          7.5,
+          seat.throwAnimTimer > 0 ? 14 : 7.5,
           dt
         );
 
-        // Reactions & Emote Body Modifiers (layered cleanly on top of articulated pose!)
-        if (isAngryReacting) {
-          seat.bodyGroup.position.y += Math.abs(Math.sin(elapsedTotal * 20)) * 0.14;
-          seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 30) * 0.2;
-          seat.angerAuraGroup.rotation.y += simDt * 4.5;
-        } else if (isHappyDancing) {
-          seat.bodyGroup.position.y += Math.abs(Math.sin(elapsedTotal * 11)) * 0.22;
-          seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 11) * 0.18;
-          seat.happyAuraGroup.rotation.y += simDt * 3.6;
-        } else if (activeEmote === 'dance') {
-          seat.bodyGroup.position.y += Math.abs(Math.sin(elapsedTotal * 10)) * 0.18;
-          seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 10) * 0.16;
-        } else if (activeEmote === 'laugh') {
-          seat.torsoGroup.rotation.x += -0.18 + Math.sin(elapsedTotal * 18) * 0.08;
-          seat.bodyGroup.rotation.z = 0;
-        } else if (activeEmote === 'panic' || isUnderHeavySuspicion) {
-          seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 26 + i) * 0.09;
-          seat.torsoGroup.rotation.x += -0.06;
-        } else if (activeEmote === 'accuse' || isPointingVote || isTitlePointing) {
-          seat.torsoGroup.rotation.x += 0.14;
-          seat.bodyGroup.rotation.z = 0;
-        } else if (seat.wobbleTimer > 0) {
-          seat.wobbleTimer = Math.max(0, seat.wobbleTimer - simDt);
-          seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 36) * seat.wobbleTimer * 0.36;
+        // Distinct 4-Prop Victim Reactions, Directional Impact Recoil & Emote Body Modifiers!
+        const activeHatGroup = seat.hatVariants[activeHat];
+        if (seat.hitRecoilTimer > 0) {
+          const imp = Math.sin((seat.hitRecoilTimer / 0.24) * Math.PI);
+          const facing = seat.group.rotation.y + seat.bodyGroup.rotation.y;
+          const localBack = -(seat.hitRecoilX * Math.sin(facing) + seat.hitRecoilZ * Math.cos(facing));
+          const localSide = seat.hitRecoilX * Math.cos(facing) - seat.hitRecoilZ * Math.sin(facing);
+          seat.torsoGroup.rotation.x += (-0.34 - localBack * 0.22) * imp;
+          seat.bodyGroup.rotation.z = localSide * 0.32 * imp;
+          if (activeHatGroup && activeHat !== 'none') {
+            activeHatGroup.position.y = imp * 0.14;
+            activeHatGroup.rotation.z = imp * 0.34;
+          }
         } else {
-          seat.bodyGroup.rotation.z = THREE.MathUtils.damp(seat.bodyGroup.rotation.z, 0, 8, dt);
-          seat.torsoGroup.rotation.x += p.isAlive ? Math.sin(elapsedTotal * 1.9 + i * 1.3) * 0.025 : 0;
+          if (activeHatGroup && activeHat !== 'none') {
+            activeHatGroup.position.y = THREE.MathUtils.damp(activeHatGroup.position.y, 0, 12, dt);
+          }
+          if (isTomatoSplat) {
+            seat.bodyGroup.position.y += Math.abs(Math.sin(elapsedTotal * 14)) * 0.08;
+            seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 22) * 0.14;
+            seat.torsoGroup.rotation.x -= 0.12;
+            seat.angerAuraGroup.rotation.y += simDt * 4.5;
+          } else if (isEggDisgust) {
+            // Hunched gagging cough posture
+            seat.torsoGroup.rotation.x += 0.34 + Math.abs(Math.sin(elapsedTotal * 7.5)) * 0.16;
+            seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 14) * 0.07;
+            seat.angerAuraGroup.rotation.y += simDt * 3.8;
+          } else if (isWaterShiver) {
+            // High-frequency cold shivering
+            seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 46) * 0.068;
+            seat.torsoGroup.rotation.x += 0.14 + Math.sin(elapsedTotal * 38) * 0.03;
+          } else if (isHappyDancing) {
+            // Joyful spin dance!
+            seat.bodyGroup.position.y += Math.abs(Math.sin(elapsedTotal * 11)) * 0.22;
+            seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 11) * 0.16;
+            seat.bodyGroup.rotation.y += simDt * 4.2;
+            seat.happyAuraGroup.rotation.y += simDt * 3.6;
+          } else if (activeEmote === 'dance') {
+            seat.bodyGroup.position.y += Math.abs(Math.sin(elapsedTotal * 10)) * 0.18;
+            seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 10) * 0.16;
+          } else if (activeEmote === 'laugh') {
+            seat.torsoGroup.rotation.x += -0.18 + Math.sin(elapsedTotal * 18) * 0.08;
+            seat.bodyGroup.rotation.z = 0;
+          } else if (activeEmote === 'panic' || isUnderHeavySuspicion) {
+            seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 26 + i) * 0.09;
+            seat.torsoGroup.rotation.x += -0.06;
+          } else if (activeEmote === 'accuse' || isPointingVote || isTitlePointing) {
+            seat.torsoGroup.rotation.x += 0.14;
+            seat.bodyGroup.rotation.z = 0;
+          } else if (seat.wobbleTimer > 0) {
+            seat.bodyGroup.rotation.z = Math.sin(elapsedTotal * 36) * seat.wobbleTimer * 0.34;
+          } else {
+            seat.bodyGroup.rotation.z = THREE.MathUtils.damp(seat.bodyGroup.rotation.z, 0, 8, dt);
+            seat.torsoGroup.rotation.x += p.isAlive
+              ? Math.sin(elapsedTotal * 1.9 + i * 1.3) * 0.025 + (isWakingActor ? 0.08 : 0)
+              : 0;
+          }
         }
 
-        // Articulated Arm Poses (2-phase Throw Windup/Follow-through, Exact Voting Point, Killer Lunge, Walk Swing!)
+        // Subtle secondary rotational inertia lag on hipLantern & active hat from vertical & yaw velocity
+        const yawVel =
+          Math.atan2(
+            Math.sin(seat.bodyGroup.rotation.y - seat.prevBodyYaw),
+            Math.cos(seat.bodyGroup.rotation.y - seat.prevBodyYaw)
+          ) / Math.max(dt, 0.008);
+        seat.prevBodyYaw = seat.bodyGroup.rotation.y;
+        seat.hipLantern.rotation.z = THREE.MathUtils.damp(
+          seat.hipLantern.rotation.z,
+          THREE.MathUtils.clamp(-yawVel * 0.06, -0.35, 0.35),
+          10,
+          dt
+        );
+        seat.hipLantern.rotation.x = THREE.MathUtils.damp(
+          seat.hipLantern.rotation.x,
+          THREE.MathUtils.clamp(seat.vy * 0.05, -0.32, 0.32),
+          10,
+          dt
+        );
+        if (activeHatGroup && activeHat !== 'none' && seat.hitRecoilTimer <= 0) {
+          activeHatGroup.rotation.z = THREE.MathUtils.damp(
+            activeHatGroup.rotation.z,
+            THREE.MathUtils.clamp(-yawVel * 0.025, -0.14, 0.14),
+            11,
+            dt
+          );
+          activeHatGroup.rotation.x = THREE.MathUtils.damp(
+            activeHatGroup.rotation.x,
+            THREE.MathUtils.clamp(-seat.vy * 0.022, -0.15, 0.15),
+            11,
+            dt
+          );
+        }
+
+        // Articulated Arm Poses (Throw Windup, 4 Distinct Prop Reactions, Clean Natural Voting Point!)
         const isSpeaking = st.activeSpeakers.includes(p.name) && p.isAlive;
-        const isWalking = moveSpeedRatio > 0.08;
-        seat.pointGlowMesh.visible = isPointingVote;
+        const isWalking = actualHorizDist > 0.003 || moveSpeedRatio > 0.08;
+        // Keep natural hand pointing clean without bright cone glow on fingertip!
+        seat.pointGlowMesh.visible = false;
 
         if (isDeathKiller && activeDeathCinematic) {
           if (activeDeathCinematic.causeType === 'werewolf') {
@@ -2390,7 +2911,28 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.rightArm.rotation.z = 0.15;
           seat.leftArm.rotation.x = -1.35;
           seat.leftArm.rotation.z = -0.35;
-        } else if (isAngryReacting || activeEmote === 'panic' || isUnderHeavySuspicion) {
+        } else if (isTomatoSplat) {
+          // Right hand repeatedly wiping tomato off face while left arm braces back angrily
+          seat.rightArm.rotation.x = -2.25 + Math.sin(elapsedTotal * 14) * 0.22;
+          seat.rightArm.rotation.y = 0;
+          seat.rightArm.rotation.z = 0.45 + Math.sin(elapsedTotal * 14) * 0.26;
+          seat.leftArm.rotation.x = -0.85;
+          seat.leftArm.rotation.z = 0.32;
+        } else if (isEggDisgust) {
+          // Right hand waving rapidly in front of nose swatting rising green stink cloud
+          seat.rightArm.rotation.x = -1.95;
+          seat.rightArm.rotation.y = 0;
+          seat.rightArm.rotation.z = 0.25 + Math.sin(elapsedTotal * 17) * 0.52;
+          seat.leftArm.rotation.x = -1.1;
+          seat.leftArm.rotation.z = -0.42;
+        } else if (isWaterShiver) {
+          // Arms crossed tightly hugging chest in freezing soak
+          seat.leftArm.rotation.x = -1.25;
+          seat.rightArm.rotation.x = -1.25;
+          seat.rightArm.rotation.y = 0;
+          seat.leftArm.rotation.z = -0.68 + Math.sin(elapsedTotal * 44) * 0.05;
+          seat.rightArm.rotation.z = 0.68 - Math.sin(elapsedTotal * 44) * 0.05;
+        } else if (activeEmote === 'panic' || isUnderHeavySuspicion) {
           seat.leftArm.rotation.x = -2.45 + Math.sin(elapsedTotal * 18 + i) * 0.18;
           seat.rightArm.rotation.x = -2.45 - Math.sin(elapsedTotal * 18 + i) * 0.18;
           seat.rightArm.rotation.y = 0;
@@ -2439,7 +2981,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.leftArm.rotation.z = 0.28;
           seat.rightArm.rotation.z = -0.28;
         } else if (isWalking) {
-          const swingAmp = Math.min(0.85, 0.55 * moveSpeedRatio);
+          const swingAmp = Math.min(0.85, 0.55 * Math.max(0.7, moveSpeedRatio));
           seat.leftArm.rotation.x = -Math.sin(seat.walkPhase) * swingAmp;
           seat.rightArm.rotation.x = Math.sin(seat.walkPhase) * swingAmp;
           seat.rightArm.rotation.y = THREE.MathUtils.damp(seat.rightArm.rotation.y, 0, 8, dt);
@@ -2459,12 +3001,21 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.rightArm.rotation.z = THREE.MathUtils.damp(seat.rightArm.rotation.z, -0.12, 6, dt);
         }
 
-        // Mouse-Driven & Social Gaze Head Tracking (so other players see who you are looking at!)
+        // Mouse-Driven, Reaction & Social Gaze Head Tracking
         if (p.isAlive) {
           let desiredHeadYaw = Math.sin(elapsedTotal * 0.85 + i * 2.1) * 0.14;
           let desiredHeadPitch = 0;
 
-          if (isMe && !st.isTitleScreen) {
+          if (isTomatoSplat) {
+            desiredHeadYaw = Math.sin(elapsedTotal * 18) * 0.48;
+            desiredHeadPitch = -0.12;
+          } else if (isEggDisgust) {
+            desiredHeadYaw = Math.sin(elapsedTotal * 10) * 0.24;
+            desiredHeadPitch = 0.28;
+          } else if (isWaterShiver) {
+            desiredHeadYaw = Math.sin(elapsedTotal * 40) * 0.14;
+            desiredHeadPitch = 0.16;
+          } else if (isMe && !st.isTitleScreen) {
             if (isDirectLook) {
               const relFpv = st.fpvYaw - (seat.group.rotation.y + seat.bodyGroup.rotation.y + seat.torsoGroup.rotation.y);
               desiredHeadYaw = THREE.MathUtils.clamp(Math.atan2(Math.sin(relFpv), Math.cos(relFpv)), -1.15, 1.15);
@@ -2498,8 +3049,8 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             }
           }
 
-          seat.headLookYaw = THREE.MathUtils.damp(seat.headLookYaw, desiredHeadYaw, 9.5, dt);
-          seat.headLookPitch = THREE.MathUtils.damp(seat.headLookPitch, desiredHeadPitch, 9.5, dt);
+          seat.headLookYaw = THREE.MathUtils.damp(seat.headLookYaw, desiredHeadYaw, 11, dt);
+          seat.headLookPitch = THREE.MathUtils.damp(seat.headLookPitch, desiredHeadPitch, 11, dt);
           seat.headGroup.rotation.y = seat.headLookYaw;
           seat.headGroup.rotation.x = seat.headLookPitch;
         }
@@ -2667,11 +3218,14 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           st.hoveredPlayerId === p.id || (isDirectLook && st.aimedPlayerId === p.id);
 
         if (isSelected) {
-          seat.haloMat.color.setHex(0xe86f24);
+          seat.haloMat.color.setHex(isVotingPhase ? 0xf5b82e : 0xe86f24);
           seat.haloMat.opacity = 0.92;
         } else if (isHovered) {
           seat.haloMat.color.setHex(0xfbbf24);
           seat.haloMat.opacity = 0.85;
+        } else if (isWakingActor) {
+          seat.haloMat.color.setHex(0xfde68a);
+          seat.haloMat.opacity = 0.56 + Math.sin(elapsedTotal * 3.6 + i) * 0.2;
         } else if (isMayor) {
           seat.haloMat.color.setHex(0xf59e0b);
           seat.haloMat.opacity = 0.62;
@@ -2680,6 +3234,137 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.haloMat.opacity = 0.55;
         } else {
           seat.haloMat.opacity = 0.0;
+        }
+      }
+
+      // Run 3D Night Skill Micro-Cutscene Director (strictly non-lethal except hunter_shot!)
+      nightDirector.update({
+        sceneEvent:
+          !st.isTitleScreen && !activeDeathCinematic && !isNightBlindfolded
+            ? st.activeNightScene
+            : null,
+        seats,
+        activePlayers,
+        biomeKey: activeBiomeKey,
+        dt,
+        simDt,
+        elapsed: elapsedTotal,
+        onPlaySfx: (kind, pos) => {
+          sound.playSkillCutsceneSfx(kind, pos);
+        },
+      });
+
+      // Frostpeak subtle frost-breath puffs every ~2.6s from living adventurers
+      if (
+        activeBiomeKey === 'frostpeak' &&
+        !isNightBlindfolded &&
+        !activeDeathCinematic &&
+        elapsedTotal - lastFrostBreathTime > 2.6 &&
+        count > 0
+      ) {
+        lastFrostBreathTime = elapsedTotal;
+        const pickIdx = Math.floor(elapsedTotal) % count;
+        const bPlayer = activePlayers[pickIdx];
+        const bSeat = seats[pickIdx];
+        if (bPlayer?.isAlive && bSeat?.group.visible) {
+          const bYaw = bSeat.group.rotation.y + bSeat.bodyGroup.rotation.y + bSeat.torsoGroup.rotation.y;
+          spawnSurfaceVfx(
+            'frost',
+            bSeat.currentPos.x + Math.sin(bYaw) * 0.28,
+            bSeat.currentPos.y + (bSeat.standFactor > 0.5 ? 1.62 : 1.38),
+            bSeat.currentPos.z + Math.cos(bYaw) * 0.28,
+            Math.sin(bYaw) * 0.35,
+            0.28,
+            Math.cos(bYaw) * 0.35,
+            bYaw,
+            0.95,
+            0.65
+          );
+        }
+      }
+
+      // Update Pooled Surface VFX (dust puffs, 8s snow footprints, frost breath, water splash droplets)
+      let anySurfaceVfxActive = false;
+      for (let i = 0; i < SURFACE_VFX_COUNT; i++) {
+        const slot = surfaceVfxSlots[i];
+        if (!slot.active) {
+          _dummyObj.position.set(0, -50, 0);
+          _dummyObj.scale.setScalar(0.0001);
+          _dummyObj.updateMatrix();
+          surfaceVfxInst.setMatrixAt(i, _dummyObj.matrix);
+          continue;
+        }
+        slot.age += simDt;
+        if (slot.age >= slot.maxAge) {
+          slot.active = false;
+          _dummyObj.position.set(0, -50, 0);
+          _dummyObj.scale.setScalar(0.0001);
+          _dummyObj.updateMatrix();
+          surfaceVfxInst.setMatrixAt(i, _dummyObj.matrix);
+          continue;
+        }
+        anySurfaceVfxActive = true;
+        const lifeT = slot.age / slot.maxAge;
+        if (slot.kind === 'snowprint') {
+          const fade = lifeT > 0.8 ? Math.max(0.01, (1 - lifeT) / 0.2) : 1;
+          _dummyObj.position.set(slot.x, slot.y, slot.z);
+          _dummyObj.rotation.set(0, slot.rotY, 0);
+          _dummyObj.scale.set(0.95 * slot.baseScale * fade, 0.12 * fade, 1.55 * slot.baseScale * fade);
+          _vfxColor.setHex(0x87a5be);
+        } else if (slot.kind === 'splash') {
+          slot.vy -= 9.5 * simDt;
+          slot.x += slot.vx * simDt;
+          slot.y = Math.max(-0.22, slot.y + slot.vy * simDt);
+          slot.z += slot.vz * simDt;
+          const sc = Math.max(0.05, (1 - lifeT) * slot.baseScale);
+          _dummyObj.position.set(slot.x, slot.y, slot.z);
+          _dummyObj.rotation.set(elapsedTotal * 4 + i, slot.rotY, 0);
+          _dummyObj.scale.setScalar(sc);
+          _vfxColor.setHex(0x7dd3fc);
+        } else if (slot.kind === 'frost') {
+          slot.x += slot.vx * simDt;
+          slot.y += slot.vy * simDt;
+          slot.z += slot.vz * simDt;
+          const sc = (0.65 + lifeT * 1.25) * (1 - lifeT) * slot.baseScale;
+          _dummyObj.position.set(slot.x, slot.y, slot.z);
+          _dummyObj.rotation.set(0, slot.rotY + elapsedTotal, 0);
+          _dummyObj.scale.setScalar(Math.max(0.02, sc));
+          _vfxColor.setHex(0xe6f4ff);
+        } else {
+          // Dirt dust puff
+          slot.x += slot.vx * simDt;
+          slot.y += slot.vy * simDt;
+          slot.z += slot.vz * simDt;
+          slot.vy *= Math.max(0, 1 - 2.4 * simDt);
+          const sc = (0.7 + lifeT * 1.15) * (1 - lifeT) * slot.baseScale;
+          _dummyObj.position.set(slot.x, slot.y, slot.z);
+          _dummyObj.rotation.set(elapsedTotal * 2, slot.rotY, 0);
+          _dummyObj.scale.setScalar(Math.max(0.02, sc));
+          _vfxColor.setHex(0xcab48e);
+        }
+        _dummyObj.updateMatrix();
+        surfaceVfxInst.setMatrixAt(i, _dummyObj.matrix);
+        surfaceVfxInst.setColorAt(i, _vfxColor);
+      }
+      surfaceVfxInst.visible = anySurfaceVfxActive;
+      if (anySurfaceVfxActive) {
+        surfaceVfxInst.instanceMatrix.needsUpdate = true;
+        if (surfaceVfxInst.instanceColor) surfaceVfxInst.instanceColor.needsUpdate = true;
+      }
+
+      // Update Pooled Expanding River Water Ripple Rings
+      for (let i = 0; i < waterRipples.length; i++) {
+        const wr = waterRipples[i];
+        if (!wr.active) continue;
+        wr.age += simDt;
+        if (wr.age >= wr.maxAge) {
+          wr.active = false;
+          wr.mesh.visible = false;
+          wr.mat.opacity = 0;
+        } else {
+          const u = wr.age / wr.maxAge;
+          wr.mesh.scale.setScalar(1 + u * 3.2);
+          wr.mat.opacity = 0.65 * (1 - u) * (1 - u);
         }
       }
 
@@ -2732,56 +3417,6 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       } else {
         deathVfxGroup.visible = false;
         deathSpotlight.intensity = 0;
-      }
-
-      // Render Flowing 3D Vote/Accusation Arcs during Day Voting
-      if (isVotingPhase && latestVoteByVoter.size > 0) {
-        voteArcInst.visible = true;
-        let beadCursor = 0;
-        let arcIdx = 0;
-        for (const [voterId, targetId] of latestVoteByVoter.entries()) {
-          if (arcIdx >= MAX_VOTE_ARCS) break;
-          const vSeatIdx = activePlayers.findIndex((p) => p.id === voterId);
-          if (vSeatIdx === -1 || !seats[vSeatIdx]) continue;
-          const fromPos = seats[vSeatIdx].currentPos;
-          const isAbstainArc = targetId === CAMPFIRE_ABSTAIN_ID;
-          const tSeatIdx = isAbstainArc
-            ? -1
-            : activePlayers.findIndex((p) => p.id === targetId);
-          if (!isAbstainArc && (tSeatIdx === -1 || !seats[tSeatIdx])) continue;
-
-          const toX = isAbstainArc ? 0 : seats[tSeatIdx].currentPos.x;
-          const toZ = isAbstainArc ? 0 : seats[tSeatIdx].currentPos.z;
-          const isMayorVote = Boolean(st.mayorId && voterId === st.mayorId);
-          _scratchColor.setHex(
-            isAbstainArc ? 0xfbbf24 : isMayorVote ? 0xf59e0b : 0xf43f5e
-          );
-
-          for (let b = 0; b < VOTE_BEADS_PER_ARC; b++) {
-            const tFlow = (b / VOTE_BEADS_PER_ARC + elapsedTotal * 0.55) % 1;
-            const bx = THREE.MathUtils.lerp(fromPos.x, toX, tFlow);
-            const bz = THREE.MathUtils.lerp(fromPos.z, toZ, tFlow);
-            const by = 1.35 + Math.sin(tFlow * Math.PI) * (isAbstainArc ? 1.35 : 2.1);
-            const bScale = (isMayorVote ? 1.3 : 0.95) * (0.55 + Math.sin(tFlow * Math.PI) * 0.55);
-            _dummyObj.position.set(bx, by, bz);
-            _dummyObj.scale.setScalar(bScale);
-            _dummyObj.rotation.set(elapsedTotal * 3, elapsedTotal * 2, 0);
-            _dummyObj.updateMatrix();
-            voteArcInst.setMatrixAt(beadCursor, _dummyObj.matrix);
-            voteArcInst.setColorAt(beadCursor, _scratchColor);
-            beadCursor++;
-          }
-          arcIdx++;
-        }
-        _dummyObj.scale.setScalar(0);
-        _dummyObj.updateMatrix();
-        for (let rem = beadCursor; rem < MAX_VOTE_ARCS * VOTE_BEADS_PER_ARC; rem++) {
-          voteArcInst.setMatrixAt(rem, _dummyObj.matrix);
-        }
-        voteArcInst.instanceMatrix.needsUpdate = true;
-        if (voteArcInst.instanceColor) voteArcInst.instanceColor.needsUpdate = true;
-      } else {
-        voteArcInst.visible = false;
       }
 
       // Camera Choreography: Night Death Cinematic vs Blindfold Campfire vs Title vs FPV vs Campfire Orbit
@@ -2882,11 +3517,12 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
         let directPose;
         if (isThirdPerson) {
-          const approxBackX = (isUserGhost ? mySeat.ghostPos.x : mySeat.currentPos.x) - Math.sin(st.fpvYaw) * 3.15;
-          const approxBackZ = (isUserGhost ? mySeat.ghostPos.z : mySeat.currentPos.z) - Math.cos(st.fpvYaw) * 3.15;
+          const tpvAnchor = isUserGhost ? mySeat.ghostPos : mySeat.currentPos;
+          const approxBackX = tpvAnchor.x - Math.sin(st.fpvYaw) * 3.15;
+          const approxBackZ = tpvAnchor.z - Math.cos(st.fpvYaw) * 3.15;
           const camTerrainY = sampleTerrainHeight(approxBackX, approxBackZ, activeBiomeKey);
           directPose = computeThirdPersonCameraPose({
-            charPos: isUserGhost ? mySeat.ghostPos : mySeat.currentPos,
+            charPos: tpvAnchor,
             isGhost: isUserGhost,
             yaw: st.fpvYaw,
             pitch: st.fpvPitch,
@@ -2900,6 +3536,23 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             strafeInput: inputX,
             minCameraY: camTerrainY + 0.55,
           });
+          // Clamp TPV camera distance cleanly against static tents, rocks & boulders
+          if (!isUserGhost) {
+            const camFrac = clampCameraRayAgainstObstacles(
+              tpvAnchor.x,
+              tpvAnchor.z,
+              directPose.eyePos.x,
+              directPose.eyePos.z,
+              staticEnvObstacles,
+              0.38
+            );
+            if (camFrac < 0.999) {
+              directPose.eyePos.x = THREE.MathUtils.lerp(tpvAnchor.x, directPose.eyePos.x, camFrac);
+              directPose.eyePos.z = THREE.MathUtils.lerp(tpvAnchor.z, directPose.eyePos.z, camFrac);
+              const clampedGroundY = sampleTerrainHeight(directPose.eyePos.x, directPose.eyePos.z, activeBiomeKey);
+              directPose.eyePos.y = Math.max(clampedGroundY + 0.55, directPose.eyePos.y);
+            }
+          }
           fpvRigGroup.visible = false;
         } else {
           directPose = computeFpvCameraPose({
@@ -3105,8 +3758,37 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
       renderer.render(scene, camera);
 
-      // Project 3D seat positions to 2D floating HTML nameplates at ~15Hz
       const nowMs = performance.now();
+
+      // Update 3D Spatial Audio Listener at ~18 Hz (every 55ms) with zero-GC scratch vectors
+      if (nowMs - lastSpatialAudioSync >= 55) {
+        lastSpatialAudioSync = nowMs;
+        if (isUserGhost && mySeatNow) {
+          _earPos.set(mySeatNow.ghostPos.x, mySeatNow.ghostPos.y + 1.0, mySeatNow.ghostPos.z);
+        } else if ((isDirectLook || st.isUserRoaming) && mySeatNow) {
+          _earPos.copy(mySeatNow.worldPos);
+        } else {
+          _earPos.copy(camera.position);
+        }
+        _earFwd.set(0, 0, -1).transformDirection(camera.matrixWorld);
+        _earUp.set(0, 1, 0).transformDirection(camera.matrixWorld);
+        sound.updateSpatialFrame({
+          x: _earPos.x,
+          y: _earPos.y,
+          z: _earPos.z,
+          fx: _earFwd.x,
+          fy: _earFwd.y,
+          fz: _earFwd.z,
+          ux: _earUp.x,
+          uy: _earUp.y,
+          uz: _earUp.z,
+          biome: activeBiomeKey,
+          isDay,
+          isNightBlindfolded,
+        });
+      }
+
+      // Project 3D seat positions to 2D floating HTML nameplates at ~15Hz
       if (nowMs - lastLabelSync > 65 && labelContainerRef.current && container) {
         lastLabelSync = nowMs;
         const cW = container.clientWidth;
@@ -3184,10 +3866,38 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       window.removeEventListener('keyup', onKeyUp);
       canvasElemRef.current = null;
       delete (window as unknown as Record<string, unknown>).__VILLAGE_DEBUG__;
+      for (const proj of activeProjectiles) {
+        scene.remove(proj.group);
+        scene.remove(proj.trailGroup);
+      }
+      for (const splat of activeSplats) {
+        splat.attachedParent?.remove(splat.bodySplatMesh);
+        scene.remove(splat.group);
+      }
       envHandle.dispose();
       adventurerPool.dispose();
-      voteArcGeo.dispose();
-      voteArcMat.dispose();
+      nightDirector.dispose();
+      surfaceVfxGeo.dispose();
+      surfaceVfxMat.dispose();
+      rippleGeo.dispose();
+      for (const wr of waterRipples) wr.mat.dispose();
+      tomatoSkinMat.dispose();
+      tomatoSeedMat.dispose();
+      tomatoStemMat.dispose();
+      eggShellMat.dispose();
+      eggYolkMat.dispose();
+      stinkGasMat.dispose();
+      rosePetalMat.dispose();
+      roseHeartMat.dispose();
+      roseWrapMat.dispose();
+      waterLiquidMat.dispose();
+      waterFoamMat.dispose();
+      propGoldMat.dispose();
+      unitSphereGeo.dispose();
+      unitConeGeo.dispose();
+      unitTorusGeo.dispose();
+      splatChunkGeo.dispose();
+      heartPetalGeo.dispose();
       clawSlashGeo.dispose();
       clawSlashMat.dispose();
       poisonCloudGeo.dispose();
@@ -3293,7 +4003,6 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           const isMe = p.id === userPlayerId;
           const isMayor = Boolean(mayorId && p.id === mayorId && p.isAlive);
           const isSelected = selectedTargetId === p.id || secondaryTargetId === p.id;
-          const voteCount = votesMap[p.id] || 0;
           const isSpeaking = activeSpeakers.includes(p.name) && p.isAlive;
           const isWolf = p.roleId === 'werewolf' || p.roleId === 'wolf_pup';
           const showRole =
@@ -3351,23 +4060,6 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
                 </div>
               )}
 
-              {/* Vote Count + Voters Tag */}
-              {voteCount > 0 && (
-                <div className="px-1.5 py-0.5 rounded-lg bg-[#b91c1c] text-white text-[9px] sm:text-[10px] font-extrabold shadow-lg border border-[#fca5a5] leading-tight text-center max-w-[175px]">
-                  <div className="font-mono leading-none">
-                    {voteCount} {t.votesUnit}
-                  </div>
-                  {votersByTarget?.[p.id] && votersByTarget[p.id].length > 0 && (
-                    <div className="text-[8px] font-sans font-semibold text-amber-100 truncate mt-0.5">
-                      ← {votersByTarget[p.id].slice(0, 3).join(', ')}
-                      {votersByTarget[p.id].length > 3
-                        ? ` +${votersByTarget[p.id].length - 3}`
-                        : ''}
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* Ghost Soul Indicator if dead */}
               {!p.isAlive && (
                 <div className="px-1.5 py-0.5 rounded-lg bg-[#0d2838] border border-[#67e8f9]/60 text-[#cffafe] font-bold text-[8px] sm:text-[9px] shadow leading-none">
@@ -3381,7 +4073,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
                   !p.isAlive
                     ? 'bg-[#1a1614]/88 border-[#67e8f9]/45 text-[#a5f3fc]/80'
                     : isSelected
-                    ? 'bg-[#5c1d16]/95 border-[#f97316] text-[#fff7ed] scale-105'
+                    ? phase === 'day_voting'
+                      ? 'bg-[#362312]/95 border-[#f5b82e] text-[#fef3c7] scale-105'
+                      : 'bg-[#5c1d16]/95 border-[#f97316] text-[#fff7ed] scale-105'
                     : isMayor
                     ? 'bg-[#362312]/95 border-[#f5b82e] text-[#fef3c7]'
                     : isMe

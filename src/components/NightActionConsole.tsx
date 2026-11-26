@@ -1,6 +1,6 @@
 import React from 'react';
-import { CheckCircle2, EyeOff, FlaskConical } from 'lucide-react';
-import { Language, Player, RoleDefinition } from '../types/game';
+import { CheckCircle2, EyeOff, FastForward, FlaskConical } from 'lucide-react';
+import { GhostNightSpectatorView, Language, Player, RoleDefinition } from '../types/game';
 import { AutoGMNightStep } from '../game/autoGM';
 import { ROLES } from '../game/roles';
 import { UI_TEXT } from '../utils/i18n';
@@ -24,11 +24,91 @@ interface NightActionConsoleProps {
   isSeerInspectPending?: boolean;
   canAdvanceBotStep?: boolean;
   wolfPackPicks?: Record<string, { primary?: string; secondary?: string }> | null;
+  ghostNightState?: GhostNightSpectatorView | null;
+  wakingActors?: Player[];
+  liveNightSummary?: string | null;
+  onSkipStepFast?: () => void;
   onSelectWitchHealTarget: (victimId: string | null) => void;
   onConfirmSeerInspect?: () => void;
   onConfirmNightAction: () => void;
   onAdvanceBotStep: () => void;
   onCloseEyes: () => void;
+}
+
+function formatGhostNightLiveAction(
+  stepKey: AutoGMNightStep['key'],
+  players: Player[],
+  ghostNightState: GhostNightSpectatorView | null | undefined,
+  lang: Language
+): string | null {
+  if (!ghostNightState) return null;
+  const nameOf = (id: string | null | undefined): string | null => {
+    if (!id) return null;
+    const idx = players.findIndex((p) => p.id === id);
+    if (idx < 0) return null;
+    return `${players[idx].name} (#${idx + 1})`;
+  };
+  const actions = ghostNightState.liveActions || {};
+
+  if (stepKey === 'doppelganger') {
+    const t = nameOf(actions.doppelgangerTargetId);
+    return t ? `🪞 → ${t}` : null;
+  }
+  if (stepKey === 'cupid') {
+    const a = nameOf(actions.cupidLovers?.[0]);
+    const b = nameOf(actions.cupidLovers?.[1]);
+    return a && b ? `💘 ${a} ❤️ ${b}` : null;
+  }
+  if (stepKey === 'bodyguard') {
+    const t = nameOf(actions.guardTargetId);
+    return t ? `🛡️ → ${t}` : null;
+  }
+  if (stepKey === 'werewolf') {
+    const t1 = nameOf(actions.wolfTargetId);
+    const t2 = nameOf(actions.secondWolfTargetId);
+    if (t1) return `🐺 → ${t1}${t2 ? ` & ${t2}` : ''}`;
+    const picks = Object.entries(ghostNightState.wolfPackPicks || {})
+      .map(([wId, pick]) => {
+        const wn = nameOf(wId);
+        const pt = [nameOf(pick.targetId), nameOf(pick.secondTargetId)].filter(Boolean).join(' & ');
+        return wn && pt ? `${wn} → ${pt}` : null;
+      })
+      .filter(Boolean);
+    return picks.length > 0 ? `🐺 ${picks.join(' · ')}` : null;
+  }
+  if (stepKey === 'witch') {
+    const parts: string[] = [];
+    const heal = nameOf(actions.witchHealTargetId);
+    const poison = nameOf(actions.witchPoisonTargetId);
+    if (heal) parts.push(`💚 + ${heal}`);
+    if (poison) parts.push(`🧪☠️ ${poison}`);
+    if (parts.length > 0) return parts.join(' · ');
+    const dying = (ghostNightState.dyingWolfVictimIds || []).map((id) => nameOf(id)).filter(Boolean);
+    if (dying.length > 0) {
+      return `🐺 ${UI_TEXT[lang].bittenPrefix} ${dying.join(' & ')}`;
+    }
+    return null;
+  }
+  if (stepKey === 'seer') {
+    if (ghostNightState.seerInspectionTonight) {
+      const targetName = nameOf(ghostNightState.seerInspectionTonight.targetId);
+      const side = ghostNightState.seerInspectionTonight.isWerewolf
+        ? `🐺 ${ROLES.werewolf.name[lang]}`
+        : `🛡️ ${ROLES.villager.name[lang]}`;
+      return targetName ? `🔮 ${targetName} → ${side}` : null;
+    }
+    if (actions.seerTargetId) {
+      const target = players.find((p) => p.id === actions.seerTargetId);
+      const targetName = nameOf(actions.seerTargetId);
+      if (target && targetName) {
+        const isWolf = target.roleId === 'werewolf' || target.roleId === 'wolf_pup';
+        const side = isWolf ? `🐺 ${ROLES.werewolf.name[lang]}` : `🛡️ ${ROLES.villager.name[lang]}`;
+        return `🔮 ${targetName} → ${side}`;
+      }
+    }
+    return null;
+  }
+  return null;
 }
 
 export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
@@ -50,6 +130,10 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
   isSeerInspectPending = false,
   canAdvanceBotStep = true,
   wolfPackPicks = null,
+  ghostNightState = null,
+  wakingActors,
+  liveNightSummary = null,
+  onSkipStepFast,
   onSelectWitchHealTarget,
   onConfirmSeerInspect,
   onConfirmNightAction,
@@ -58,7 +142,95 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
 }) => {
   const t = UI_TEXT[lang];
 
-  if (!isPlayerAwakeAtNight || !me.isAlive) {
+  if (!me.isAlive) {
+    const resolvedWakingActors: Player[] =
+      wakingActors && wakingActors.length > 0
+        ? wakingActors
+        : (ghostNightState?.wakingActorIds || [])
+            .map((id) => players.find((p) => p.id === id))
+            .filter((p): p is Player => Boolean(p));
+    const liveReadout =
+      liveNightSummary ??
+      formatGhostNightLiveAction(currentNightStep.key, players, ghostNightState, lang);
+
+    return (
+      <div
+        data-testid="ghost-night-spectator-card"
+        className="pointer-events-auto w-full max-w-lg agrou-wood-panel !bg-[#111926]/95 !border-2 !border-cyan-400/70 rounded-2xl px-3 py-2 sm:px-3.5 sm:py-2.5 space-y-1.5 shadow-2xl"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-[11px] sm:text-xs font-black text-cyan-200 truncate">
+              {t.ghostNightSpectatorTitle}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <span className="px-1.5 py-0.5 rounded bg-cyan-950/90 border border-cyan-500/50 text-[10px] font-mono font-bold text-cyan-200 whitespace-nowrap">
+              🌙 {currentNightStep.stepIndex + 1}/{currentNightStep.totalSteps} · ⏳{' '}
+              {Math.round(timerSeconds)}s
+            </span>
+            {canAdvanceBotStep && (
+              <button
+                type="button"
+                data-testid="auto-gm-next-step-btn"
+                onClick={onSkipStepFast || onAdvanceBotStep}
+                className="px-2 py-0.5 rounded-lg bg-[#b84b10] hover:bg-[#9e3f0c] border border-[#fbc266]/70 text-white font-extrabold text-[10px] flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                <FastForward className="w-3 h-3" />
+                <span>{t.ghostFastForwardStep}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span className="px-2 py-0.5 rounded-lg bg-[#271b12] border border-[#e89c3e]/70 text-[#fde7c3] font-extrabold shrink-0">
+            {({
+              doppelganger: '🎭',
+              cupid: '💘',
+              bodyguard: '🛡️',
+              werewolf: '🐺',
+              witch: '🧪',
+              seer: '🔮',
+            }[currentNightStep.key] || '🌙')}{' '}
+            {ROLES[currentNightStep.roleId].name[lang]}
+          </span>
+          {resolvedWakingActors.length > 0 ? (
+            <span
+              data-testid="ghost-waking-actors-list"
+              className="text-cyan-100 font-bold truncate"
+            >
+              {resolvedWakingActors
+                .map((actor) => {
+                  const seat = players.findIndex((p) => p.id === actor.id) + 1;
+                  return seat > 0 ? `${actor.name} (#${seat})` : actor.name;
+                })
+                .join(', ')}
+            </span>
+          ) : (
+            <span
+              data-testid="ghost-no-living-actor"
+              className="text-slate-400 italic font-semibold"
+            >
+              {t.ghostNoLivingActor}
+            </span>
+          )}
+        </div>
+
+        {liveReadout && (
+          <div
+            data-testid="ghost-live-action-readout"
+            className="px-2.5 py-1 rounded-xl bg-cyan-950/75 border border-cyan-500/45 text-[11px] font-extrabold text-[#fef3c7] flex items-center gap-1.5"
+          >
+            <span className="text-cyan-300 shrink-0">{t.ghostWatchingAction}</span>
+            <span className="truncate">{liveReadout}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!isPlayerAwakeAtNight) {
     return (
       <div
         data-testid="auto-gm-step-pill"
@@ -70,21 +242,9 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
         <span className="truncate font-extrabold text-[#fff8ed]">
           {ROLES[currentNightStep.roleId].name[lang]}
         </span>
-        {!me.isAlive && canAdvanceBotStep ? (
-          <button
-            type="button"
-            data-testid="auto-gm-next-step-btn"
-            onClick={onAdvanceBotStep}
-            className="px-2.5 py-0.5 rounded-lg bg-[#b84b10] hover:bg-[#9e3f0c] text-white font-extrabold text-[10px] flex items-center gap-1 cursor-pointer shrink-0"
-          >
-            <CheckCircle2 className="w-3 h-3" />
-            <span>{t.nextShort}</span>
-          </button>
-        ) : (
-          <span className="text-[10px] font-mono font-bold text-[#fde7c3] shrink-0">
-            ⏳ {Math.round(timerSeconds)}s
-          </span>
-        )}
+        <span className="text-[10px] font-mono font-bold text-[#fde7c3] shrink-0">
+          ⏳ {Math.round(timerSeconds)}s
+        </span>
       </div>
     );
   }

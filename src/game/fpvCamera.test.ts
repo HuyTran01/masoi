@@ -20,6 +20,10 @@ import {
   computeBotGhostWanderStep,
   computeDragEdgePanRate,
   shouldApplyCameraLook,
+  resolveObstaclesCollision,
+  clampCameraRayAgainstObstacles,
+  computeRiverWadingState,
+  EnvObstacle,
 } from './fpvCamera';
 
 test('computeCampfireCircleRadius expands smoothly for larger player counts without crowding', () => {
@@ -728,5 +732,76 @@ test('BUG-41: walking straight into campfire radius deflects smoothly tangential
   });
   assert.ok(leftSlide.nextX < -0.4, `expected left-angled approach to slide left, got x=${leftSlide.nextX}`);
   assert.ok(Math.abs(Math.hypot(leftSlide.nextX, leftSlide.nextZ) - 1.85) < 1e-4);
+});
+
+test('Phase 3: resolveObstaclesCollision slides smoothly around circles, rotated OBBs & preserves campfire safety', () => {
+  const obstacles: EnvObstacle[] = [
+    { kind: 'circle', x: 10, z: 0, r: 1.0 },
+    { kind: 'obb', x: -13.6, z: 10.6, hx: 1.5, hz: 2.05, rotY: 0.72 },
+    { kind: 'circle', x: 0, z: 5.65, r: 0.52 }, // seated villager stool
+  ];
+
+  // Circle push-out & smooth tangential slide when walking at a diagonal
+  const circleHit = resolveObstaclesCollision(9.2, 0.35, 0.36, obstacles);
+  const distToCircle = Math.hypot(circleHit.x - 10, circleHit.z - 0);
+  assert.ok(distToCircle >= 1.36 - 1e-4, `expected outside circle radius+pad (1.36), got ${distToCircle}`);
+  assert.ok(circleHit.z > 0.35, 'diagonal circle collision should slide tangentially in +Z');
+
+  // Rotated OBB push-out from inside tent footprint
+  const obbInside = resolveObstaclesCollision(-13.4, 10.7, 0.36, obstacles);
+  const dx = obbInside.x - -13.6;
+  const dz = obbInside.z - 10.6;
+  const c = Math.cos(0.72);
+  const s = Math.sin(0.72);
+  const lx = Math.abs(dx * c - dz * s);
+  const lz = Math.abs(dx * s + dz * c);
+  assert.ok(
+    lx >= 1.5 + 0.36 - 1e-4 || lz >= 2.05 + 0.36 - 1e-4,
+    `expected ejected outside rotated OBB extents, got local (${lx.toFixed(3)}, ${lz.toFixed(3)})`
+  );
+
+  // Combined campfire slide + obstacle collision keeps player strictly outside both
+  const fireStep = clampAndSlideCampfireCollision({
+    currentX: 0,
+    currentZ: 1.9,
+    moveWorldX: 0,
+    moveWorldZ: -1,
+    stepDist: 0.4,
+    minRadius: 1.85,
+  });
+  const combined = resolveObstaclesCollision(fireStep.nextX, fireStep.nextZ, 0.36, obstacles);
+  assert.ok(Math.hypot(combined.x, combined.z) >= 1.85 - 1e-4, 'campfire radius invariant must hold');
+  assert.ok(
+    Math.hypot(combined.x - 0, combined.z - 5.65) >= 0.52 + 0.36 - 1e-4,
+    'stool collider invariant must hold'
+  );
+
+  // TPV camera obstacle distance clamp pulls camera forward when tent blocks line of sight
+  const blockedFrac = clampCameraRayAgainstObstacles(-11.0, 8.0, -16.0, 13.0, obstacles, 0.35);
+  assert.ok(blockedFrac < 0.8 && blockedFrac >= 0.22, `expected clamped TPV fraction < 0.8, got ${blockedFrac}`);
+  const clearFrac = clampCameraRayAgainstObstacles(0, 4, 0, 8, [obstacles[0], obstacles[1]], 0.35);
+  assert.equal(clearFrac, 1);
+});
+
+test('Phase 3: computeRiverWadingState applies 0.62x drag & crouch clamp only inside autumn stream', () => {
+  const wading = computeRiverWadingState('autumn', -0.45);
+  assert.equal(wading.isWading, true);
+  assert.equal(wading.speedMultiplier, 0.62);
+  assert.ok(wading.maxCrouchBlend < 0.35, 'crouch depth must be clamped above stream surface');
+
+  // Dry meadow bank (groundY >= -0.26) -> normal speed
+  const dryMeadow = computeRiverWadingState('autumn', -0.15);
+  assert.equal(dryMeadow.isWading, false);
+  assert.equal(dryMeadow.speedMultiplier, 1.0);
+  assert.equal(dryMeadow.maxCrouchBlend, 1.0);
+
+  // Non-river biomes never trigger wading drag even at negative heights
+  const forest = computeRiverWadingState('forest', -0.5);
+  assert.equal(forest.isWading, false);
+  assert.equal(forest.speedMultiplier, 1.0);
+
+  const frost = computeRiverWadingState('frostpeak', -0.5);
+  assert.equal(frost.isWading, false);
+  assert.equal(frost.speedMultiplier, 1.0);
 });
 

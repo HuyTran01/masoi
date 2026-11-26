@@ -1105,7 +1105,7 @@ export function createApiRouter(options: ApiRouterOptions) {
             timestamp: now,
           };
           const res = mgr.recordProp(code, propEvent);
-          if (!res.ok) return jsonResponse(res, 400);
+          if (!res.ok) return jsonResponse(res, 403);
           hookKind = 'prop';
           hookExtra = { propEvent };
         } else if (action === 'vote') {

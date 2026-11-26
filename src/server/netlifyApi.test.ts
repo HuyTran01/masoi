@@ -4,7 +4,9 @@ import netlifyApiHandler, {
   config as netlifyApiConfig,
   resetNetlifyApiTestStore,
 } from '../../netlify/functions/api.mts';
-import { resolveNetlifyStoreMode } from './stateStore.ts';
+import { createApiRouter } from './apiRouter.ts';
+import { RealtimeRoomManager } from './realtimeRooms.ts';
+import { MemoryStateStore, resolveNetlifyStoreMode } from './stateStore.ts';
 
 function req(
   path: string,
@@ -209,7 +211,7 @@ test('Netlify Function 2-player Online Room HTTP flow works end-to-end with zero
   assert.equal(unchanged.ok, true);
   assert.equal(unchanged.unchanged, true);
 
-  // Chat & Prop via HTTP action propagate to other player on next poll
+  // Chat via HTTP action propagates to other player on next poll; throwing prop at Night is rejected with 403!
   const chatRes = await netlifyApiHandler(
     req('/api/rooms/NET-101/action', {
       headers: { 'x-room-player-secret': j1.playerSecret },
@@ -222,17 +224,17 @@ test('Netlify Function 2-player Online Room HTTP flow works end-to-end with zero
   );
   assert.equal(chatRes.status, 200);
 
-  const propRes = await netlifyApiHandler(
+  const nightPropRes = await netlifyApiHandler(
     req('/api/rooms/NET-101/action', {
       headers: { 'x-room-player-secret': j2.playerSecret },
       body: {
         userId: 'u_p2',
         action: 'prop',
-        event: { id: 'http_prop_1', propType: 'rose', targetPlayerId: 'u_p1' },
+        event: { id: 'http_prop_night_blocked', propType: 'rose', targetPlayerId: 'u_p1' },
       },
     })
   );
-  assert.equal(propRes.status, 200);
+  assert.equal(nightPropRes.status, 403);
 
   const p1Poll = await (
     await netlifyApiHandler(
@@ -242,7 +244,10 @@ test('Netlify Function 2-player Online Room HTTP flow works end-to-end with zero
     )
   ).json();
   assert.equal(p1Poll.room.chatMessages.some((m: { id: string }) => m.id === 'http_msg_1'), true);
-  assert.equal(p1Poll.recentProps.some((e: { id: string }) => e.id === 'http_prop_1'), true);
+  assert.equal(
+    p1Poll.recentProps.some((e: { id: string }) => e.id === 'http_prop_night_blocked'),
+    false
+  );
 
   // Test kick detection over HTTP polling on a waiting room
   const kickRoomP1 = await (
@@ -389,5 +394,268 @@ test('Netlify Function /api/gm-rooms enforces hostSecret and playerToken 403/200
       )
     ).status,
     200
+  );
+});
+
+test('HTTP apiRouter enforces prop anti-cheat (403, no onRoomMutated) and zero-leak ghostNightState on Netlify serverless store', async () => {
+  const store = new MemoryStateStore();
+  const mutatedEvents: Array<{ code: string; kind: string }> = [];
+  const router = createApiRouter({
+    store,
+    isNetlify: true,
+    persistRooms: true,
+    hooks: {
+      onRoomMutated(code, kind) {
+        mutatedEvents.push({ code, kind });
+      },
+    },
+  });
+
+  // Seed deterministic 5-player room directly into persisted store (simulating Netlify Blobs)
+  const seedMgr = new RealtimeRoomManager();
+  const now = Date.now();
+  seedMgr.createOrJoinRoom('NET-PROP', { id: 'u_host', name: 'Host', avatar: '👑', elo: 1600 }, { villageSize: 5 });
+  seedMgr.createOrJoinRoom('NET-PROP', { id: 'u_wolf', name: 'Wolf', avatar: '🐺', elo: 1550 });
+  seedMgr.createOrJoinRoom('NET-PROP', { id: 'u_seer', name: 'Seer', avatar: '🔮', elo: 1550 });
+  seedMgr.createOrJoinRoom('NET-PROP', { id: 'u_vil', name: 'Villager', avatar: '🧑‍🌾', elo: 1500 });
+  seedMgr.createOrJoinRoom('NET-PROP', { id: 'u_ghost', name: 'Ghost', avatar: '👻', elo: 1500 });
+
+  const hostSecret = seedMgr.getOrIssuePlayerSecret('NET-PROP', 'u_host');
+  const wolfSecret = seedMgr.getOrIssuePlayerSecret('NET-PROP', 'u_wolf');
+  const seerSecret = seedMgr.getOrIssuePlayerSecret('NET-PROP', 'u_seer');
+  const ghostSecret = seedMgr.getOrIssuePlayerSecret('NET-PROP', 'u_ghost');
+
+  assert.equal(
+    seedMgr.startMatch('NET-PROP', 'u_host', {
+      now,
+      customRoles: {
+        u_host: 'villager',
+        u_wolf: 'werewolf',
+        u_seer: 'seer',
+        u_vil: 'villager',
+        u_ghost: 'villager',
+      },
+    }).ok,
+    true
+  );
+
+  // Kill u_ghost on Night 1 -> Dawn (day_discussion)
+  assert.equal(seedMgr.submitNightAction('NET-PROP', 'u_wolf', { actionType: 'wolf_bite', targetId: 'u_ghost' }, now).ok, true);
+  assert.equal(seedMgr.submitNightAction('NET-PROP', 'u_wolf', { actionType: 'confirm_done' }, now).ok, true);
+  assert.equal(seedMgr.submitNightAction('NET-PROP', 'u_seer', { actionType: 'confirm_done' }, now).ok, true);
+  assert.equal(seedMgr.getMatchState('NET-PROP')?.phase, 'day_discussion');
+
+  await store.setJSON('rooms/NET-PROP/state', seedMgr.exportSnapshot('NET-PROP'));
+
+  // 1. Dead Ghost throwing prop during Day Discussion -> HTTP 403 and NO onRoomMutated!
+  const ghostDayProp = await router.handleRequest(
+    req('/api/rooms/NET-PROP/action', {
+      headers: { 'x-room-player-secret': ghostSecret },
+      body: {
+        userId: 'u_ghost',
+        action: 'prop',
+        event: { id: 'p_ghost_day', propType: 'tomato', targetPlayerId: 'u_wolf' },
+      },
+    }),
+    { now }
+  );
+  assert.equal(ghostDayProp.status, 403);
+  assert.equal((await ghostDayProp.json()).ok, false);
+  assert.equal(mutatedEvents.length, 0);
+
+  // 2. Living player throwing at dead Ghost or at self during Day Discussion -> HTTP 403 and NO onRoomMutated!
+  const hitDeadProp = await router.handleRequest(
+    req('/api/rooms/NET-PROP/action', {
+      headers: { 'x-room-player-secret': hostSecret },
+      body: {
+        userId: 'u_host',
+        action: 'prop',
+        event: { id: 'p_hit_dead', propType: 'rose', targetPlayerId: 'u_ghost' },
+      },
+    }),
+    { now }
+  );
+  assert.equal(hitDeadProp.status, 403);
+
+  const selfProp = await router.handleRequest(
+    req('/api/rooms/NET-PROP/action', {
+      headers: { 'x-room-player-secret': hostSecret },
+      body: {
+        userId: 'u_host',
+        action: 'prop',
+        event: { id: 'p_self', propType: 'egg', targetPlayerId: 'u_host' },
+      },
+    }),
+    { now }
+  );
+  assert.equal(selfProp.status, 403);
+  assert.equal(mutatedEvents.length, 0);
+
+  // 3. Living player throwing at another living player during Day Discussion -> HTTP 200 + onRoomMutated('prop')!
+  const okDayProp = await router.handleRequest(
+    req('/api/rooms/NET-PROP/action', {
+      headers: { 'x-room-player-secret': hostSecret },
+      body: {
+        userId: 'u_host',
+        action: 'prop',
+        event: { id: 'p_day_ok', propType: 'rose', targetPlayerId: 'u_seer' },
+      },
+    }),
+    { now }
+  );
+  assert.equal(okDayProp.status, 200);
+  const okDayBody = await okDayProp.json();
+  assert.equal(okDayBody.ok, true);
+  assert.equal(okDayBody.recentProps.some((e: { id: string }) => e.id === 'p_day_ok'), true);
+  assert.deepEqual(mutatedEvents, [{ code: 'NET-PROP', kind: 'prop' }]);
+
+  // 4. Advance to Day Voting: living -> living succeeds (200), dead Ghost still blocked (403)
+  assert.equal(
+    (
+      await router.handleRequest(
+        req('/api/rooms/NET-PROP/action', {
+          headers: { 'x-room-player-secret': hostSecret },
+          body: { userId: 'u_host', action: 'advance_phase' },
+        }),
+        { now: now + 100 }
+      )
+    ).status,
+    200
+  );
+  assert.equal(
+    (
+      await router.handleRequest(
+        req('/api/rooms/NET-PROP/action', {
+          headers: { 'x-room-player-secret': ghostSecret },
+          body: {
+            userId: 'u_ghost',
+            action: 'prop',
+            event: { id: 'p_ghost_vote', propType: 'water', targetPlayerId: 'u_wolf' },
+          },
+        }),
+        { now: now + 150 }
+      )
+    ).status,
+    403
+  );
+  assert.equal(
+    (
+      await router.handleRequest(
+        req('/api/rooms/NET-PROP/action', {
+          headers: { 'x-room-player-secret': seerSecret },
+          body: {
+            userId: 'u_seer',
+            action: 'prop',
+            event: { id: 'p_vote_ok', propType: 'water', targetPlayerId: 'u_host' },
+          },
+        }),
+        { now: now + 200 }
+      )
+    ).status,
+    200
+  );
+
+  // 5. Advance to Night 2: both dead Ghost and living player blocked from props (403),
+  // AND Netlify HTTP /state serves omniscient ghostNightState ONLY to u_ghost (null to living u_host/u_seer/u_wolf)!
+  assert.equal(
+    (
+      await router.handleRequest(
+        req('/api/rooms/NET-PROP/action', {
+          headers: { 'x-room-player-secret': hostSecret },
+          body: { userId: 'u_host', action: 'advance_phase' },
+        }),
+        { now: now + 300 }
+      )
+    ).status,
+    200
+  );
+
+  const countBeforeNightProps = mutatedEvents.length;
+  assert.equal(
+    (
+      await router.handleRequest(
+        req('/api/rooms/NET-PROP/action', {
+          headers: { 'x-room-player-secret': ghostSecret },
+          body: {
+            userId: 'u_ghost',
+            action: 'prop',
+            event: { id: 'p_ghost_night', propType: 'tomato', targetPlayerId: 'u_wolf' },
+          },
+        }),
+        { now: now + 350 }
+      )
+    ).status,
+    403
+  );
+  assert.equal(
+    (
+      await router.handleRequest(
+        req('/api/rooms/NET-PROP/action', {
+          headers: { 'x-room-player-secret': hostSecret },
+          body: {
+            userId: 'u_host',
+            action: 'prop',
+            event: { id: 'p_living_night', propType: 'tomato', targetPlayerId: 'u_seer' },
+          },
+        }),
+        { now: now + 360 }
+      )
+    ).status,
+    403
+  );
+  assert.equal(mutatedEvents.length, countBeforeNightProps);
+
+  // Wolf picks u_vil and confirms over HTTP -> Ghost /state receives skillCutscenes, living players get null!
+  assert.equal(
+    (
+      await router.handleRequest(
+        req('/api/rooms/NET-PROP/action', {
+          headers: { 'x-room-player-secret': wolfSecret },
+          body: { userId: 'u_wolf', action: 'night_action', actionType: 'wolf_bite', targetId: 'u_vil' },
+        }),
+        { now: now + 400 }
+      )
+    ).status,
+    200
+  );
+  assert.equal(
+    (
+      await router.handleRequest(
+        req('/api/rooms/NET-PROP/action', {
+          headers: { 'x-room-player-secret': wolfSecret },
+          body: { userId: 'u_wolf', action: 'night_action', actionType: 'confirm_done' },
+        }),
+        { now: now + 450 }
+      )
+    ).status,
+    200
+  );
+
+  const ghostStateBody = await (
+    await router.handleRequest(
+      req('/api/rooms/NET-PROP/state?userId=u_ghost', {
+        headers: { 'x-room-player-secret': ghostSecret },
+      }),
+      { now: now + 500 }
+    )
+  ).json();
+  const livingStateBody = await (
+    await router.handleRequest(
+      req('/api/rooms/NET-PROP/state?userId=u_host', {
+        headers: { 'x-room-player-secret': hostSecret },
+      }),
+      { now: now + 500 }
+    )
+  ).json();
+
+  assert.equal(livingStateBody.matchView.ghostNightState, null);
+  assert.ok(ghostStateBody.matchView.ghostNightState);
+  assert.deepEqual(ghostStateBody.matchView.ghostNightState.wakingActorIds, ['u_seer']);
+  assert.equal(
+    ghostStateBody.matchView.ghostNightState.skillCutscenes.some(
+      (c: { kind: string; primaryTargetId: string | null }) =>
+        c.kind === 'werewolf' && c.primaryTargetId === 'u_vil'
+    ),
+    true
   );
 });

@@ -172,3 +172,65 @@ export interface LeaderboardUser {
 }
 
 export type Language = 'vi' | 'en' | 'fr' | 'es' | 'ja';
+
+export type NightSkillCutsceneKind =
+  | 'werewolf'
+  | 'cupid'
+  | 'bodyguard'
+  | 'seer'
+  | 'witch_heal'
+  | 'witch_poison'
+  | 'doppelganger'
+  | 'hunter_shot';
+
+export interface NightSkillCutsceneEvent {
+  id: string;
+  kind: NightSkillCutsceneKind;
+  actorIds: string[];
+  primaryTargetId: string | null;
+  secondaryTargetId?: string | null;
+  /** Populated ONLY for the Seer themselves (after confirming) or dead Ghosts. */
+  seerIsWolf?: boolean | null;
+  durationMs?: number;
+  label?: string;
+}
+
+export interface GhostNightSpectatorView {
+  wakingActorIds: string[];
+  liveActions: NightActions;
+  wolfPackPicks: Record<string, { targetId: string | null; secondTargetId?: string | null }>;
+  dyingWolfVictimIds: string[];
+  seerInspectionTonight: {
+    seerId: string;
+    targetId: string;
+    roleId: RoleId;
+    isWerewolf: boolean;
+  } | null;
+  skillCutscenes: NightSkillCutsceneEvent[];
+}
+
+export type BotPersonaId =
+  | 'detective'
+  | 'prosecutor'
+  | 'observer'
+  | 'manipulator'
+  | 'protector'
+  | 'wildcard';
+
+export type StorylineId =
+  | 'random_dramatic'
+  | 'classic_deduction'
+  | 'twin_seers'
+  | 'forbidden_lovers'
+  | 'wolf_civil_war'
+  | 'jester_mindgame'
+  | 'silent_night_paranoia'
+  | 'mayor_coup';
+
+export interface PublicRoleClaim {
+  speakerId: string;
+  claimedRole: RoleId;
+  round: number;
+  targetId?: string;
+  checkResult?: 'wolf' | 'good';
+}
