@@ -660,3 +660,71 @@ test('[SmartAI #10] Cross-faction Lovers defend each other in voting & discussio
   }
 });
 
+
+test('[Night-Aim] Bot Hunter marks a living non-self target on its night step, or holds fire (null) ~15% of the time', () => {
+  const players = makeRoster([
+    ['u1', 'Bạn', 'villager'],
+    ['h1', 'Thợ Săn Bot', 'hunter'],
+    ['w1', 'Sói', 'werewolf'],
+    ['v1', 'Dân 1', 'villager'],
+    ['v2', 'Dân 2', 'seer'],
+  ]);
+  const brain = createAIMatchBrain(players, 'classic_deduction', 'u1', makeSeededRng(7));
+
+  // rng = 0.9 (>= 0.15): must pick a real target who is alive and not the Hunter
+  const marked = computeSmartBotNightAction(brain, 'hunter', players, {}, {
+    round: 2,
+    wolfPupFrenzy: false,
+    humanPlayerId: 'u1',
+    rng: () => 0.9,
+  });
+  assert.ok(marked.hunterTargetId, 'Hunter bot must pick a mark');
+  assert.notEqual(marked.hunterTargetId, 'h1');
+  assert.ok(players.some((p) => p.id === marked.hunterTargetId && p.isAlive));
+
+  // rng = 0.01 (< 0.15): explicit "Không ghim"
+  const hold = computeSmartBotNightAction(brain, 'hunter', players, {}, {
+    round: 2,
+    wolfPupFrenzy: false,
+    humanPlayerId: 'u1',
+    rng: () => 0.01,
+  });
+  assert.equal(hold.hunterTargetId, null);
+
+  // Already decided tonight -> no overwrite; human Hunter is never auto-played
+  assert.deepEqual(
+    computeSmartBotNightAction(brain, 'hunter', players, { hunterTargetId: 'w1' }, {
+      round: 2,
+      wolfPupFrenzy: false,
+      humanPlayerId: 'u1',
+      rng: () => 0.9,
+    }),
+    {}
+  );
+  const humanHunter = players.map((p) => (p.id === 'u1' ? { ...p, roleId: 'hunter' as RoleId } : { ...p, roleId: p.roleId === 'hunter' ? ('villager' as RoleId) : p.roleId }));
+  assert.deepEqual(
+    computeSmartBotNightAction(brain, 'hunter', humanHunter, {}, {
+      round: 2,
+      wolfPupFrenzy: false,
+      humanPlayerId: 'u1',
+      rng: () => 0.9,
+    }),
+    {}
+  );
+});
+
+test('[W3-AI] A Wolf bot that publicly claimed Seer never replies "I am just a Villager" when accused', () => {
+  const players = makeRoster([
+    ['u1', 'Bạn', 'villager'],
+    ['b1', 'Minh Hoàng', 'werewolf'],
+    ['b2', 'Thảo My', 'seer'],
+    ['b3', 'Tuấn Kiệt', 'villager'],
+  ]);
+  const rng = makeSeededRng(7);
+  const brain = createAIMatchBrain(players, 'classic_deduction', 'u1', rng);
+  brain.publicClaims.push({ speakerId: 'b1', claimedRole: 'seer', round: 1 });
+  const replies = generateHumanChatResponses(brain, 'Mình nghi Minh Hoàng là sói', players, 1, 'vi', rng);
+  const text = replies.find((r) => r.speakerId === 'b1')?.text ?? '';
+  assert.ok(text.includes('Tiên Tri'), text);
+  assert.ok(!text.includes('Dân Làng'), text);
+});

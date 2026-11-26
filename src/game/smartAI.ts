@@ -707,7 +707,7 @@ export function suggestWolfPackTargets(
  */
 export function computeSmartBotNightAction(
   brain: AIMatchBrain,
-  stepKey: 'doppelganger' | 'cupid' | 'bodyguard' | 'werewolf' | 'witch' | 'seer',
+  stepKey: 'doppelganger' | 'cupid' | 'bodyguard' | 'hunter' | 'werewolf' | 'witch' | 'seer',
   players: Player[],
   currentActions: NightActions,
   options: {
@@ -821,6 +821,26 @@ export function computeSmartBotNightAction(
       });
       const pick = pickWeightedTop(scored, rng, 18);
       if (pick) return { guardTargetId: pick.id };
+    }
+    return {};
+  }
+
+  if (stepKey === 'hunter') {
+    const botHunter = alivePlayers.find(
+      (p) =>
+        p.roleId === 'hunter' &&
+        !p.hasUsedPower &&
+        p.id !== options.humanPlayerId
+    );
+    if (botHunter && currentActions.hunterTargetId === undefined) {
+      // ~15% tactical hold ("Không ghim") so bots don't always lock a shot blindly
+      if (rng() < 0.15) {
+        return { hunterTargetId: null };
+      }
+      const pick = pickSmartBotHunterTargetWithBrain(brain, players, botHunter, {
+        rng,
+      });
+      return { hunterTargetId: pick ? pick.id : null };
     }
     return {};
   }
@@ -2293,10 +2313,29 @@ export function generateHumanChatResponses(
             ? 'Ồ, nghi tôi nhanh thế? Nếu bạn tự tin vậy thì cứ bỏ phiếu treo cổ tôi đi, xem ai mới hối hận!'
             : 'Oh, pointing at me already? Go ahead and vote me out if you’re so sure — don’t regret it!';
       } else if (isBitingWolf(primaryMentioned.roleId)) {
-        defenseText =
-          lang === 'vi'
-            ? 'Nghi vô cớ thế bạn? Tôi chỉ là Dân Làng thôi — bạn vội đổ tội cho tôi như vậy có khi mới đáng nghi đấy!'
-            : 'Baseless accusation! I’m a regular Villager — pushing on me this fast makes you look pretty sus yourself!';
+        // A fake Seer must stay consistent with its public claim instead of "I'm just a Villager".
+        const claimsSeer = brain.publicClaims.some(
+          (c) => c.speakerId === primaryMentioned.id && c.claimedRole === 'seer'
+        );
+        defenseText = claimsSeer
+          ? lang === 'vi'
+            ? 'Tôi là Tiên Tri, soi được gì tôi đã báo cả làng rồi! Đổ tội cho tôi lúc này chỉ có lợi cho Sói thôi!'
+            : 'I’m the Seer and I already shared my results! Pushing on me now only helps the Wolves!'
+          : lang === 'vi'
+          ? pickFrom(
+              [
+                'Nghi vô cớ thế bạn? Tôi chỉ là Dân Làng thôi — bạn vội đổ tội cho tôi như vậy có khi mới đáng nghi đấy!',
+                'Tôi là Dân Làng đàng hoàng! Bạn có bằng chứng gì không hay chỉ đang đẩy phiếu cho nhanh?',
+              ],
+              rng
+            )
+          : pickFrom(
+              [
+                'Baseless accusation! I’m a regular Villager — pushing on me this fast makes you look pretty sus yourself!',
+                'I’m just a Villager! Got any evidence, or are you only rushing the vote?',
+              ],
+              rng
+            );
       } else if (primaryMentioned.roleId === 'seer') {
         defenseText =
           lang === 'vi'

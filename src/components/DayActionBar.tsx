@@ -25,8 +25,6 @@ interface DayActionBarProps {
   onVoteCampfireAbstain?: () => void;
   onClearVote?: () => void;
   onReopenGMAnnouncement?: () => void;
-  canUserShootHunter?: boolean;
-  onSkipHunterShot?: () => void;
 }
 
 export const DayActionBar: React.FC<DayActionBarProps> = ({
@@ -49,13 +47,14 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
   onVoteCampfireAbstain,
   onClearVote,
   onReopenGMAnnouncement,
-  canUserShootHunter = false,
-  onSkipHunterShot,
 }) => {
   const t = UI_TEXT[lang];
 
   if (phase === 'day_discussion') {
-    const latestClue = messages.filter((m) => !m.isGhost && !m.isSystem).slice(-1)[0];
+    // Skip last words of players who have since died (e.g. a bot lynched yesterday).
+    const latestClue = messages
+      .filter((m) => !m.isGhost && !m.isSystem && players.find((p) => p.id === m.senderId)?.isAlive !== false)
+      .slice(-1)[0];
     const cleanSummary =
       morningSummary ||
       (eventBanner.includes(':')
@@ -307,27 +306,6 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
               </div>
             )}
           </div>
-        )}
-      </div>
-    );
-  }
-
-  if (phase === 'hunter_revenge') {
-    return (
-      <div
-        data-testid="hunter-revenge-bar"
-        className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 px-3.5 py-2 rounded-xl bg-[#4f1814] border-2 border-[#f87171] text-xs font-extrabold text-[#fde7c3] shadow-xl text-center"
-      >
-        <span>{eventBanner}</span>
-        {canUserShootHunter && onSkipHunterShot && (
-          <button
-            type="button"
-            data-testid="hunter-hold-fire-btn"
-            onClick={onSkipHunterShot}
-            className="px-3 py-1 rounded-lg bg-[#1b120b] hover:bg-[#312115] border border-[#f5b82e]/80 text-[#fde7c3] text-[11px] font-extrabold cursor-pointer"
-          >
-            {t.holdFireBtn}
-          </button>
         )}
       </div>
     );

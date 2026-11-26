@@ -303,7 +303,14 @@ test('GMRoomManager issues and verifies hostSecret/playerToken without leaking t
   assert.equal(mgr.verifyPlayerToken('GM-6666', 'u_elder', token), true);
   assert.equal(mgr.verifyPlayerToken('GM-6666', 'u_elder', 'bad_token'), false);
 
-  const reconn = mgr.joinAsPlayer('GM-6666', { id: 'u_elder', name: 'Già Làng' });
+  const reconnNoToken = mgr.joinAsPlayer('GM-6666', { id: 'u_elder', name: 'Già Làng' });
+  assert.equal(reconnNoToken.ok, false);
+
+  const reconn = mgr.joinAsPlayer(
+    'GM-6666',
+    { id: 'u_elder', name: 'Già Làng' },
+    { playerToken: token }
+  );
   assert.equal(reconn.ok, true);
   if (reconn.ok) {
     assert.equal(reconn.playerToken, token);

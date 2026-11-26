@@ -1,5 +1,6 @@
 import type {
   GhostNightSpectatorView,
+  HunterShotRecord,
   NightActions,
   NightDeathCinematicState,
   NightResult,
@@ -17,7 +18,6 @@ import {
   checkWinCondition,
   generateBalancedRoster,
   getDyingWolfVictimsForWitch,
-  resolveHunterShot,
   resolveNightActions,
 } from '../game/rules.ts';
 import {
@@ -36,7 +36,6 @@ import {
   type GMAnnouncementData,
   isPlayerAwakeForNightStep,
   type NightStepKey,
-  pickSmartBotHunterTarget,
 } from '../game/autoGM.ts';
 import {
   CAMPFIRE_ABSTAIN_ID,
@@ -55,6 +54,7 @@ export type OnlineNightActionType =
   | 'wolf_bite'
   | 'wolf_second_bite'
   | 'guard'
+  | 'hunter_mark'
   | 'seer_inspect'
   | 'witch_heal'
   | 'witch_poison'
@@ -82,18 +82,6 @@ export interface OnlineNightSelection {
   witchPoisonTargetId?: string | null;
   cupidLovers?: [string, string] | null;
   doppelgangerTargetId?: string | null;
-}
-
-export interface OnlineDawnHunterEvent {
-  hunterId?: string;
-  hunterName: string;
-  hunterSeat: number;
-  targetId: string;
-  targetName: string;
-  targetSeat: number;
-  extraLoverId?: string;
-  extraLoverName?: string;
-  extraLoverSeat?: number;
 }
 
 export interface OnlineGameResult {
@@ -127,25 +115,17 @@ export interface OnlineMatchState {
   botWitchActedTonight: boolean;
   botComputedStepKey?: string | null;
   knownWolfIdsByBotSeer: string[];
-  pendingHunterIds: string[];
-  hunterOriginPhase: 'night' | 'day_voting';
   pendingDawnBeforePlayers?: Player[];
   pendingDawnKilledIds?: string[];
   pendingDawnNightResult?: NightResult;
-  pendingDawnHunterShotEvent?: OnlineDawnHunterEvent | null;
+  pendingDawnHunterShots?: HunterShotRecord[];
   pendingDuskBeforePlayers?: Player[];
   pendingLynchedVictimId?: string | null;
   pendingDuskVoteCounts?: Record<string, number>;
   pendingDuskVotes?: VoteRecord[];
   pendingDuskIsTie?: boolean;
   pendingDuskElderPenalty?: boolean;
-  pendingDuskHunterShotEvent?: {
-    hunterName: string;
-    hunterSeat: number;
-    targetId: string;
-    targetName: string;
-    targetSeat: number;
-  } | null;
+  pendingDuskHunterShots?: HunterShotRecord[];
   dawnAnnouncement: GMAnnouncementData | null;
   duskAnnouncement: GMAnnouncementData | null;
   announcementDismissedAt?: number;
@@ -186,9 +166,6 @@ export interface OnlinePlayerMatchView {
   dyingWolfVictimIds: string[];
   mySeerInspection: OnlineSeerInspection | null;
   votes: VoteRecord[];
-  activeHunterId: string | null;
-  activeHunterName: string | null;
-  isMyHunterTurn: boolean;
   announcement: GMAnnouncementData | null;
   deathCinematic: NightDeathCinematicState | null;
   ghostNightState: GhostNightSpectatorView | null;
@@ -217,13 +194,14 @@ export interface EloUpdateEntry {
 
 const DEFAULT_BOT_STEP_SEC = 4;
 const DEFAULT_HUNTER_SHOT_SEC = 20;
+const ANNOUNCEMENT_GRACE_MS = 8000;
 
 function toCustomTimerConfig(cfg: RealtimeTimerConfig): CustomTimerConfig {
   return {
-    nightActionSec: Math.max(5, Math.min(180, cfg.nightActionSec || DEFAULT_TIMER_CONFIG.nightActionSec)),
+    nightActionSec: Math.max(15, Math.min(180, cfg.nightActionSec || DEFAULT_TIMER_CONFIG.nightActionSec)),
     botStepSec: DEFAULT_BOT_STEP_SEC,
-    dayDiscussSec: Math.max(10, Math.min(600, cfg.dayDiscussSec || DEFAULT_TIMER_CONFIG.dayDiscussSec)),
-    dayVoteSec: Math.max(10, Math.min(300, cfg.dayVoteSec || DEFAULT_TIMER_CONFIG.dayVoteSec)),
+    dayDiscussSec: Math.max(20, Math.min(600, cfg.dayDiscussSec || DEFAULT_TIMER_CONFIG.dayDiscussSec)),
+    dayVoteSec: Math.max(15, Math.min(300, cfg.dayVoteSec || DEFAULT_TIMER_CONFIG.dayVoteSec)),
     hunterShotSec: DEFAULT_HUNTER_SHOT_SEC,
   };
 }
@@ -338,6 +316,18 @@ function recordStepSkillCutscenes(
       if (targetId) {
         appendNightSkillCutscene(match, step.key, {
           kind: 'bodyguard',
+          actorIds,
+          primaryTargetId: targetId,
+          secondaryTargetId: null,
+        });
+      }
+      break;
+    }
+    case 'hunter': {
+      const targetId = match.nightActions.hunterTargetId ?? null;
+      if (targetId) {
+        appendNightSkillCutscene(match, step.key, {
+          kind: 'hunter_shot',
           actorIds,
           primaryTargetId: targetId,
           secondaryTargetId: null,
@@ -502,7 +492,8 @@ function runBotActionsForCurrentNightStep(
 function setupCurrentNightStep(
   match: OnlineMatchState,
   ctx: MatchRoomBridge,
-  now: number
+  now: number,
+  graceMs = 0
 ): void {
   const step = match.nightSchedule[match.nightStepIndex] ?? null;
   match.stepConfirmedBy = {};
@@ -513,7 +504,7 @@ function setupCurrentNightStep(
   const durationSec = livingHumans.length > 0 ? timers.nightActionSec : timers.botStepSec;
 
   match.phaseStartedAt = now;
-  match.phaseEndsAt = now + durationSec * 1000;
+  match.phaseEndsAt = now + durationSec * 1000 + graceMs;
 
   if (livingHumans.length === 0) {
     runBotActionsForCurrentNightStep(match, ctx);
@@ -547,7 +538,7 @@ export function beginNewNight(
   match.deathCinematicByPlayer = {};
   syncVotesMap(match, ctx);
 
-  setupCurrentNightStep(match, ctx, now);
+  setupCurrentNightStep(match, ctx, now, options?.keepDuskAnnouncement ? ANNOUNCEMENT_GRACE_MS : 0);
 }
 
 /**
@@ -610,8 +601,6 @@ export function createOnlineMatchState(
     botWitchActedTonight: false,
     botComputedStepKey: null,
     knownWolfIdsByBotSeer: [],
-    pendingHunterIds: [],
-    hunterOriginPhase: 'night',
     dawnAnnouncement: null,
     duskAnnouncement: null,
     deathCinematicByPlayer: {},
@@ -645,7 +634,6 @@ function enterGameOver(
   match.phase = 'game_over';
   match.phaseStartedAt = now;
   match.phaseEndsAt = now;
-  match.pendingHunterIds = [];
   match.gameResult = {
     winner,
     reason,
@@ -716,7 +704,7 @@ function finalizeDawn(
     summary: [],
     killedDetails: [],
   };
-  const hunterShotEvent = match.pendingDawnHunterShotEvent ?? null;
+  const hunterShots = match.pendingDawnHunterShots ?? [];
 
   updateMayorAfterDeaths(match, ctx, 'dawn', now);
 
@@ -726,7 +714,7 @@ function finalizeDawn(
     beforePlayers,
     afterPlayers: match.players,
     nightKilledIds,
-    hunterShotEvent,
+    hunterShots,
     humanPlayerId: '__PUBLIC__',
     lang: 'vi',
   });
@@ -744,7 +732,6 @@ function finalizeDawn(
       beforePlayers,
       afterPlayers: match.players,
       nightResult,
-      hunterShotEvent,
       lang: 'vi',
     });
   }
@@ -793,7 +780,7 @@ function finalizeDawn(
   const timers = toCustomTimerConfig(ctx.timerConfig);
   match.phase = 'day_discussion';
   match.phaseStartedAt = now;
-  match.phaseEndsAt = now + timers.dayDiscussSec * 1000;
+  match.phaseEndsAt = now + timers.dayDiscussSec * 1000 + ANNOUNCEMENT_GRACE_MS;
   match.dayVotes = [];
   match.dayBotVotesComputed = false;
   syncVotesMap(match, ctx);
@@ -827,7 +814,7 @@ function finalizeDusk(
     votes: playerTargetVotes,
     isTie: Boolean(match.pendingDuskIsTie),
     elderLynchedPenalty: Boolean(match.pendingDuskElderPenalty),
-    hunterShotEvent: match.pendingDuskHunterShotEvent ?? null,
+    hunterShots: match.pendingDuskHunterShots ?? [],
     humanPlayerId: '__PUBLIC__',
     lang: 'vi',
   });
@@ -885,102 +872,6 @@ function finalizeDusk(
   return undefined;
 }
 
-function resolveHunterQueueOrContinue(
-  match: OnlineMatchState,
-  ctx: MatchRoomBridge,
-  now: number
-): EloUpdateEntry[] | undefined {
-  const chatSignals = extractChatVoteSignals(ctx.chatMessages, match.players);
-
-  while (match.pendingHunterIds.length > 0) {
-    const hunterId = match.pendingHunterIds[0];
-    const hunter = match.players.find((p) => p.id === hunterId);
-    if (!hunter || hunter.hasUsedPower) {
-      match.pendingHunterIds.shift();
-      continue;
-    }
-
-    const hasLivingTarget = match.players.some((p) => p.isAlive && p.id !== hunterId);
-    if (!hasLivingTarget) {
-      hunter.hasUsedPower = true;
-      match.pendingHunterIds.shift();
-      continue;
-    }
-
-    if (hunter.isBot) {
-      match.pendingHunterIds.shift();
-      const target = pickSmartBotHunterTarget(
-        match.players,
-        hunter,
-        match.knownWolfIdsByBotSeer,
-        chatSignals
-      );
-      if (!target) {
-        hunter.hasUsedPower = true;
-        continue;
-      }
-      const shotRes = resolveHunterShot(match.players, hunterId, target.id, {
-        elderSealActive: match.elderSealActive,
-      });
-      match.players = shotRes.updatedPlayers;
-      appendNightSkillCutscene(
-        match,
-        match.hunterOriginPhase === 'day_voting' ? 'day_hunter_revenge' : 'hunter_revenge',
-        {
-          kind: 'hunter_shot',
-          actorIds: [hunter.id],
-          primaryTargetId: target.id,
-          secondaryTargetId: shotRes.extraVictimId ?? null,
-        }
-      );
-      if (shotRes.wolfPupTriggeredNextNight) {
-        match.wolfPupFrenzy = true;
-      }
-      for (const nextH of shotRes.triggeredHunterIds) {
-        if (!match.pendingHunterIds.includes(nextH)) {
-          match.pendingHunterIds.push(nextH);
-        }
-      }
-      const extraLover = shotRes.extraVictimId
-        ? match.players.find((p) => p.id === shotRes.extraVictimId)
-        : null;
-      if (match.hunterOriginPhase === 'night') {
-        match.pendingDawnHunterShotEvent = {
-          hunterId: hunter.id,
-          hunterName: hunter.name,
-          hunterSeat: getSeatNumber(match.players, hunter.id),
-          targetId: target.id,
-          targetName: target.name,
-          targetSeat: getSeatNumber(match.players, target.id),
-          extraLoverId: extraLover?.id,
-          extraLoverName: extraLover?.name,
-          extraLoverSeat: extraLover ? getSeatNumber(match.players, extraLover.id) : undefined,
-        };
-      } else {
-        match.pendingDuskHunterShotEvent = {
-          hunterName: hunter.name,
-          hunterSeat: getSeatNumber(match.players, hunter.id),
-          targetId: target.id,
-          targetName: target.name,
-          targetSeat: getSeatNumber(match.players, target.id),
-        };
-      }
-      continue;
-    }
-
-    // Living/dying human Hunter -> pause in hunter_revenge with authoritative deadline
-    const timers = toCustomTimerConfig(ctx.timerConfig);
-    match.phase = 'hunter_revenge';
-    match.phaseStartedAt = now;
-    match.phaseEndsAt = now + timers.hunterShotSec * 1000;
-    return undefined;
-  }
-
-  return match.hunterOriginPhase === 'night'
-    ? finalizeDawn(match, ctx, now)
-    : finalizeDusk(match, ctx, now);
-}
-
 function advanceNightStepOrResolveDawn(
   match: OnlineMatchState,
   ctx: MatchRoomBridge,
@@ -998,7 +889,7 @@ function advanceNightStepOrResolveDawn(
     return undefined;
   }
 
-  // Last night step finished -> Resolve Dawn authoritatively via rules.ts
+  // Last night step finished -> Resolve Dawn authoritatively via rules.ts (including Night-Aim Hunter shots)
   const beforePlayers = match.players.map((p) => ({ ...p }));
   const { updatedPlayers, result } = resolveNightActions(match.players, match.nightActions, {
     wolfPupTriggered: match.wolfPupFrenzy,
@@ -1020,11 +911,9 @@ function advanceNightStepOrResolveDawn(
   match.pendingDawnBeforePlayers = beforePlayers;
   match.pendingDawnKilledIds = [...result.killedPlayerIds];
   match.pendingDawnNightResult = result;
-  match.pendingDawnHunterShotEvent = null;
-  match.hunterOriginPhase = 'night';
-  match.pendingHunterIds = [...result.triggeredHunterIds];
+  match.pendingDawnHunterShots = [...(result.hunterShots || [])];
 
-  return resolveHunterQueueOrContinue(match, ctx, now);
+  return finalizeDawn(match, ctx, now);
 }
 
 function transitionToDayVoting(
@@ -1086,9 +975,7 @@ function resolveDayVotingToDusk(
   match.pendingDuskVotes = [...match.dayVotes];
   match.pendingDuskIsTie = tally.isTie;
   match.pendingDuskElderPenalty = false;
-  match.pendingDuskHunterShotEvent = null;
-  match.hunterOriginPhase = 'day_voting';
-  match.pendingHunterIds = [];
+  match.pendingDuskHunterShots = [];
 
   if (tally.targetId) {
     const targetBefore = beforePlayers.find((p) => p.id === tally.targetId);
@@ -1104,12 +991,12 @@ function resolveDayVotingToDusk(
       match.wolfPupFrenzy = true;
     }
     // Tanner wins immediately on lynch without waiting on unrelated cascades
-    if (targetBefore?.roleId !== 'tanner') {
-      match.pendingHunterIds = [...lynchRes.triggeredHunterIds];
+    if (targetBefore?.roleId !== 'tanner' && lynchRes.hunterShots.length > 0) {
+      match.pendingDuskHunterShots = [...lynchRes.hunterShots];
     }
   }
 
-  return resolveHunterQueueOrContinue(match, ctx, now);
+  return finalizeDusk(match, ctx, now);
 }
 
 /**
@@ -1141,16 +1028,6 @@ export function tickOnlineMatchIfDue(
   if (match.phase === 'day_voting') {
     const eloUpdates = resolveDayVotingToDusk(match, ctx, now);
     return { changed: true, eloUpdates };
-  }
-
-  if (match.phase === 'hunter_revenge') {
-    const activeHunterId = match.pendingHunterIds[0];
-    if (!activeHunterId) {
-      const eloUpdates = resolveHunterQueueOrContinue(match, ctx, now);
-      return { changed: true, eloUpdates };
-    }
-    const res = applyOnlineHunterShot(match, ctx, activeHunterId, null, now);
-    return { changed: res.ok, eloUpdates: res.ok ? res.eloUpdates : undefined };
   }
 
   return { changed: false };
@@ -1237,6 +1114,26 @@ export function applyOnlineNightAction(
         }
       }
       match.nightActions.guardTargetId = targetId;
+      return { ok: true };
+    }
+
+    case 'hunter_mark': {
+      if (currentStep.key !== 'hunter') {
+        return { ok: false, error: 'Không phải lượt Thợ Săn.' };
+      }
+      if (actor.hasUsedPower) {
+        return { ok: false, error: 'Quyền năng Thợ Săn đã bị phong ấn.' };
+      }
+      if (targetId !== null) {
+        if (targetId === userId) {
+          return { ok: false, error: 'Thợ Săn không thể tự ghim chính mình.' };
+        }
+        const target = match.players.find((p) => p.id === targetId && p.isAlive);
+        if (!target) {
+          return { ok: false, error: 'Mục tiêu ghim đạn không hợp lệ.' };
+        }
+      }
+      match.nightActions.hunterTargetId = targetId;
       return { ok: true };
     }
 
@@ -1377,95 +1274,12 @@ export function applyOnlineDayVote(
   return { ok: true, votes: { ...ctx.votes } };
 }
 
-export function applyOnlineHunterShot(
-  match: OnlineMatchState,
-  ctx: MatchRoomBridge,
-  userId: string,
-  targetId: string | null,
-  now: number
-): { ok: true; eloUpdates?: EloUpdateEntry[] } | { ok: false; error: string } {
-  if (match.phase !== 'hunter_revenge') {
-    return { ok: false, error: 'Hiện không ở lượt Phản Đòn Thợ Săn.' };
-  }
-  if (match.pendingHunterIds[0] !== userId) {
-    return { ok: false, error: 'Không phải lượt nổ súng của bạn.' };
-  }
-  const hunter = match.players.find((p) => p.id === userId);
-  if (!hunter) {
-    return { ok: false, error: 'Không tìm thấy Thợ Săn.' };
-  }
-
-  if (targetId === null) {
-    match.pendingHunterIds.shift();
-    hunter.hasUsedPower = true;
-    const eloUpdates = resolveHunterQueueOrContinue(match, ctx, now);
-    return { ok: true, eloUpdates };
-  }
-
-  const target = match.players.find((p) => p.id === targetId && p.isAlive && p.id !== userId);
-  if (!target) {
-    return { ok: false, error: 'Mục tiêu bắn của Thợ Săn không hợp lệ.' };
-  }
-
-  match.pendingHunterIds.shift();
-  const shotRes = resolveHunterShot(match.players, userId, target.id, {
-    elderSealActive: match.elderSealActive,
-  });
-  match.players = shotRes.updatedPlayers;
-  appendNightSkillCutscene(
-    match,
-    match.hunterOriginPhase === 'day_voting' ? 'day_hunter_revenge' : 'hunter_revenge',
-    {
-      kind: 'hunter_shot',
-      actorIds: [hunter.id],
-      primaryTargetId: target.id,
-      secondaryTargetId: shotRes.extraVictimId ?? null,
-    }
-  );
-  if (shotRes.wolfPupTriggeredNextNight) {
-    match.wolfPupFrenzy = true;
-  }
-  for (const nextH of shotRes.triggeredHunterIds) {
-    if (!match.pendingHunterIds.includes(nextH)) {
-      match.pendingHunterIds.push(nextH);
-    }
-  }
-
-  const extraLover = shotRes.extraVictimId
-    ? match.players.find((p) => p.id === shotRes.extraVictimId)
-    : null;
-
-  if (match.hunterOriginPhase === 'night') {
-    match.pendingDawnHunterShotEvent = {
-      hunterId: hunter.id,
-      hunterName: hunter.name,
-      hunterSeat: getSeatNumber(match.players, hunter.id),
-      targetId: target.id,
-      targetName: target.name,
-      targetSeat: getSeatNumber(match.players, target.id),
-      extraLoverId: extraLover?.id,
-      extraLoverName: extraLover?.name,
-      extraLoverSeat: extraLover ? getSeatNumber(match.players, extraLover.id) : undefined,
-    };
-  } else {
-    match.pendingDuskHunterShotEvent = {
-      hunterName: hunter.name,
-      hunterSeat: getSeatNumber(match.players, hunter.id),
-      targetId: target.id,
-      targetName: target.name,
-      targetSeat: getSeatNumber(match.players, target.id),
-    };
-  }
-
-  const eloUpdates = resolveHunterQueueOrContinue(match, ctx, now);
-  return { ok: true, eloUpdates };
-}
-
 export function applyHostAdvancePhase(
   match: OnlineMatchState,
   ctx: MatchRoomBridge,
   requesterId: string,
-  now: number
+  now: number,
+  expectedStepIndex?: number
 ): { ok: true; eloUpdates?: EloUpdateEntry[] } | { ok: false; error: string } {
   if (ctx.hostId !== requesterId) {
     return { ok: false, error: 'Chỉ Chủ phòng mới có thể chuyển pha sớm.' };
@@ -1479,12 +1293,17 @@ export function applyHostAdvancePhase(
     return { ok: true, eloUpdates };
   }
   if (match.phase === 'night') {
+    if (
+      typeof expectedStepIndex === 'number' &&
+      !Number.isNaN(expectedStepIndex) &&
+      expectedStepIndex !== match.nightStepIndex
+    ) {
+      return { ok: false, error: 'Bước đêm đã thay đổi.' };
+    }
     const step = match.nightSchedule[match.nightStepIndex] ?? null;
     const livingHumans = getLivingHumanActorsForStep(match, step);
-    const otherUnconfirmed = livingHumans.some(
-      (h) => h.id !== requesterId && !match.stepConfirmedBy[h.id]
-    );
-    if (otherUnconfirmed) {
+    const anyUnconfirmed = livingHumans.some((h) => !match.stepConfirmedBy[h.id]);
+    if (anyUnconfirmed) {
       return { ok: false, error: 'Đang chờ người chơi khác hoàn tất hành động đêm.' };
     }
     const eloUpdates = advanceNightStepOrResolveDawn(match, ctx, now);
@@ -1566,31 +1385,9 @@ function buildPersonalizedAnnouncement(
 
 function buildGhostNightSpectatorView(
   match: OnlineMatchState,
-  rawStep: AutoGMNightStep | null,
-  activeHunterId: string | null
+  rawStep: AutoGMNightStep | null
 ): GhostNightSpectatorView {
-  const isDayOriginHunter =
-    match.phase === 'hunter_revenge' && match.hunterOriginPhase === 'day_voting';
-
-  const wakingActorIds =
-    match.phase === 'hunter_revenge'
-      ? activeHunterId
-        ? [activeHunterId]
-        : []
-      : getLivingActorsForStep(match, rawStep).map((p) => p.id);
-
-  if (isDayOriginHunter) {
-    return {
-      wakingActorIds,
-      liveActions: {},
-      wolfPackPicks: {},
-      dyingWolfVictimIds: [],
-      seerInspectionTonight: null,
-      skillCutscenes: (match.nightSkillEvents || [])
-        .filter((ev) => ev.kind === 'hunter_shot' && ev.id.includes('_day_hunter_revenge_'))
-        .map((ev) => ({ ...ev, actorIds: [...ev.actorIds] })),
-    };
-  }
+  const wakingActorIds = getLivingActorsForStep(match, rawStep).map((p) => p.id);
 
   const liveActions: NightActions = {
     ...match.nightActions,
@@ -1614,10 +1411,7 @@ function buildGhostNightSpectatorView(
     ])
   );
 
-  const playersForLethality =
-    match.phase === 'hunter_revenge'
-      ? (match.pendingDawnBeforePlayers ?? match.players)
-      : match.players;
+  const playersForLethality = match.players;
   const dyingWolfVictimIds = getDyingWolfVictimsForWitch(
     playersForLethality,
     match.nightActions,
@@ -1706,6 +1500,7 @@ export function buildPlayerMatchView(
       hasUsedPoison: revealPrivateFlags ? p.hasUsedPoison : undefined,
       hasUsedPower: revealPrivateFlags ? p.hasUsedPower : undefined,
       elderLives: revealPrivateFlags ? p.elderLives : undefined,
+      hunterMarkId: revealPrivateFlags ? p.hunterMarkId : undefined,
       protectedLastNight:
         revealPrivateFlags || viewerIsGuard ? p.protectedLastNight : undefined,
       loverId: revealLover ? p.loverId : undefined,
@@ -1748,6 +1543,8 @@ export function buildPlayerMatchView(
       };
     } else if (viewer.roleId === 'bodyguard') {
       myNightSelection = { targetId: match.nightActions.guardTargetId ?? null };
+    } else if (viewer.roleId === 'hunter') {
+      myNightSelection = { targetId: match.nightActions.hunterTargetId ?? null };
     } else if (viewer.roleId === 'seer') {
       myNightSelection = { targetId: match.nightActions.seerTargetId ?? null };
     } else if (viewer.roleId === 'witch') {
@@ -1800,25 +1597,14 @@ export function buildPlayerMatchView(
       }
     : null;
 
-  const activeHunterId =
-    match.phase === 'hunter_revenge' ? (match.pendingHunterIds[0] ?? null) : null;
-  const activeHunter = activeHunterId
-    ? match.players.find((p) => p.id === activeHunterId) ?? null
-    : null;
-
   const announcement = buildPersonalizedAnnouncement(match, viewerId, viewer);
   const deathCinematic =
     match.phase === 'day_discussion' ? (match.deathCinematicByPlayer[viewerId] ?? null) : null;
 
-  // STRICT ZERO-LEAK GATE: only verified dead Ghosts (excluding pending Hunters mid-shot) see night omniscience
-  const isVerifiedDeadGhost = Boolean(
-    viewer &&
-      !viewer.isAlive &&
-      !(match.phase === 'hunter_revenge' && match.pendingHunterIds.includes(viewer.id))
-  );
+  // STRICT ZERO-LEAK GATE: only verified dead Ghosts see night omniscience
   const ghostNightState: GhostNightSpectatorView | null =
-    isVerifiedDeadGhost && (match.phase === 'night' || match.phase === 'hunter_revenge')
-      ? buildGhostNightSpectatorView(match, rawStep, activeHunterId)
+    viewer && !viewer.isAlive && match.phase === 'night'
+      ? buildGhostNightSpectatorView(match, rawStep)
       : null;
 
   return {
@@ -1841,9 +1627,6 @@ export function buildPlayerMatchView(
     dyingWolfVictimIds,
     mySeerInspection,
     votes: match.dayVotes.map((v) => ({ ...v })),
-    activeHunterId,
-    activeHunterName: activeHunter?.name ?? null,
-    isMyHunterTurn: Boolean(activeHunterId && activeHunterId === viewerId),
     announcement,
     deathCinematic: deathCinematic ? { ...deathCinematic } : null,
     ghostNightState,

@@ -260,7 +260,8 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
                       <div className="flex flex-wrap items-center gap-1 text-[10px] text-[#d6bfa2]">
                         <span className="text-[#bfa586] font-semibold">←</span>
                         {entry.voters.map((v) => {
-                          const isVoterMayor = Boolean(mayorId && v.id === mayorId);
+                          const crownedId = announcement.votingMayorId ?? mayorId;
+                          const isVoterMayor = Boolean(crownedId && v.id === crownedId);
                           return (
                             <span
                               key={v.id}
@@ -319,7 +320,7 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
         )}
 
         {/* Footer: Survivor Counter + Single Primary CTA */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 pt-1">
+        <div className="sticky bottom-0 -mx-4 sm:-mx-6 -mb-4 sm:-mb-6 px-4 sm:px-6 py-3 rounded-b-3xl bg-[#1b120b]/95 flex flex-col sm:flex-row items-center justify-between gap-2.5">
           <div className="flex items-center gap-1.5 text-xs font-bold text-[#e6d5b8]">
             <Users className="w-4 h-4 text-[#6ee7b7] shrink-0" />
             <span>

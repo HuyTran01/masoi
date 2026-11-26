@@ -42,6 +42,8 @@ export interface UITranslationSchema {
   roomBadge: (roomId: string) => string;
   aiPracticeBadge: string;
   skipNightBtn: string;
+  hunterNoMarkBtn: string;
+  hunterNoMarkStatus: string;
   goToVoteBtn: string;
   confirmVoteBtn: string;
   wolvesAlive: string;
@@ -160,6 +162,56 @@ export interface UITranslationSchema {
   botRoleLabel: string;
   humanRoleLabel: string;
   preferredRoleLobby: string;
+  lbWaitingHostStart: string;
+  lbEnterCodeOnline: string;
+  lbEnterCodeGM: string;
+  lbGMToolShort: string;
+  lbGMRoomNotFound: (code: string) => string;
+  lbGMUnreachable: string;
+  lbJoinTimeout: (code: string) => string;
+  lbLiveServer: string;
+  lbConnecting: string;
+  lbSyncWs: string;
+  lbSyncHttp: string;
+  lbGuestReadonly: string;
+  lbLeaveRoom: string;
+  lbRoomHost: string;
+  lbJoinedRoomCode: string;
+  lbMaxSeats: string;
+  lbRoomSettingsHost: string;
+  lbSeats: string;
+  lbShareCode: (code: string) => string;
+  lbSyncedFromHost: string;
+  lbConnectTimeout: string;
+  lbRetry: string;
+  lbYou: string;
+  lbPhaseTimers: string;
+  lbTimerFast: string;
+  lbTimerStandard: string;
+  lbTimerRelaxed: string;
+  lbTimerNight: string;
+  lbTimerDebate: string;
+  lbTimerVote: string;
+  lbStarting: string;
+  lbSyncingRoom: string;
+  lbNoPhysicalDeck: string;
+  lbNoPhysicalDeckDesc: string;
+  lbHavePhysicalDeck: string;
+  lbHavePhysicalDeckDesc: string;
+  lbCompanionTitle: string;
+  lbCompanionStep1: (code: string) => string;
+  lbCompanionStep2: (code: string) => string;
+  lbOpenOnlineRooms: string;
+  lbRefresh: string;
+  lbNoOpenRooms: string;
+  lbInMatch: string;
+  lbJoin: string;
+  lbOpenGMRooms: string;
+  lbNoGMRooms: string;
+  lbPhysical: string;
+  lbVirtual: string;
+  lbJoining: string;
+  lbChecking: string;
   startOnlineMatchBtn: (cnt: number, code: string) => string;
   minPlayersWarning: (cnt: number) => string;
   gmGuideTitle: string;
@@ -283,6 +335,7 @@ export interface UITranslationSchema {
   behindViewBanner: string;
   ghostFlightBanner: string;
   winDraw: string;
+  autoGmSenderName: string;
   waitingHostRematch: string;
   deadChatLockedBanner: string;
   openGhostRealmBtn: string;
@@ -357,6 +410,8 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     roomBadge: (id) => `Phòng ${id}`,
     aiPracticeBadge: 'Đấu AI',
     skipNightBtn: 'Qua Đêm',
+    hunterNoMarkBtn: 'Không ghim',
+    hunterNoMarkStatus: 'Chưa ghim ai (đạn sẽ không bắn)',
     goToVoteBtn: 'Bỏ Phiếu',
     confirmVoteBtn: 'Chốt Phiếu',
     wolvesAlive: 'SÓI SỐNG',
@@ -471,6 +526,56 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     botRoleLabel: '🤖 Bot AI',
     humanRoleLabel: '👤 Người chơi',
     preferredRoleLobby: 'Vai trò ưu tiên của bạn:',
+    lbWaitingHostStart: 'Đang chờ Chủ phòng bắt đầu ván đấu...',
+    lbEnterCodeOnline: 'Nhập mã phòng hợp lệ (VD: ONL-4821)',
+    lbEnterCodeGM: 'Nhập mã phòng Quản Trò hợp lệ (VD: GM-4821)',
+    lbGMToolShort: '2. Quản Trò',
+    lbGMRoomNotFound: (c) => `Không tìm thấy phòng Quản Trò "${c}". Hãy kiểm tra lại mã phòng từ Quản Trò.`,
+    lbGMUnreachable: 'Không thể kiểm tra phòng Quản Trò. Vui lòng thử lại.',
+    lbJoinTimeout: (c) => `Quá thời gian kết nối máy chủ phòng "${c}" (10s). Kiểm tra mạng hoặc bấm Thử lại.`,
+    lbLiveServer: 'Máy chủ trực tuyến',
+    lbConnecting: 'Đang kết nối...',
+    lbSyncWs: '⚡ Đồng bộ Thời Gian Thực (WebSocket · Server-Authoritative)',
+    lbSyncHttp: '☁️ Đồng bộ Cloud (HTTP Sync · Server-Authoritative)',
+    lbGuestReadonly: 'Khách mời · Chỉ Chủ phòng được tùy chỉnh thông tin phòng',
+    lbLeaveRoom: 'Rời phòng',
+    lbRoomHost: 'Chủ phòng',
+    lbJoinedRoomCode: 'MÃ PHÒNG ĐANG THAM GIA',
+    lbMaxSeats: 'Số ghế tối đa',
+    lbRoomSettingsHost: 'Cấu hình phòng (Chủ phòng đặt)',
+    lbSeats: 'ghế',
+    lbShareCode: (c) => `Gửi mã ${c} cho bạn bè ở thiết bị khác nhập tại tab "Nhập Mã Phòng Để Vào" để cùng chơi trực tuyến thời gian thực.`,
+    lbSyncedFromHost: 'Danh sách thành viên và cấu hình phòng được đồng bộ trực tiếp từ Chủ phòng.',
+    lbConnectTimeout: 'Không thể kết nối máy chủ phòng trực tuyến sau 10 giây. Vui lòng thử lại.',
+    lbRetry: 'Thử lại',
+    lbYou: 'Bạn',
+    lbPhaseTimers: 'Thời gian mỗi pha:',
+    lbTimerFast: 'Nhanh',
+    lbTimerStandard: 'Chuẩn',
+    lbTimerRelaxed: 'Thư thả',
+    lbTimerNight: 'Đêm:',
+    lbTimerDebate: 'Thảo luận:',
+    lbTimerVote: 'Bỏ phiếu:',
+    lbStarting: 'Đang bắt đầu ván đấu...',
+    lbSyncingRoom: 'Đang đồng bộ phòng với máy chủ...',
+    lbNoPhysicalDeck: 'Không có bộ bài ngoài đời',
+    lbNoPhysicalDeckDesc: 'App chia vai tự động. Người chơi vào mã phòng chỉ thấy duy nhất vai trò của riêng mình.',
+    lbHavePhysicalDeck: 'Đã có bộ bài giấy ngoài đời',
+    lbHavePhysicalDeckDesc: 'Người chơi tự nhập lá bài mình bốc trước trận đấu, hoặc Quản Trò nhập hộ trực tiếp.',
+    lbCompanionTitle: 'Chế độ hỗ trợ chơi ngoài đời (tách biệt hoàn toàn với game 3D Online/Bot):',
+    lbCompanionStep1: (c) => `1. Quản Trò mở bảng điều khiển phòng ${c} để gọi đêm, ghi nhớ Bảo Vệ/Phù Thủy/Sói Con.`,
+    lbCompanionStep2: (c) => `2. Người chơi nhập mã ${c} ở tab "Nhập Mã Phòng Để Vào" — chỉ xem được mỗi vai trò của mình hoặc tự nhập bài trước khi bắt đầu.`,
+    lbOpenOnlineRooms: 'Phòng Online đang mở trên máy chủ:',
+    lbRefresh: 'Làm mới',
+    lbNoOpenRooms: 'Chưa có phòng nào đang mở. Hãy tạo phòng mới hoặc nhập mã từ bạn bè!',
+    lbInMatch: 'Đang chơi',
+    lbJoin: 'Vào ngay',
+    lbOpenGMRooms: 'Phòng Quản Trò đang mở:',
+    lbNoGMRooms: 'Chưa có phòng Quản Trò nào đang mở. Hãy tạo phòng hoặc nhập mã từ Quản Trò!',
+    lbPhysical: '🎴 Bài giấy',
+    lbVirtual: '🃏 Chia bài ảo',
+    lbJoining: 'Đang vào phòng...',
+    lbChecking: 'Đang kiểm tra mã phòng...',
     startOnlineMatchBtn: (c, code) => `BẮT ĐẦU VÁN ONLINE 3D (${c} NGƯỜI · PHÒNG ${code})`,
     minPlayersWarning: (c) =>
       `⚠️ Cần tối thiểu 4 người trong phòng để bắt đầu (hiện có ${c} người). Hãy thêm bạn bè hoặc bấm "+1 Bot AI"!`,
@@ -644,6 +749,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostFlightBanner:
       '👻 Chế độ Hồn Ma · Bay tự do WASD · Space Lên / Shift Xuống · Giữ chuột kéo xoay 360° · 🔒 Chat Làng & Mic đã khóa · Mở Khu Vực Ma',
     winDraw: 'HÒA — KHÔNG CÒN AI SỐNG SÓT!',
+    autoGmSenderName: '🤖 Quản Trò Máy',
     waitingHostRematch: '⏳ Đang chờ Chủ phòng bắt đầu ván mới...',
     deadChatLockedBanner: '👻 Bạn đã thành Hồn Ma — Phòng Chính bị khóa để chống gian lận!',
     openGhostRealmBtn: 'Sang Khu Vực Ma',
@@ -658,7 +764,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostNightSpectatorTitle: '👻 Chế Độ Hồn Ma Toàn Tri — Đang chứng kiến ban đêm',
     skipCutsceneBtn: 'Bỏ qua ⏭',
     ghostFastForwardStep: 'Tua nhanh ⏭',
-    ghostNoLivingActor: '💀 Vai này đã tử trận / không có người thức',
+    ghostNoLivingActor: '💤 Vai này không có ai hành động đêm nay (đã tử trận hoặc hết quyền năng)',
     ghostWatchingAction: 'Đang chứng kiến:',
   },
   en: {
@@ -713,6 +819,8 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     roomBadge: (id) => `Room ${id}`,
     aiPracticeBadge: 'AI Match',
     skipNightBtn: 'Skip Night',
+    hunterNoMarkBtn: 'No Mark',
+    hunterNoMarkStatus: 'No target marked (gun will not fire)',
     goToVoteBtn: 'Start Vote',
     confirmVoteBtn: 'Lock Vote',
     wolvesAlive: 'WOLVES',
@@ -827,6 +935,56 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     botRoleLabel: '🤖 AI Bot',
     humanRoleLabel: '👤 Player',
     preferredRoleLobby: 'Your Preferred Role:',
+    lbWaitingHostStart: 'Waiting for the Room Host to start the match...',
+    lbEnterCodeOnline: 'Enter a valid room code',
+    lbEnterCodeGM: 'Enter a valid room code',
+    lbGMToolShort: '2. GM Tool',
+    lbGMRoomNotFound: (c) => `GM room "${c}" not found. Check the code with your Game Master.`,
+    lbGMUnreachable: 'Could not reach GM server. Please try again.',
+    lbJoinTimeout: (c) => `Connection timed out while joining "${c}" (10s). Please retry.`,
+    lbLiveServer: 'Live Server',
+    lbConnecting: 'Connecting...',
+    lbSyncWs: '⚡ Real-Time Sync (WebSocket · Server-Authoritative)',
+    lbSyncHttp: '☁️ Cloud Sync (HTTP Sync · Server-Authoritative)',
+    lbGuestReadonly: 'Guest · Only the Room Host can modify room settings',
+    lbLeaveRoom: 'Leave Room',
+    lbRoomHost: 'Room Host',
+    lbJoinedRoomCode: 'JOINED ROOM CODE',
+    lbMaxSeats: 'Maximum seats',
+    lbRoomSettingsHost: 'Room Settings (Host Only)',
+    lbSeats: 'seats',
+    lbShareCode: (c) => `Share code ${c} with friends on other devices to enter in "Join with Room Code" and play live.`,
+    lbSyncedFromHost: 'Participant list and room rules are synced live from the Room Host.',
+    lbConnectTimeout: 'Could not reach the live room server after 10s. Please retry.',
+    lbRetry: 'Retry',
+    lbYou: 'You',
+    lbPhaseTimers: 'Phase timers:',
+    lbTimerFast: 'Fast',
+    lbTimerStandard: 'Standard',
+    lbTimerRelaxed: 'Relaxed',
+    lbTimerNight: 'Night:',
+    lbTimerDebate: 'Debate:',
+    lbTimerVote: 'Vote:',
+    lbStarting: 'Starting match...',
+    lbSyncingRoom: 'Syncing room with server...',
+    lbNoPhysicalDeck: 'No physical deck (Virtual)',
+    lbNoPhysicalDeckDesc: 'App deals balanced roles. Players join with the room code and see ONLY their own role.',
+    lbHavePhysicalDeck: 'Have physical deck',
+    lbHavePhysicalDeckDesc: 'Players submit their own drawn card before match starts, or GM enters it for them.',
+    lbCompanionTitle: 'Real-life companion mode (completely isolated from 3D Online/Bot matches):',
+    lbCompanionStep1: (c) => `1. GM opens room ${c} to track nights, potions, lovers, and wolf pup frenzy.`,
+    lbCompanionStep2: (c) => `2. Players enter ${c} in "Join with Room Code" to view ONLY their own secret role or enter their physical card.`,
+    lbOpenOnlineRooms: 'Open Online rooms on server:',
+    lbRefresh: 'Refresh',
+    lbNoOpenRooms: 'No open rooms yet. Create one or enter a friend’s room code!',
+    lbInMatch: 'In match',
+    lbJoin: 'Join',
+    lbOpenGMRooms: 'Active GM rooms on server:',
+    lbNoGMRooms: 'No active GM rooms yet. Create one or enter your Game Master’s code!',
+    lbPhysical: '🎴 Physical',
+    lbVirtual: '🃏 Virtual',
+    lbJoining: 'Joining room...',
+    lbChecking: 'Checking room...',
     startOnlineMatchBtn: (c, code) => `START 3D ONLINE MATCH (${c} PLAYERS · ${code})`,
     minPlayersWarning: (c) =>
       `⚠️ Need at least 4 players in the room to start (currently ${c}). Invite friends or tap "+1 AI Bot"!`,
@@ -1000,6 +1158,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostFlightBanner:
       '👻 Ghost Mode · Free Flight WASD · Space Up / Shift Down · Drag to Look 360° · 🔒 Village Chat & Mic Locked · Ghost Realm Open',
     winDraw: 'DRAW — NO SURVIVORS!',
+    autoGmSenderName: '🤖 Auto-GM',
     waitingHostRematch: '⏳ Waiting for Room Host to start a new match...',
     deadChatLockedBanner: '👻 You are a Ghost — Main Chat is locked to prevent cheating!',
     openGhostRealmBtn: 'Open Ghost Realm',
@@ -1014,7 +1173,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostNightSpectatorTitle: '👻 Omniscient Ghost Mode — Witnessing the Night',
     skipCutsceneBtn: 'Skip ⏭',
     ghostFastForwardStep: 'Fast-Forward ⏭',
-    ghostNoLivingActor: '💀 This role fell / no living actor wakes',
+    ghostNoLivingActor: '💤 No one acts for this role tonight (fallen or power spent)',
     ghostWatchingAction: 'Witnessing action:',
   },
   fr: {
@@ -1069,6 +1228,8 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     roomBadge: (id) => `Salle ${id}`,
     aiPracticeBadge: 'Match IA',
     skipNightBtn: 'Passer Nuit',
+    hunterNoMarkBtn: 'Aucune cible',
+    hunterNoMarkStatus: 'Aucune cible (pas de tir)',
     goToVoteBtn: 'Voter',
     confirmVoteBtn: 'Valider Vote',
     wolvesAlive: 'LOUPS',
@@ -1183,6 +1344,56 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     botRoleLabel: '🤖 Bot IA',
     humanRoleLabel: '👤 Joueur',
     preferredRoleLobby: 'Rôle préféré :',
+    lbWaitingHostStart: 'En attente du chef de salle pour lancer la partie...',
+    lbEnterCodeOnline: 'Saisissez un code de salle valide (ex. ONL-4821)',
+    lbEnterCodeGM: 'Saisissez un code de salle MJ valide (ex. GM-4821)',
+    lbGMToolShort: '2. Outil MJ',
+    lbGMRoomNotFound: (c) => `Salle MJ « ${c} » introuvable. Vérifiez le code auprès de votre Maître du Jeu.`,
+    lbGMUnreachable: 'Impossible de joindre le serveur MJ. Veuillez réessayer.',
+    lbJoinTimeout: (c) => `Délai de connexion dépassé pour la salle « ${c} » (10 s). Veuillez réessayer.`,
+    lbLiveServer: 'Serveur en direct',
+    lbConnecting: 'Connexion...',
+    lbSyncWs: '⚡ Synchro temps réel (WebSocket · serveur autoritaire)',
+    lbSyncHttp: '☁️ Synchro cloud (HTTP · serveur autoritaire)',
+    lbGuestReadonly: 'Invité · Seul le chef de salle peut modifier les réglages',
+    lbLeaveRoom: 'Quitter la salle',
+    lbRoomHost: 'Chef de salle',
+    lbJoinedRoomCode: 'CODE DE LA SALLE REJOINTE',
+    lbMaxSeats: 'Nombre max. de places',
+    lbRoomSettingsHost: 'Paramètres de la salle (hôte uniquement)',
+    lbSeats: 'places',
+    lbShareCode: (c) => `Partagez le code ${c} avec vos amis sur d'autres appareils : à saisir dans « Rejoindre avec Code » pour jouer en direct.`,
+    lbSyncedFromHost: 'La liste des participants et les règles sont synchronisées en direct depuis le chef de salle.',
+    lbConnectTimeout: 'Impossible de joindre le serveur de salle en ligne après 10 s. Veuillez réessayer.',
+    lbRetry: 'Réessayer',
+    lbYou: 'Vous',
+    lbPhaseTimers: 'Durée des phases :',
+    lbTimerFast: 'Rapide',
+    lbTimerStandard: 'Standard',
+    lbTimerRelaxed: 'Détendu',
+    lbTimerNight: 'Nuit :',
+    lbTimerDebate: 'Débat :',
+    lbTimerVote: 'Vote :',
+    lbStarting: 'Lancement de la partie...',
+    lbSyncingRoom: 'Synchronisation de la salle avec le serveur...',
+    lbNoPhysicalDeck: 'Pas de jeu physique (virtuel)',
+    lbNoPhysicalDeckDesc: 'L\'app distribue les rôles automatiquement. Les joueurs rejoignent avec le code et ne voient QUE leur propre rôle.',
+    lbHavePhysicalDeck: 'J\'ai un jeu physique',
+    lbHavePhysicalDeckDesc: 'Les joueurs saisissent la carte qu\'ils ont tirée avant la partie, ou le MJ la saisit pour eux.',
+    lbCompanionTitle: 'Mode compagnon en vie réelle (totalement isolé des parties 3D en ligne/bots) :',
+    lbCompanionStep1: (c) => `1. Le MJ ouvre la salle ${c} pour suivre les nuits, potions, amoureux et la furie du louveteau.`,
+    lbCompanionStep2: (c) => `2. Les joueurs saisissent ${c} dans « Rejoindre avec Code » pour voir UNIQUEMENT leur rôle secret ou saisir leur carte physique.`,
+    lbOpenOnlineRooms: 'Salles en ligne ouvertes sur le serveur :',
+    lbRefresh: 'Actualiser',
+    lbNoOpenRooms: 'Aucune salle ouverte pour l’instant. Créez-en une ou saisissez le code d’un ami !',
+    lbInMatch: 'En partie',
+    lbJoin: 'Rejoindre',
+    lbOpenGMRooms: 'Salles MJ actives :',
+    lbNoGMRooms: 'Aucune salle MJ active. Créez-en une ou saisissez le code de votre Maître du Jeu !',
+    lbPhysical: '🎴 Physique',
+    lbVirtual: '🃏 Virtuel',
+    lbJoining: 'Connexion à la salle...',
+    lbChecking: 'Vérification de la salle...',
     startOnlineMatchBtn: (c, code) => `LANCER LA PARTIE 3D (${c} JOUEURS · ${code})`,
     minPlayersWarning: (c) =>
       `⚠️ Minimum 4 joueurs requis (actuellement ${c}). Ajoutez des amis ou cliquez sur "+1 Bot IA" !`,
@@ -1354,6 +1565,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostFlightBanner:
       '👻 Mode Fantôme · Vol libre WASD · Espace Monter / Shift Descendre · Glisser 360° · 🔒 Chat Village & Micro verrouillés · Salon Fantôme ouvert',
     winDraw: 'ÉGALITÉ — AUCUN SURVIVANT !',
+    autoGmSenderName: '🤖 MJ Auto',
     waitingHostRematch: '⏳ En attente que l’hôte lance une nouvelle partie...',
     deadChatLockedBanner: '👻 Vous êtes Fantôme — Le chat principal est verrouillé !',
     openGhostRealmBtn: 'Ouvrir Canal Fantôme',
@@ -1368,7 +1580,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostNightSpectatorTitle: '👻 Mode Fantôme Omniscient — Témoin de la Nuit',
     skipCutsceneBtn: 'Passer ⏭',
     ghostFastForwardStep: 'Avancer ⏭',
-    ghostNoLivingActor: '💀 Ce rôle est tombé / aucun acteur éveillé',
+    ghostNoLivingActor: '💤 Personne n’agit pour ce rôle cette nuit (tombé ou pouvoir épuisé)',
     ghostWatchingAction: 'Action observée :',
   },
   es: {
@@ -1423,6 +1635,8 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     roomBadge: (id) => `Sala ${id}`,
     aiPracticeBadge: 'Práctica IA',
     skipNightBtn: 'Pasar Noche',
+    hunterNoMarkBtn: 'Sin marca',
+    hunterNoMarkStatus: 'Sin objetivo (no disparará)',
     goToVoteBtn: 'A Votar',
     confirmVoteBtn: 'Cerrar Voto',
     wolvesAlive: 'LOBOS',
@@ -1537,6 +1751,56 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     botRoleLabel: '🤖 Bot IA',
     humanRoleLabel: '👤 Jugador',
     preferredRoleLobby: 'Tu rol preferido:',
+    lbWaitingHostStart: 'Esperando a que el anfitrión inicie la partida...',
+    lbEnterCodeOnline: 'Introduce un código de sala válido (p. ej. ONL-4821)',
+    lbEnterCodeGM: 'Introduce un código de sala de Narrador válido (p. ej. GM-4821)',
+    lbGMToolShort: '2. Narrador',
+    lbGMRoomNotFound: (c) => `Sala de Narrador "${c}" no encontrada. Verifica el código con tu Narrador.`,
+    lbGMUnreachable: 'No se pudo conectar con el servidor del Narrador. Inténtalo de nuevo.',
+    lbJoinTimeout: (c) => `Tiempo de conexión agotado al unirse a "${c}" (10 s). Inténtalo de nuevo.`,
+    lbLiveServer: 'Servidor en vivo',
+    lbConnecting: 'Conectando...',
+    lbSyncWs: '⚡ Sincronización en tiempo real (WebSocket · servidor autoritativo)',
+    lbSyncHttp: '☁️ Sincronización en la nube (HTTP · servidor autoritativo)',
+    lbGuestReadonly: 'Invitado · Solo el anfitrión puede modificar la sala',
+    lbLeaveRoom: 'Salir de la sala',
+    lbRoomHost: 'Anfitrión',
+    lbJoinedRoomCode: 'CÓDIGO DE LA SALA UNIDA',
+    lbMaxSeats: 'Asientos máximos',
+    lbRoomSettingsHost: 'Ajustes de la sala (solo anfitrión)',
+    lbSeats: 'asientos',
+    lbShareCode: (c) => `Comparte el código ${c} con amigos en otros dispositivos para que lo introduzcan en "Unirse con Código" y jugar en vivo.`,
+    lbSyncedFromHost: 'La lista de participantes y las reglas se sincronizan en vivo desde el anfitrión.',
+    lbConnectTimeout: 'No se pudo conectar con el servidor de salas en línea tras 10 s. Inténtalo de nuevo.',
+    lbRetry: 'Reintentar',
+    lbYou: 'Tú',
+    lbPhaseTimers: 'Tiempo por fase:',
+    lbTimerFast: 'Rápido',
+    lbTimerStandard: 'Estándar',
+    lbTimerRelaxed: 'Relajado',
+    lbTimerNight: 'Noche:',
+    lbTimerDebate: 'Debate:',
+    lbTimerVote: 'Votación:',
+    lbStarting: 'Iniciando la partida...',
+    lbSyncingRoom: 'Sincronizando la sala con el servidor...',
+    lbNoPhysicalDeck: 'Sin baraja física (virtual)',
+    lbNoPhysicalDeckDesc: 'La app reparte roles equilibrados. Los jugadores entran con el código y ven SOLO su propio rol.',
+    lbHavePhysicalDeck: 'Tengo baraja física',
+    lbHavePhysicalDeckDesc: 'Los jugadores introducen la carta que robaron antes de la partida, o el Narrador la introduce por ellos.',
+    lbCompanionTitle: 'Modo acompañante presencial (totalmente aislado de las partidas 3D en línea/bots):',
+    lbCompanionStep1: (c) => `1. El Narrador abre la sala ${c} para llevar las noches, pociones, enamorados y la furia del lobezno.`,
+    lbCompanionStep2: (c) => `2. Los jugadores introducen ${c} en "Unirse con Código" para ver SOLO su rol secreto o introducir su carta física.`,
+    lbOpenOnlineRooms: 'Salas en línea abiertas en el servidor:',
+    lbRefresh: 'Actualizar',
+    lbNoOpenRooms: 'Aún no hay salas abiertas. ¡Crea una o introduce el código de un amigo!',
+    lbInMatch: 'En partida',
+    lbJoin: 'Unirse',
+    lbOpenGMRooms: 'Salas de Narrador activas:',
+    lbNoGMRooms: 'Aún no hay salas de Narrador activas. ¡Crea una o introduce el código de tu Narrador!',
+    lbPhysical: '🎴 Física',
+    lbVirtual: '🃏 Virtual',
+    lbJoining: 'Entrando a la sala...',
+    lbChecking: 'Comprobando la sala...',
     startOnlineMatchBtn: (c, code) => `INICIAR PARTIDA 3D (${c} JUGADORES · ${code})`,
     minPlayersWarning: (c) =>
       `⚠️ Se necesitan mínimo 4 jugadores (actualmente ${c}). ¡Añade amigos o pulsa "+1 Bot IA"!`,
@@ -1708,6 +1972,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostFlightBanner:
       '👻 Modo Fantasma · Vuelo libre WASD · Espacio Subir / Shift Bajar · Arrastrar 360° · 🔒 Chat de Aldea y Mic bloqueados · Chat Fantasma abierto',
     winDraw: '¡EMPATE — SIN SUPERVIVIENTES!',
+    autoGmSenderName: '🤖 Narrador Auto',
     waitingHostRematch: '⏳ Esperando al anfitrión para nueva partida...',
     deadChatLockedBanner: '👻 Eres Fantasma — ¡El chat principal está bloqueado!',
     openGhostRealmBtn: 'Abrir Canal Fantasma',
@@ -1722,7 +1987,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostNightSpectatorTitle: '👻 Modo Fantasma Omnisciente — Testigo de la Noche',
     skipCutsceneBtn: 'Omitir ⏭',
     ghostFastForwardStep: 'Avanzar ⏭',
-    ghostNoLivingActor: '💀 Este rol cayó / nadie despierta',
+    ghostNoLivingActor: '💤 Nadie actúa con este rol esta noche (caído o sin poder)',
     ghostWatchingAction: 'Observando acción:',
   },
   ja: {
@@ -1777,6 +2042,8 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     roomBadge: (id) => `部屋 ${id}`,
     aiPracticeBadge: 'AI対戦',
     skipNightBtn: '夜をスキップ',
+    hunterNoMarkBtn: '照準なし',
+    hunterNoMarkStatus: '照準なし（発砲しません）',
     goToVoteBtn: '投票へ進む',
     confirmVoteBtn: '投票を確定',
     wolvesAlive: '生存人狼',
@@ -1891,6 +2158,56 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     botRoleLabel: '🤖 AIボット',
     humanRoleLabel: '👤 プレイヤー',
     preferredRoleLobby: '希望の役職:',
+    lbWaitingHostStart: 'ホストが試合を開始するのを待っています...',
+    lbEnterCodeOnline: '有効なルームコードを入力してください（例: ONL-4821）',
+    lbEnterCodeGM: '有効なGMルームコードを入力してください（例: GM-4821）',
+    lbGMToolShort: '2. GMツール',
+    lbGMRoomNotFound: (c) => `GMルーム「${c}」が見つかりません。ゲームマスターにコードを確認してください。`,
+    lbGMUnreachable: 'GMサーバーに接続できませんでした。もう一度お試しください。',
+    lbJoinTimeout: (c) => `ルーム「${c}」への接続がタイムアウトしました（10秒）。もう一度お試しください。`,
+    lbLiveServer: 'ライブサーバー',
+    lbConnecting: '接続中...',
+    lbSyncWs: '⚡ リアルタイム同期（WebSocket・サーバー権威）',
+    lbSyncHttp: '☁️ クラウド同期（HTTP・サーバー権威）',
+    lbGuestReadonly: 'ゲスト・ルーム設定を変更できるのはホストのみ',
+    lbLeaveRoom: '退室',
+    lbRoomHost: 'ホスト',
+    lbJoinedRoomCode: '参加中のルームコード',
+    lbMaxSeats: '最大席数',
+    lbRoomSettingsHost: 'ルーム設定（ホストのみ）',
+    lbSeats: '席',
+    lbShareCode: (c) => `コード ${c} を別の端末の友達に共有し、「部屋コードで参加」に入力してもらうとリアルタイムで一緒に遊べます。`,
+    lbSyncedFromHost: '参加者リストとルール設定はホストからリアルタイムで同期されます。',
+    lbConnectTimeout: '10秒以内にオンラインルームサーバーに接続できませんでした。もう一度お試しください。',
+    lbRetry: '再試行',
+    lbYou: 'あなた',
+    lbPhaseTimers: 'フェーズ時間:',
+    lbTimerFast: '速い',
+    lbTimerStandard: '標準',
+    lbTimerRelaxed: 'ゆったり',
+    lbTimerNight: '夜:',
+    lbTimerDebate: '議論:',
+    lbTimerVote: '投票:',
+    lbStarting: '試合を開始中...',
+    lbSyncingRoom: 'サーバーとルームを同期中...',
+    lbNoPhysicalDeck: '実物のカードなし（バーチャル）',
+    lbNoPhysicalDeckDesc: 'アプリが役職を自動配布します。参加者はルームコードで入室し、自分の役職だけが見えます。',
+    lbHavePhysicalDeck: '実物のカードあり',
+    lbHavePhysicalDeckDesc: 'プレイヤーは開始前に引いたカードを自分で入力するか、GMが代わりに入力します。',
+    lbCompanionTitle: '対面プレイ補助モード（3Dオンライン/ボット対戦とは完全に独立）:',
+    lbCompanionStep1: (c) => `1. GMがルーム ${c} を開き、夜の進行・薬・恋人・子狼の狂乱を管理します。`,
+    lbCompanionStep2: (c) => `2. 参加者は「部屋コードで参加」に ${c} を入力し、自分の秘密の役職だけを確認するか、実物のカードを入力します。`,
+    lbOpenOnlineRooms: 'サーバー上の公開オンラインルーム:',
+    lbRefresh: '更新',
+    lbNoOpenRooms: '公開中のルームはまだありません。新しく作成するか、友達のコードを入力しましょう！',
+    lbInMatch: '対戦中',
+    lbJoin: '参加',
+    lbOpenGMRooms: '公開中のGMルーム:',
+    lbNoGMRooms: '公開中のGMルームはまだありません。作成するか、GMのコードを入力しましょう！',
+    lbPhysical: '🎴 実物',
+    lbVirtual: '🃏 バーチャル',
+    lbJoining: '入室中...',
+    lbChecking: 'ルームを確認中...',
     startOnlineMatchBtn: (c, code) => `3Dオンライン対戦開始 (${c}人 · ${code})`,
     minPlayersWarning: (c) =>
       `⚠️ 開始には最低4人のプレイヤーが必要です (現在${c}人)。友達を追加するか「+1 AIボット」を押してください！`,
@@ -2062,6 +2379,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostFlightBanner:
       '👻 幽霊モード・WASD自由飛行・Space上昇/Shift下降・ドラッグで360°視点・🔒 村チャット＆マイク無効・霊界チャット解放',
     winDraw: '引き分け — 生存者なし！',
+    autoGmSenderName: '🤖 自動GM',
     waitingHostRematch: '⏳ ホストが次の試合を開始するのを待機中...',
     deadChatLockedBanner: '👻 幽霊状態です — 不正防止のため村チャットはロックされています',
     openGhostRealmBtn: '霊界チャットへ',
@@ -2076,7 +2394,7 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostNightSpectatorTitle: '👻 全知の幽霊モード — 夜の行動を観戦中',
     skipCutsceneBtn: 'スキップ ⏭',
     ghostFastForwardStep: '早送り ⏭',
-    ghostNoLivingActor: '💀 この役職は脱落 / 生存者なし',
+    ghostNoLivingActor: '💤 今夜この役職で動く人はいません（脱落または能力使用済み）',
     ghostWatchingAction: '現在の行動:',
   },
 };

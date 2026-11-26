@@ -15,7 +15,6 @@ import {
   fisherYatesShuffle,
   generateBalancedRoster,
   getDyingWolfVictimsForWitch,
-  resolveHunterShot,
   resolveNightActions,
   tallyVotes,
 } from './rules.ts';
@@ -260,9 +259,9 @@ test('[Auto-GM Agent] Sequential night call schedule, strict role wake rules, bo
 });
 
 test('[All 13 Roles Wake Guidance] Verifies getHumanRoleWakeGuidance across all 13 roles on Night 1 and Night 2', () => {
-  const wakingEveryNight: RoleId[] = ['werewolf', 'wolf_pup', 'witch', 'seer', 'bodyguard'];
+  const wakingEveryNight: RoleId[] = ['werewolf', 'wolf_pup', 'witch', 'seer', 'bodyguard', 'hunter'];
   const wakingNight1Only: RoleId[] = ['cupid', 'doppelganger'];
-  const passiveNightRoles: RoleId[] = ['villager', 'hunter', 'tanner', 'elder', 'cursed', 'traitor'];
+  const passiveNightRoles: RoleId[] = ['villager', 'tanner', 'elder', 'cursed', 'traitor'];
 
   for (const r of wakingEveryNight) {
     const p: Player = { id: 'p', name: 'Tester', avatar: '🐺', roleId: r, isAlive: true };
@@ -328,7 +327,6 @@ test('[Human Turn Protection] prepareNightStartForHuman, shouldAutoAdvanceOnTime
       isPlayerAwakeAtNight: true,
       isHumanAlive: true,
       hasHumanVoted: false,
-      isHumanHunterRevenge: false,
     }),
     false,
     'Must NEVER auto-advance when human player is awake on their night turn'
@@ -342,7 +340,6 @@ test('[Human Turn Protection] prepareNightStartForHuman, shouldAutoAdvanceOnTime
       isPlayerAwakeAtNight: false,
       isHumanAlive: true,
       hasHumanVoted: false,
-      isHumanHunterRevenge: false,
     }),
     true,
     'Day voting MUST auto-advance at 0s with abstain instead of hanging forever (BUG-15)'
@@ -456,13 +453,7 @@ test('[Authentic AI GM Announcements] Dawn/Dusk briefings announce casualties cl
     beforePlayers,
     afterPlayers: afterMultiDeath,
     nightKilledIds: ['b3'],
-    hunterShotEvent: {
-      hunterName: 'Minh Hoàng',
-      hunterSeat: 4,
-      targetId: 'b5',
-      targetName: 'Tuấn Kiệt',
-      targetSeat: 6,
-    },
+    hunterShots: [{ hunterId: 'b3', targetId: 'b5' }],
     humanPlayerId: 'u1',
     lang: 'vi',
   });
@@ -550,7 +541,6 @@ test('[Authentic AI GM Announcements] Dawn/Dusk briefings announce casualties cl
       isPlayerAwakeAtNight: false,
       isHumanAlive: true,
       hasHumanVoted: false,
-      isHumanHunterRevenge: false,
       hasActiveGMAnnouncement: true,
     }),
     false,
@@ -577,15 +567,7 @@ test('[Zero-Leak Cupid & Death Cause Hiding] Night and Dusk announcements never 
     beforePlayers,
     afterPlayers: afterDawn,
     nightKilledIds: ['b2'],
-    hunterShotEvent: {
-      hunterName: 'Thảo My',
-      hunterSeat: 3,
-      targetId: 'b5',
-      targetName: 'Tuấn Kiệt',
-      targetSeat: 6,
-      extraLoverName: 'Minh Hoàng',
-      extraLoverSeat: 4,
-    },
+    hunterShots: [{ hunterId: 'b2', targetId: 'b5' }],
     humanPlayerId: 'u1',
     lang: 'vi',
   });
@@ -846,7 +828,10 @@ test('[Zero-Leak Night Kill Short Film & Dawn Hunter] End-of-night cinematic act
   const rosterWithHunter: Player[] = baseRoster.map((p) =>
     p.id === 'b_vil' ? { ...p, roleId: 'hunter' } : { ...p }
   );
-  const wolfBitesHunter = resolveNightActions(rosterWithHunter, { wolfTargetId: 'b_vil' });
+  const wolfBitesHunter = resolveNightActions(rosterWithHunter, {
+    wolfTargetId: 'b_vil',
+    hunterTargetId: 'u_wolf',
+  });
   const afterHunterRevenge = wolfBitesHunter.updatedPlayers.map((p) =>
     p.id === 'u_wolf' ? { ...p, isAlive: false } : { ...p }
   );
@@ -855,14 +840,6 @@ test('[Zero-Leak Night Kill Short Film & Dawn Hunter] End-of-night cinematic act
     beforePlayers: rosterWithHunter,
     afterPlayers: afterHunterRevenge,
     nightResult: wolfBitesHunter.result,
-    hunterShotEvent: {
-      hunterId: 'b_vil',
-      hunterName: 'Tuấn Kiệt',
-      hunterSeat: 6,
-      targetId: 'u_wolf',
-      targetName: 'Sói Đầu Đàn',
-      targetSeat: 1,
-    },
     lang: 'vi',
   });
   assert.ok(shotWolfCinematic !== null);
@@ -885,13 +862,7 @@ test('[Zero-Leak Night Kill Short Film & Dawn Hunter] End-of-night cinematic act
       beforePlayers: baseRoster,
       afterPlayers: afterHunterDawn,
       nightKilledIds: ['b_guard'],
-      hunterShotEvent: {
-        hunterName: 'Đức Huy',
-        hunterSeat: 2,
-        targetId: 'b_vil',
-        targetName: 'Tuấn Kiệt',
-        targetSeat: 6,
-      },
+      hunterShots: [{ hunterId: 'b_guard', targetId: 'b_vil' }],
       humanPlayerId: 'u_wolf',
       lang,
     });
@@ -961,10 +932,26 @@ test('[QA Regression] BUG-08: Chained Hunter cascade and pendingDeathCascade win
   );
   assert.equal(guarded.isOver, false);
 
-  // Shooting another Hunter returns triggeredHunterId for chained resolution
-  const shot = resolveHunterShot(players, 'h1', 'h2');
-  assert.equal(shot.triggeredHunterId, 'h2');
-  assert.equal(shot.updatedPlayers.find((p) => p.id === 'h2')?.isAlive, false);
+  // Night-Aim: a lynched Hunter's mark on another Hunter chains into that Hunter's own mark
+  const chained = applyDayLynch(
+    players.map((p) =>
+      p.id === 'h1'
+        ? { ...p, isAlive: true, hunterMarkId: 'h2' }
+        : p.id === 'h2'
+        ? { ...p, hunterMarkId: 'v1' }
+        : p
+    ),
+    'h1'
+  );
+  assert.deepEqual(
+    chained.hunterShots,
+    [
+      { hunterId: 'h1', targetId: 'h2' },
+      { hunterId: 'h2', targetId: 'v1' },
+    ]
+  );
+  assert.equal(chained.updatedPlayers.find((p) => p.id === 'h2')?.isAlive, false);
+  assert.equal(chained.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, false);
 });
 
 test('[QA Regression] BUG-10: computeFactionAliveCounts separates Wolves, Villagers, and Third-Party (Tanner/Traitor)', () => {
@@ -1068,24 +1055,24 @@ test('[P1-1] Elder Lynch Power-Seal prevents sealed Villager roles from waking a
   assert.equal(dpAfterLynch.hasUsedHeal, true);
   assert.equal(dpAfterLynch.hasUsedPoison, true);
 
-  // Hunter shot inheritance under elderSealActive seals villager Hunter, does NOT seal Werewolf
+  // Hunter-mark kill under elderSealActive: Doppelgänger inheriting a Hunter is sealed, but NOT when inheriting a Werewolf
   const shotRoster: Player[] = [
-    { id: 'h1', name: 'Thợ Săn 1', avatar: '🎯', roleId: 'hunter', isAlive: false },
+    { id: 'h1', name: 'Thợ Săn 1', avatar: '🎯', roleId: 'hunter', isAlive: true, hunterMarkId: 'h2' },
     { id: 'h2', name: 'Thợ Săn 2', avatar: '🎯', roleId: 'hunter', isAlive: true, hasUsedPower: true },
     { id: 'dp', name: 'Nhân Bản', avatar: '🎭', roleId: 'doppelganger', isAlive: true, targetPlayerId: 'h2', targetRoleId: 'hunter' },
     { id: 'wf', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
   ];
-  const shotOut = resolveHunterShot(shotRoster, 'h1', 'h2', { elderSealActive: true });
+  const shotOut = applyDayLynch(shotRoster, 'h1', { elderSealActive: true });
   const dpAfterShot = shotOut.updatedPlayers.find((p) => p.id === 'dp')!;
   assert.equal(dpAfterShot.roleId, 'hunter');
   assert.equal(dpAfterShot.hasUsedPower, true);
 
   const wolfDoppelRoster: Player[] = [
-    { id: 'h1', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: false },
+    { id: 'h1', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: true, hunterMarkId: 'wf' },
     { id: 'wf', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
     { id: 'dp', name: 'Nhân Bản', avatar: '🎭', roleId: 'doppelganger', isAlive: true, targetPlayerId: 'wf', targetRoleId: 'werewolf' },
   ];
-  const wolfShot = resolveHunterShot(wolfDoppelRoster, 'h1', 'wf', { elderSealActive: true });
+  const wolfShot = applyDayLynch(wolfDoppelRoster, 'h1', { elderSealActive: true });
   const dpWolf = wolfShot.updatedPlayers.find((p) => p.id === 'dp')!;
   assert.equal(dpWolf.roleId, 'werewolf');
   assert.notEqual(dpWolf.hasUsedPower, true, 'Werewolf inheritance must NOT be sealed by Elder penalty');
@@ -1147,7 +1134,7 @@ test('[P1-3] getDyingWolfVictimsForWitch handles Wolf Pup frenzy 2nd victim clea
   assert.equal(botWitchSelfAct.witchHealTargetId, 'wt', 'Bot Witch must heal herself when she is Victim #2');
 });
 
-test('[P1-9 & P3-7] Multi-Hunter cascade preserves all triggeredHunterIds and cross-faction Lovers prevent premature Werewolf win', () => {
+test('[P1-9 & P3-7] Multi-Hunter Lover cascade fires each marked bullet and cross-faction Lovers prevent premature Werewolf win', () => {
   // Multi-Hunter night cascade (Hunter 1 & Hunter 2 are Lovers)
   const nightHunters: Player[] = [
     { id: 'w1', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
@@ -1155,23 +1142,20 @@ test('[P1-9 & P3-7] Multi-Hunter cascade preserves all triggeredHunterIds and cr
     { id: 'h2', name: 'Thợ Săn 2', avatar: '🎯', roleId: 'hunter', isAlive: true, loverId: 'h1' },
     { id: 'v1', name: 'Dân', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
   ];
-  const nightRes = resolveNightActions(nightHunters, { wolfTargetId: 'h1' });
-  assert.equal(nightRes.result.triggeredHunterId, 'h1');
-  assert.deepEqual(nightRes.result.triggeredHunterIds, ['h1', 'h2']);
+  // h1 marks the villager, h2 marks the wolf; wolves bite h1 -> lover h2 dies too -> BOTH bullets fire
+  const nightRes = resolveNightActions(nightHunters, { wolfTargetId: 'h1', hunterTargetId: 'v1' });
+  assert.deepEqual(nightRes.result.killedPlayerIds.sort(), ['h1', 'h2', 'v1']);
+  assert.equal(nightRes.result.hunterShots.length, 1, 'Only the first living Hunter received the mark action');
 
-  // Multi-Hunter day lynch cascade
-  const dayRes = applyDayLynch(nightHunters, 'h1');
-  assert.equal(dayRes.triggeredHunterId, 'h1');
-  assert.deepEqual(dayRes.triggeredHunterIds, ['h1', 'h2']);
-
-  // Multi-Hunter shot cascade (h0 shoots h1 whose Lover is h2)
-  const shotHunters: Player[] = [
-    { id: 'h0', name: 'Thợ Săn 0', avatar: '🎯', roleId: 'hunter', isAlive: false },
-    ...nightHunters,
-  ];
-  const shotRes = resolveHunterShot(shotHunters, 'h0', 'h1');
-  assert.equal(shotRes.triggeredHunterId, 'h1');
-  assert.deepEqual(shotRes.triggeredHunterIds, ['h1', 'h2']);
+  // Multi-Hunter day lynch cascade with stored marks on both Hunters
+  const markedHunters = nightHunters.map((p) =>
+    p.id === 'h1' ? { ...p, hunterMarkId: 'v1' } : p.id === 'h2' ? { ...p, hunterMarkId: 'w1' } : p
+  );
+  const dayRes = applyDayLynch(markedHunters, 'h1');
+  assert.deepEqual(
+    dayRes.hunterShots.map((s) => s.hunterId).sort(),
+    ['h1', 'h2']
+  );
 
   // P3-7: 3 alive = Wolf A + Villager B (Lovers) + Wolf C -> MUST NOT end as Werewolves win!
   const threeAliveCrossLovers: Player[] = [
@@ -1362,4 +1346,191 @@ test('[P1-11 & P2-12] Fair Bot AI: non-cheating Witch Poison, non-omniscient Tra
   // If only Lover is alive, falls back to Lover cleanly
   const onlyLoverAlive = hunterPool.map((p) => (p.id === 'b2' ? p : { ...p, isAlive: false }));
   assert.equal(pickSmartBotHunterTarget(onlyLoverAlive, hunter)?.id, 'b2');
+});
+
+// ---------------------------------------------------------------------------
+// Night-Aim Hunter ("Ghim Đạn Ban Đêm"): mark at night, auto-fire on death (pierces Guard & Heal)
+// ---------------------------------------------------------------------------
+const nightAimRoster = (): Player[] => [
+  { id: 'wf', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
+  { id: 'hn', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: true },
+  { id: 'wi', name: 'Phù Thủy', avatar: '🧪', roleId: 'witch', isAlive: true },
+  { id: 'bg', name: 'Bảo Vệ', avatar: '🛡️', roleId: 'bodyguard', isAlive: true },
+  { id: 'v1', name: 'Dân 1', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+  { id: 'v2', name: 'Dân 2', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+];
+
+test('[Night-Aim 1] Hunter bitten at night shoots the marked target even if that target is shielded by the Bodyguard', () => {
+  const { updatedPlayers, result } = resolveNightActions(nightAimRoster(), {
+    wolfTargetId: 'hn',
+    hunterTargetId: 'v1',
+    guardTargetId: 'v1',
+  });
+  assert.equal(updatedPlayers.find((p) => p.id === 'hn')?.isAlive, false);
+  assert.equal(updatedPlayers.find((p) => p.id === 'v1')?.isAlive, false, 'Shield must NOT stop the Hunter bullet');
+  assert.deepEqual(result.hunterShots, [{ hunterId: 'hn', targetId: 'v1' }]);
+  assert.equal(result.killedDetails?.find((d) => d.playerId === 'v1')?.causeType, 'hunter_shot');
+});
+
+test('[Night-Aim 2] Witch Heal saves the Hunter from the bite but a dead Hunter\'s bullet cannot be healed away', () => {
+  // Hunter bitten and Witch heals the Hunter -> Hunter lives, no shot
+  const healed = resolveNightActions(nightAimRoster(), {
+    wolfTargetId: 'hn',
+    hunterTargetId: 'v1',
+    witchHealTargetId: 'hn',
+  });
+  assert.equal(healed.updatedPlayers.find((p) => p.id === 'hn')?.isAlive, true);
+  assert.equal(healed.result.hunterShots.length, 0);
+
+  // Hunter killed by poison while the mark target is also "healed" in the same night -> mark still dies
+  const poisoned = resolveNightActions(nightAimRoster(), {
+    wolfTargetId: 'v1',
+    hunterTargetId: 'v1',
+    witchHealTargetId: 'v1',
+    witchPoisonTargetId: 'hn',
+  });
+  assert.equal(poisoned.updatedPlayers.find((p) => p.id === 'hn')?.isAlive, false);
+  assert.equal(poisoned.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, false, 'Heal must NOT cancel the Hunter bullet');
+});
+
+test('[Night-Aim 3] "Không ghim" (hunterTargetId null) means a dying Hunter fires nothing', () => {
+  const { updatedPlayers, result } = resolveNightActions(nightAimRoster(), {
+    wolfTargetId: 'hn',
+    hunterTargetId: null,
+  });
+  assert.equal(updatedPlayers.find((p) => p.id === 'hn')?.isAlive, false);
+  assert.equal(result.hunterShots.length, 0);
+  assert.equal(updatedPlayers.filter((p) => !p.isAlive).length, 1);
+});
+
+test('[Night-Aim 4] A mark that is already dead (or the Hunter itself) never fires', () => {
+  const roster = nightAimRoster().map((p) => (p.id === 'v2' ? { ...p, isAlive: false } : p));
+  const deadMark = resolveNightActions(roster, { wolfTargetId: 'hn', hunterTargetId: 'v2' });
+  assert.equal(deadMark.result.hunterShots.length, 0);
+  const selfMark = resolveNightActions(nightAimRoster(), { wolfTargetId: 'hn', hunterTargetId: 'hn' });
+  assert.equal(selfMark.result.hunterShots.length, 0);
+  assert.equal(selfMark.updatedPlayers.find((p) => p.id === 'hn')?.hunterMarkId, undefined);
+});
+
+test('[Night-Aim 5] Lynching the Hunter auto-fires the bullet marked the previous night', () => {
+  const night = resolveNightActions(nightAimRoster(), { hunterTargetId: 'wf' });
+  assert.equal(night.updatedPlayers.find((p) => p.id === 'hn')?.hunterMarkId, 'wf');
+  const lynch = applyDayLynch(night.updatedPlayers, 'hn');
+  assert.deepEqual(lynch.hunterShots, [{ hunterId: 'hn', targetId: 'wf' }]);
+  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'wf')?.isAlive, false);
+  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'hn')?.hasUsedPower, true);
+
+  // A later night overwrites the old mark; "Không ghim" clears it
+  const reMark = resolveNightActions(night.updatedPlayers, { hunterTargetId: 'v1' });
+  assert.equal(reMark.updatedPlayers.find((p) => p.id === 'hn')?.hunterMarkId, 'v1');
+  const cleared = resolveNightActions(reMark.updatedPlayers, { hunterTargetId: null });
+  assert.equal(cleared.updatedPlayers.find((p) => p.id === 'hn')?.hunterMarkId, undefined);
+  assert.equal(applyDayLynch(cleared.updatedPlayers, 'hn').hunterShots.length, 0);
+});
+
+test('[Night-Aim 6] Lynching the Elder seals the Hunter: no mark is fired', () => {
+  const roster: Player[] = [
+    ...nightAimRoster().map((p) => (p.id === 'hn' ? { ...p, hunterMarkId: 'wf' } : p)),
+    { id: 'el', name: 'Già Làng', avatar: '👑', roleId: 'elder', isAlive: true, elderLives: 2 },
+  ];
+  const lynchElder = applyDayLynch(roster, 'el');
+  assert.equal(lynchElder.elderLynchedPenalty, true);
+  assert.equal(lynchElder.updatedPlayers.find((p) => p.id === 'hn')?.hunterMarkId, undefined);
+  assert.equal(lynchElder.updatedPlayers.find((p) => p.id === 'hn')?.hasUsedPower, true);
+  // Even if the sealed Hunter dies later the next day, nothing fires
+  assert.equal(applyDayLynch(lynchElder.updatedPlayers, 'hn', { elderSealActive: true }).hunterShots.length, 0);
+  // And a sealed Hunter's night mark is ignored
+  const sealedNight = resolveNightActions(lynchElder.updatedPlayers, { wolfTargetId: 'hn', hunterTargetId: 'v1' }, { elderSealActive: true });
+  assert.equal(sealedNight.result.hunterShots.length, 0);
+});
+
+test('[Night-Aim 7] The marked target\'s Lover dies with them (cascade) and Doppelgänger inheriting Hunter starts with no stale mark', () => {
+  const roster: Player[] = [
+    { id: 'wf', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
+    { id: 'hn', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: true, hunterMarkId: 'v1' },
+    { id: 'v1', name: 'Dân 1', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, loverId: 'v2' },
+    { id: 'v2', name: 'Dân 2', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, loverId: 'v1' },
+    { id: 'dp', name: 'Nhân Bản', avatar: '🎭', roleId: 'doppelganger', isAlive: true, targetPlayerId: 'hn', targetRoleId: 'hunter', hunterMarkId: 'wf' },
+  ];
+  const lynch = applyDayLynch(roster, 'hn');
+  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, false);
+  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'v2')?.isAlive, false, 'Lover chain must cascade from the bullet');
+  const dp = lynch.updatedPlayers.find((p) => p.id === 'dp')!;
+  assert.equal(dp.roleId, 'hunter');
+  assert.equal(dp.hunterMarkId, undefined, 'Inherited Hunter must not carry a stale mark');
+  assert.notEqual(dp.hasUsedPower, true);
+});
+
+// ---------------------------------------------------------------------------
+// W3 rules hardening: pre-resolution Seer, dead-actor checks, Doppel same-night death, Lover win parity
+// ---------------------------------------------------------------------------
+const w3Player = (id: string, roleId: RoleId, extra: Partial<Player> = {}): Player => ({
+  id, name: id, avatar: '🙂', roleId, isAlive: true, ...extra,
+});
+
+test('[W3-rules 1] Seer reads a Cursed player bitten the same night as a Villager (pre-resolution role)', () => {
+  const { updatedPlayers, result } = resolveNightActions(
+    [w3Player('wf', 'werewolf'), w3Player('sr', 'seer'), w3Player('cu', 'cursed'), w3Player('v1', 'villager')],
+    { wolfTargetId: 'cu', seerTargetId: 'cu' }
+  );
+  assert.equal(result.seerInspection?.roleId, 'cursed');
+  assert.equal(result.seerInspection?.isWerewolf, false);
+  assert.equal(updatedPlayers.find((p) => p.id === 'cu')?.roleId, 'werewolf');
+});
+
+test('[W3-rules 2] Dead Witch cannot poison and dead Bodyguard cannot shield', () => {
+  const poison = resolveNightActions(
+    [w3Player('wf', 'werewolf'), w3Player('wi', 'witch', { isAlive: false }), w3Player('v1', 'villager')],
+    { witchPoisonTargetId: 'v1' }
+  );
+  assert.equal(poison.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, true);
+  const guard = resolveNightActions(
+    [w3Player('wf', 'werewolf'), w3Player('bg', 'bodyguard', { isAlive: false }), w3Player('v1', 'villager')],
+    { wolfTargetId: 'v1', guardTargetId: 'v1' }
+  );
+  assert.equal(guard.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, false);
+});
+
+test('[W3-rules 3] Doppelgänger dying the same night as its model does not inherit the role', () => {
+  const { updatedPlayers } = resolveNightActions(
+    [
+      w3Player('wf', 'werewolf'), w3Player('wi', 'witch'), w3Player('v1', 'villager'),
+      w3Player('dp', 'doppelganger', { targetPlayerId: 'v1', targetRoleId: 'villager' }),
+    ],
+    { wolfTargetId: 'v1', witchPoisonTargetId: 'dp' }
+  );
+  const dp = updatedPlayers.find((p) => p.id === 'dp')!;
+  assert.equal(dp.isAlive, false);
+  assert.equal(dp.roleId, 'doppelganger');
+});
+
+test('[W3-rules 4] Cross-faction Lovers only delay the Wolf win when a biting Wolf is in the pair', () => {
+  const traitorLovers = [
+    w3Player('w1', 'werewolf'), w3Player('w2', 'werewolf'),
+    w3Player('tr', 'traitor', { loverId: 'v1' }), w3Player('v1', 'villager', { loverId: 'tr' }),
+  ];
+  assert.equal(checkWinCondition(traitorLovers).winner, 'werewolves');
+  const wolfLovers = [
+    w3Player('w1', 'werewolf', { loverId: 'v1' }), w3Player('v1', 'villager', { loverId: 'w1' }),
+    w3Player('w2', 'werewolf'),
+  ];
+  assert.equal(checkWinCondition(wolfLovers).isOver, false);
+});
+
+test('[W3-stall] Last night step auto-advances at 0s for a living human who is no longer awake', () => {
+  const base = { shellState: 'playing', phase: 'night', showOnboardingTour: false, isHumanAlive: true, hasHumanVoted: false } as const;
+  assert.equal(shouldAutoAdvanceOnTimerZero({ ...base, isPlayerAwakeAtNight: false }), true);
+  assert.equal(shouldAutoAdvanceOnTimerZero({ ...base, isPlayerAwakeAtNight: true }), false);
+});
+
+test('[W3-mayor] Dusk announcement keeps the voting Mayor even if the Mayor died in the same lynch', () => {
+  const before = [
+    w3Player('m', 'villager', { isMayor: true }), w3Player('a', 'villager'), w3Player('w', 'werewolf'),
+  ];
+  const after = before.map((p) => (p.id === 'm' ? { ...p, isAlive: false } : p));
+  const dusk = buildDuskGMAnnouncement({
+    round: 1, beforePlayers: before, afterPlayers: after, lynchedVictim: before[0],
+    voteCounts: { m: 2 }, votes: [{ voterId: 'a', targetId: 'm' }], isTie: false, humanPlayerId: 'a', lang: 'vi',
+  });
+  assert.equal(dusk.votingMayorId, 'm');
 });

@@ -4,7 +4,6 @@ import {
   resolveNightActions,
   tallyVotes,
   applyDayLynch,
-  resolveHunterShot,
   checkWinCondition,
   getNightCallOrder,
 } from './rules.ts';
@@ -107,12 +106,21 @@ export function simulateCompleteMatch(seed: number, playerCount: number): {
     const cupidLovers: [string, string] | undefined =
       cupid && alive.length >= 2 ? [alive[0].id, alive[1].id] : undefined;
 
+    // Night-Aim Hunter: a living Hunter randomly marks another living player (or holds fire)
+    const hunter = alive.find((p) => p.roleId === 'hunter' && !p.hasUsedPower);
+    const hunterChoices = hunter ? alive.filter((p) => p.id !== hunter.id) : [];
+    const hunterTargetId =
+      hunter && hunterChoices.length > 0 && rng() < 0.85
+        ? hunterChoices[Math.floor(rng() * hunterChoices.length)].id
+        : null;
+
     const nightOut = resolveNightActions(
       players,
       {
         wolfTargetId: wolves.length > 0 ? wolfTarget : undefined,
         secondWolfTargetId: wolves.length > 0 ? secondWolfTarget : undefined,
         guardTargetId: guardTarget,
+        hunterTargetId,
         cupidLovers,
       },
       { roundNumber: round, wolfPupTriggered: wolfPupFrenzy }
@@ -129,21 +137,6 @@ export function simulateCompleteMatch(seed: number, playerCount: number): {
         roundsPlayed: round,
         detail: 'Missing logicExplanations array in NightResult',
       };
-    }
-
-    // If Hunter died at night, fire revenge shot
-    if (nightOut.result.triggeredHunterId) {
-      const aliveTargets = players.filter((p) => p.isAlive);
-      if (aliveTargets.length > 0) {
-        const shotTarget = aliveTargets[Math.floor(rng() * aliveTargets.length)].id;
-        const shotOut = resolveHunterShot(
-          players,
-          nightOut.result.triggeredHunterId,
-          shotTarget
-        );
-        players = shotOut.updatedPlayers;
-        if (shotOut.wolfPupTriggeredNextNight) wolfPupFrenzy = true;
-      }
     }
 
     const winAfterNight = checkWinCondition(players);
@@ -173,21 +166,6 @@ export function simulateCompleteMatch(seed: number, playerCount: number): {
       if (winCheckTanner.isOver && winCheckTanner.winner === 'tanner') {
         winner = 'tanner';
         break;
-      }
-
-      if (lynchOut.triggeredHunterId) {
-        const postLynchAlive = players.filter((p) => p.isAlive);
-        if (postLynchAlive.length > 0) {
-          const shotTarget =
-            postLynchAlive[Math.floor(rng() * postLynchAlive.length)].id;
-          const shotOut = resolveHunterShot(
-            players,
-            lynchOut.triggeredHunterId,
-            shotTarget
-          );
-          players = shotOut.updatedPlayers;
-          if (shotOut.wolfPupTriggeredNextNight) wolfPupFrenzy = true;
-        }
       }
     }
 
@@ -309,7 +287,7 @@ export function buildQA1000TestSuite(): QATestCase[] {
           return {
             passed:
               result.killedPlayerIds.includes('p8') &&
-              result.triggeredHunterId === 'p8' &&
+              result.hunterShots.length === 0 &&
               Boolean(result.killedDetails?.some((d) => d.playerId === 'p8')),
             detail: `Witch poisoned Hunter p8: killed=${result.killedPlayerIds.join(',')}`,
           };
@@ -353,7 +331,7 @@ export function buildQA1000TestSuite(): QATestCase[] {
             passed:
               result.killedPlayerIds.includes('p5') &&
               result.killedPlayerIds.includes('p8') &&
-              result.triggeredHunterId === 'p8',
+              result.hunterShots.length === 0,
             detail: `Lovers chain death: ${result.killedPlayerIds.join(',')}`,
           };
         } else if (mode === 6) {

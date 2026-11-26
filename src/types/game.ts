@@ -52,7 +52,8 @@ export interface Player {
   isMuted?: boolean;
   hasUsedHeal?: boolean; // witch heal potion
   hasUsedPoison?: boolean; // witch poison potion
-  hasUsedPower?: boolean; // hunter shot
+  hasUsedPower?: boolean; // elder seal or spent hunter shot
+  hunterMarkId?: string; // player pre-aimed by Hunter at night
   loverId?: string; // paired by cupid
   protectedLastNight?: boolean;
   elderLives?: number; // starts with 2
@@ -69,6 +70,7 @@ export interface NightActions {
   wolfTargetId?: string | null;
   secondWolfTargetId?: string | null; // when wolf pup frenzy is active
   guardTargetId?: string | null;
+  hunterTargetId?: string | null; // optional Night-Aim Hunter mark (null = Không ghim)
   seerTargetId?: string | null;
   witchHealTargetId?: string | null;
   witchPoisonTargetId?: string | null;
@@ -119,6 +121,11 @@ export interface NightLogicStep {
   category: 'death' | 'saved' | 'special' | 'info';
 }
 
+export interface HunterShotRecord {
+  hunterId: string;
+  targetId: string;
+}
+
 export interface NightResult {
   killedPlayerIds: string[];
   savedPlayerIds: string[];
@@ -126,7 +133,7 @@ export interface NightResult {
   loversLinked?: [string, string] | null;
   wolfPupTriggeredNextNight?: boolean;
   elderAttacked?: boolean;
-  triggeredHunterId?: string | null;
+  hunterShots?: HunterShotRecord[];
   summary: string[];
   killedDetails?: NightVictimDetail[];
   logicExplanations?: NightLogicStep[];

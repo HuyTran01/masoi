@@ -601,28 +601,6 @@ export function getContextualInteractionPrompt(params: {
 
   if (!target) return null;
 
-  // Dying Hunter firing their revenge shot is already dead (isAlive=false), so check before Ghost block
-  if (phase === 'hunter_revenge' && me.roleId === 'hunter' && !me.hasUsedPower) {
-    if (!target.isAlive) {
-      return {
-        icon: '🪦',
-        actionLabel: isVi ? `${target.name} đã tử vong` : `${target.name} is eliminated`,
-        targetName: target.name,
-        detail: isVi ? 'Không thể chọn mục tiêu đã chết' : 'Cannot target eliminated players',
-        canInteract: false,
-        tone: 'blocked',
-      };
-    }
-    return {
-      icon: '🏹',
-      actionLabel: isVi ? `Bắn kéo theo ${target.name}` : `Shoot & drag down ${target.name}`,
-      targetName: target.name,
-      detail: isVi ? 'Nhấn [E] hoặc Click để khai hỏa' : 'Press [E] or Click to fire revenge shot',
-      canInteract: true,
-      tone: 'night',
-    };
-  }
-
   if (!me.isAlive) {
     return {
       icon: '👻',
@@ -675,20 +653,29 @@ export function getContextualInteractionPrompt(params: {
     };
   }
 
-  if (phase === 'hunter_revenge') {
-    return {
-      icon: '👀',
-      actionLabel: isVi ? `Theo dõi ${target.name}` : `Watch ${target.name}`,
-      targetName: target.name,
-      detail: isVi ? 'Đang chờ Thợ Săn chọn mục tiêu' : 'Waiting for Hunter to fire',
-      canInteract: false,
-      tone: 'info',
-    };
-  }
-
   if (phase === 'night') {
     if (!isPlayerAwakeAtNight) {
       return null;
+    }
+    if (currentNightStep === 'hunter') {
+      if (target.id === me.id) {
+        return {
+          icon: '🎯',
+          actionLabel: isVi ? 'Không thể tự ghim chính mình' : 'Cannot mark yourself',
+          targetName: target.name,
+          detail: isVi ? 'Chọn người khác hoặc bấm Không ghim' : 'Pick another player or choose No Mark',
+          canInteract: false,
+          tone: 'blocked',
+        };
+      }
+      return {
+        icon: '🎯',
+        actionLabel: isVi ? `Ghim đạn vào ${target.name}` : `Mark ${target.name} with Hunter bullet`,
+        targetName: target.name,
+        detail: isVi ? 'Nhấn [E] hoặc Click để ghim (kéo theo nếu bạn chết)' : 'Press [E] or Click to mark target',
+        canInteract: true,
+        tone: 'night',
+      };
     }
     if (currentNightStep === 'werewolf') {
       return {

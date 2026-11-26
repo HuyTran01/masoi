@@ -1,4 +1,5 @@
 import {
+  HunterShotRecord,
   Language,
   NightActions,
   NightDeathCinematicState,
@@ -26,10 +27,11 @@ import {
 export type NightStepKey =
   | 'doppelganger'
   | 'cupid'
+  | 'bodyguard'
+  | 'hunter'
   | 'werewolf'
   | 'witch'
-  | 'seer'
-  | 'bodyguard';
+  | 'seer';
 
 export interface CustomTimerConfig {
   nightActionSec: number; // Human turn duration at night (default 20s, range 5..120s)
@@ -142,6 +144,30 @@ const STEP_TRANSLATIONS: Record<
       ja: '人狼の襲撃から守るプレイヤーを1人選んでください（昨夜守った人は選べません）。',
     },
   },
+  hunter: {
+    roleId: 'hunter',
+    title: {
+      vi: 'Thợ Săn Ghim Đạn',
+      en: 'Hunter Night Aim',
+      fr: 'Visée du Chasseur',
+      es: 'Mira del Cazador',
+      ja: '狩人の照準',
+    },
+    gmNarration: {
+      vi: '🤖 Quản Trò Máy: "Thợ Săn thức dậy! Hãy chọn ghim đạn vào 1 người chơi (hoặc chọn Không ghim)."',
+      en: '🤖 Auto-GM: "Hunter, wake up! Mark 1 player with your bullet (or choose No Mark)."',
+      fr: '🤖 MJ Auto : « Le Chasseur se réveille ! Désignez 1 cible (ou Aucune cible). »',
+      es: '🤖 Narrador Auto: "¡Cazador, despierta! Marca a 1 jugador con tu bala (o elige Sin marca)."',
+      ja: '🤖 自動GM：「狩人は目覚めて、照準を定める人を1人選ぶか『照準なし』を選択してください。」',
+    },
+    playerInstruction: {
+      vi: 'Chọn 1 người chơi khác để ghim đạn (tự động bắn kéo theo nếu bạn chết đêm nay hoặc bị treo cổ), hoặc bấm Không ghim.',
+      en: 'Mark 1 player (auto-fires if you die tonight or are lynched tomorrow), or choose No Mark.',
+      fr: 'Ciblez 1 joueur pour votre tir réflexe si vous mourez cette nuit ou êtes exécuté demain, ou choisissez Aucune cible.',
+      es: 'Marca a 1 jugador para dispararle automáticamente si mueres esta noche o mañana, o elige Sin marca.',
+      ja: '他プレイヤーを1人照準に指定するか（死亡・処刑時に自動発砲）、照準なしを選んでください。',
+    },
+  },
   werewolf: {
     roleId: 'werewolf',
     title: {
@@ -152,11 +178,11 @@ const STEP_TRANSLATIONS: Record<
       ja: '人狼の襲撃',
     },
     gmNarration: {
-      vi: '🤖 Quản Trò Máy: "Bảo Vệ đi ngủ. Đàn Ma Sói thức dậy! Nhận diện đồng đội và thống nhất chọn con mồi đêm nay."',
-      en: '🤖 Auto-GM: "Bodyguard sleeps. Werewolves, wake up! Recognize your pack and choose tonight’s victim."',
-      fr: '🤖 MJ Auto : « Le Salvateur s’endort. Les Loups-Garous se réveillent ! Choisissez votre victime de la nuit. »',
-      es: '🤖 Narrador Auto: "El Guardaespaldas duerme. ¡Hombres Lobo, despertad! Elegid a vuestra presa de esta noche."',
-      ja: '🤖 自動GM：「騎士は眠り、人狼は目覚めて今夜襲撃する獲物を1人選んでください。」',
+      vi: '🤖 Quản Trò Máy: "Đàn Ma Sói thức dậy! Nhận diện đồng đội và thống nhất chọn con mồi đêm nay."',
+      en: '🤖 Auto-GM: "Werewolves, wake up! Recognize your pack and choose tonight’s victim."',
+      fr: '🤖 MJ Auto : « Les Loups-Garous se réveillent ! Reconnaissez votre meute et choisissez votre victime. »',
+      es: '🤖 Narrador Auto: "¡Hombres Lobo, despertad! Reconoced a la manada y elegid a vuestra presa."',
+      ja: '🤖 自動GM：「人狼は目覚めて、仲間を確認し今夜襲撃する獲物を1人選んでください。」',
     },
     playerInstruction: {
       vi: 'Chọn nạn nhân để cắn đêm nay (nếu Sói Con chết đêm trước, đàn Sói được chọn 2 nạn nhân!).',
@@ -176,7 +202,7 @@ const STEP_TRANSLATIONS: Record<
       ja: '魔女の秘薬',
     },
     gmNarration: {
-      vi: '🤖 Quản Trò Máy: "Ma Sói đi ngủ. Phù Thủy thức dậy! Đêm nay có người bị cắn, bạn có cứu hay đầu độc ai không?"',
+      vi: '🤖 Quản Trò Máy: "Ma Sói đi ngủ. Phù Thủy thức dậy! Bạn có dùng Bình Cứu hay Bình Độc đêm nay không?"',
       en: '🤖 Auto-GM: "Werewolves sleep. Witch, wake up! Will you use your Heal or Poison potion tonight?"',
       fr: '🤖 MJ Auto : « La Sorcière se réveille ! Voulez-vous utiliser votre potion de soin ou de poison ? »',
       es: '🤖 Narrador Auto: "¡Bruja, despierta! ¿Usarás tu poción de cura o de veneno esta noche?"',
@@ -244,6 +270,8 @@ export function isPlayerAwakeForNightStep(
       return round === 1 && player.roleId === 'cupid';
     case 'bodyguard':
       return player.roleId === 'bodyguard' && !player.hasUsedPower;
+    case 'hunter':
+      return player.roleId === 'hunter' && !player.hasUsedPower;
     case 'werewolf':
       return player.roleId === 'werewolf' || player.roleId === 'wolf_pup';
     case 'witch':
@@ -258,8 +286,8 @@ export function isPlayerAwakeForNightStep(
 /**
  * Builds the sequential Night Call Schedule for the Automated Game Master ("Quản Trò Máy")
  * strictly following canonical Werewolf rules & wakeOrder (BUG-12):
- * Night 1: #5 Doppelgänger -> #10 Cupid -> #15 Bodyguard -> #20/#22 Werewolves -> #30 Witch -> #40 Seer
- * Night 2+: #15 Bodyguard -> #20/#22 Werewolves -> #30 Witch -> #40 Seer
+ * Night 1: #5 Doppelgänger -> #10 Cupid -> #15 Bodyguard -> #18 Hunter -> #20/#22 Werewolves -> #30 Witch -> #40 Seer
+ * Night 2+: #15 Bodyguard -> #18 Hunter -> #20/#22 Werewolves -> #30 Witch -> #40 Seer
  * Also attaches custom timer durations and whether the human player wakes up on each step.
  */
 export function buildAutoGMNightSchedule(
@@ -277,8 +305,9 @@ export function buildAutoGMNightSchedule(
     if (hasRoleInMatch('cupid')) keys.push('cupid');
   }
 
-  // Canonical wake priority: #15 Bodyguard -> #20/#22 Werewolves -> #30 Witch -> #40 Seer
+  // Canonical wake priority: #15 Bodyguard -> #18 Hunter -> #20/#22 Werewolves -> #30 Witch -> #40 Seer
   if (hasRoleInMatch('bodyguard')) keys.push('bodyguard');
+  if (hasRoleInMatch('hunter')) keys.push('hunter');
   keys.push('werewolf');
   if (hasRoleInMatch('witch')) keys.push('witch');
   if (hasRoleInMatch('seer')) keys.push('seer');
@@ -481,19 +510,33 @@ export function getHumanRoleWakeGuidance(
             : 'Choose 1 player to shield from wolf bites (no consecutive repeats).',
       };
     case 'hunter':
-      return {
-        wakesTonight: false,
-        headline:
-          lang === 'vi'
-            ? `🎯 Vai của bạn là ${roleName} (Kỹ năng Phản Đòn Khi Chết — Ngủ ban đêm)`
-            : lang === 'en'
-            ? `🎯 Your role is ${roleName} (Death Retribution Passive — Sleeps at night)`
-            : `🎯 ${rolePrefix} ${roleName}`,
-        subtext:
-          lang === 'vi'
-            ? 'Thợ Săn không thức dậy ban đêm. Ngay khi bạn bị Sói cắn hoặc bị treo cổ, Quản Trò Máy sẽ gọi bạn rút súng bắn kéo theo 1 người!'
-            : 'The Hunter sleeps at night. If killed by wolves or vote, Auto-GM immediately prompts your final revenge shot!',
-      };
+      return player.hasUsedPower
+        ? {
+            wakesTonight: false,
+            headline:
+              lang === 'vi'
+                ? `🎯 ${roleName} đã bị phong ấn quyền năng`
+                : lang === 'en'
+                ? `🎯 ${roleName} power sealed`
+                : `🎯 ${rolePrefix} ${roleName}`,
+            subtext:
+              lang === 'vi'
+                ? 'Kỹ năng Thợ Săn đã bị phong ấn sau khi Già Làng bị treo cổ.'
+                : 'Your Hunter power is sealed due to the Elder lynch penalty.',
+          }
+        : {
+            wakesTonight: true,
+            headline:
+              lang === 'vi'
+                ? `🎯 Vai của bạn (${roleName}) thức dậy mỗi đêm ở lượt Thợ Săn!`
+                : lang === 'en'
+                ? `🎯 Your role (${roleName}) wakes every night on the Hunter turn!`
+                : `🎯 ${rolePrefix} ${roleName}`,
+            subtext:
+              lang === 'vi'
+                ? 'Chọn ghim đạn vào 1 người (hoặc Không ghim). Nếu bạn chết đêm nay hoặc bị treo cổ hôm sau, phát đạn ghim sẽ tự động nổ súng!'
+                : 'Mark 1 player (or choose No Mark). If you die tonight or at the gallows tomorrow, your gun auto-fires at them!',
+          };
     case 'elder':
       return {
         wakesTonight: false,
@@ -747,6 +790,24 @@ export function computeAutoGMBotNightStepAction(
         const pick = validTargets[Math.floor(Math.random() * validTargets.length)];
         return { guardTargetId: pick.id };
       }
+    }
+  }
+
+  if (stepKey === 'hunter') {
+    const botHunter = alivePlayers.find(
+      (p) => p.roleId === 'hunter' && !p.hasUsedPower && p.id !== options.humanPlayerId
+    );
+    if (botHunter && currentActions.hunterTargetId === undefined) {
+      if (Math.random() < 0.15) {
+        return { hunterTargetId: null };
+      }
+      const pick = pickSmartBotHunterTarget(
+        players,
+        botHunter,
+        options.knownWolfIdsByBotSeer,
+        null
+      );
+      return { hunterTargetId: pick ? pick.id : null };
     }
   }
 
@@ -1247,6 +1308,10 @@ export function prepareNightStartForHuman(
         wolfTargetId: preSimulatedActions.wolfTargetId || null,
         secondWolfTargetId: preSimulatedActions.secondWolfTargetId || null,
         guardTargetId: preSimulatedActions.guardTargetId || null,
+        hunterTargetId:
+          preSimulatedActions.hunterTargetId !== undefined
+            ? preSimulatedActions.hunterTargetId
+            : undefined,
         witchHealTargetId: preSimulatedActions.witchHealTargetId || null,
         witchPoisonTargetId: preSimulatedActions.witchPoisonTargetId || null,
         seerTargetId: preSimulatedActions.seerTargetId || null,
@@ -1353,6 +1418,28 @@ export function buildNightSkillCutsceneForStep(params: {
     ];
   }
 
+  if (stepKey === 'hunter' && actions.hunterTargetId) {
+    return [
+      {
+        id: `cutscene_r${round}_hunter`,
+        kind: 'hunter_shot',
+        actorIds,
+        primaryTargetId: actions.hunterTargetId,
+        durationMs: 2200,
+        label:
+          lang === 'vi'
+            ? '🎯 Thợ Săn Ghim Đạn'
+            : lang === 'fr'
+            ? '🎯 Visée du Chasseur'
+            : lang === 'es'
+            ? '🎯 Mira del Cazador'
+            : lang === 'ja'
+            ? '🎯 狩人の照準'
+            : '🎯 Hunter Night Aim',
+      },
+    ];
+  }
+
   if (stepKey === 'werewolf' && actions.wolfTargetId) {
     const secondary =
       wolfPupFrenzy &&
@@ -1451,6 +1538,8 @@ export interface GMAnnouncementData {
   publicEvents: string[];
   privateNotice: string | null;
   voteBreakdown?: GMVoteTallyEntry[];
+  /** Mayor who held the x2 vote while ballots were cast (may be dead by the time Dusk is shown). */
+  votingMayorId?: string | null;
   aliveCount: number;
   totalCount: number;
   ctaLabel: string;
@@ -1600,17 +1689,7 @@ export function buildDawnGMAnnouncement(params: {
   beforePlayers: Player[];
   afterPlayers: Player[];
   nightKilledIds: string[];
-  hunterShotEvent?: {
-    hunterId?: string;
-    hunterName: string;
-    hunterSeat: number;
-    targetId: string;
-    targetName: string;
-    targetSeat: number;
-    extraLoverId?: string;
-    extraLoverName?: string;
-    extraLoverSeat?: number;
-  } | null;
+  hunterShots?: HunterShotRecord[];
   humanDeathReason?: string | null;
   humanPlayerId: string;
   lang: Language;
@@ -1620,15 +1699,15 @@ export function buildDawnGMAnnouncement(params: {
     beforePlayers,
     afterPlayers,
     nightKilledIds,
-    hunterShotEvent,
+    hunterShots,
     humanDeathReason,
     humanPlayerId,
     lang,
   } = params;
 
   const uniqueVictimIds = new Set<string>(nightKilledIds);
-  if (hunterShotEvent) {
-    uniqueVictimIds.add(hunterShotEvent.targetId);
+  for (const shot of hunterShots || []) {
+    uniqueVictimIds.add(shot.targetId);
   }
   // Also catch any player who transitioned from alive -> dead during dawn resolution (e.g., lover of Hunter's target)
   for (const bp of beforePlayers) {
@@ -1851,13 +1930,7 @@ export function buildDuskGMAnnouncement(params: {
   votes?: VoteRecord[];
   isTie: boolean;
   elderLynchedPenalty?: boolean;
-  hunterShotEvent?: {
-    hunterName: string;
-    hunterSeat: number;
-    targetId: string;
-    targetName: string;
-    targetSeat: number;
-  } | null;
+  hunterShots?: HunterShotRecord[];
   humanPlayerId: string;
   lang: Language;
 }): GMAnnouncementData {
@@ -1870,10 +1943,12 @@ export function buildDuskGMAnnouncement(params: {
     votes,
     isTie,
     elderLynchedPenalty,
-    hunterShotEvent,
+    hunterShots,
     humanPlayerId,
     lang,
   } = params;
+
+  const hunterShotTargetIds = new Set((hunterShots || []).map((s) => s.targetId));
 
   const nextRound = round + 1;
   const aliveCount = afterPlayers.filter((p) => p.isAlive).length;
@@ -1920,7 +1995,7 @@ export function buildDuskGMAnnouncement(params: {
             : lang === 'ja'
             ? `⚖️ 追放処刑（${vCnt}票）`
             : `⚖️ Executed (${vCnt} votes)`;
-      } else if (hunterShotEvent && ap.id === hunterShotEvent.targetId) {
+      } else if (hunterShotTargetIds.has(ap.id)) {
         tag =
           lang === 'vi'
             ? '🎯 Bị Thợ Săn bắn'
@@ -1962,11 +2037,26 @@ export function buildDuskGMAnnouncement(params: {
     );
   }
 
-  if (hunterShotEvent) {
+  for (const shot of hunterShots || []) {
+    const hunterP =
+      beforePlayers.find((p) => p.id === shot.hunterId) ||
+      afterPlayers.find((p) => p.id === shot.hunterId);
+    const targetP =
+      afterPlayers.find((p) => p.id === shot.targetId) ||
+      beforePlayers.find((p) => p.id === shot.targetId);
+    if (!hunterP || !targetP) continue;
+    const hunterSeat = getSeatNumber(beforePlayers, hunterP.id);
+    const targetSeat = getSeatNumber(beforePlayers, targetP.id);
     publicEvents.push(
       lang === 'vi'
-        ? `🎯 Trước khi lên giá treo cổ, Thợ Săn ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) đã nổ súng kéo theo ${hunterShotEvent.targetName} (#${hunterShotEvent.targetSeat})!`
-        : `🎯 Before facing the gallows, Hunter ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) fired a final shot at ${hunterShotEvent.targetName} (#${hunterShotEvent.targetSeat})!`
+        ? `🎯 Trước khi lên giá treo cổ, Thợ Săn ${hunterP.name} (#${hunterSeat}) đã kích hoạt phát đạn ghim kéo theo ${targetP.name} (#${targetSeat})!`
+        : lang === 'fr'
+        ? `🎯 Avant l’exécution, le Chasseur ${hunterP.name} (#${hunterSeat}) a abattu ${targetP.name} (#${targetSeat}) avec sa balle préparée !`
+        : lang === 'es'
+        ? `🎯 Antes de morir en la horca, el Cazador ${hunterP.name} (#${hunterSeat}) abatió a ${targetP.name} (#${targetSeat}) con su bala marcada!`
+        : lang === 'ja'
+        ? `🎯 処刑直前、狩人 ${hunterP.name}（#${hunterSeat}）の仕込んだ弾が ${targetP.name}（#${targetSeat}）を道連れにしました！`
+        : `🎯 Before facing the gallows, Hunter ${hunterP.name} (#${hunterSeat})’s Night-Aim shot felled ${targetP.name} (#${targetSeat})!`
     );
   }
 
@@ -2060,6 +2150,7 @@ export function buildDuskGMAnnouncement(params: {
     publicEvents,
     privateNotice,
     voteBreakdown,
+    votingMayorId: beforePlayers.find((p) => p.isMayor)?.id ?? null,
     aliveCount,
     totalCount,
     ctaLabel,
@@ -2073,8 +2164,6 @@ export function buildDuskGMAnnouncement(params: {
  * - Never auto-advance while a Game Master Announcement (Dawn/Dusk briefing) is on screen!
  * - Never auto-skip the human player's active night turn (`isPlayerAwakeAtNight === true`)!
  *   Always wait for the human player to choose their target and confirm (or explicitly skip).
- * - Never auto-end the final night step for a living human player without their click.
- * - Never auto-skip human Hunter revenge shot (`isHumanHunterRevenge === true`).
  * - Never auto-skip Day Voting while the human player is alive and has not yet cast a vote (`isHumanAlive && !hasHumanVoted`).
  */
 export function shouldAutoAdvanceOnTimerZero(params: {
@@ -2084,8 +2173,6 @@ export function shouldAutoAdvanceOnTimerZero(params: {
   isPlayerAwakeAtNight: boolean;
   isHumanAlive: boolean;
   hasHumanVoted: boolean;
-  isHumanHunterRevenge: boolean;
-  isLastNightStep?: boolean;
   hasActiveGMAnnouncement?: boolean;
 }): boolean {
   if (
@@ -2099,20 +2186,8 @@ export function shouldAutoAdvanceOnTimerZero(params: {
   }
 
   if (params.phase === 'night') {
-    if (params.isPlayerAwakeAtNight) {
-      return false;
-    }
-    if (params.isHumanAlive && params.isLastNightStep) {
-      return false;
-    }
-    return true;
-  }
-
-  if (params.phase === 'hunter_revenge') {
-    if (params.isHumanHunterRevenge) {
-      return false;
-    }
-    return true;
+    // An awake human always finishes their own turn; a human who already closed their eyes must not stall the last step at 0s.
+    return !params.isPlayerAwakeAtNight;
   }
 
   if (params.phase === 'day_voting') {
@@ -2145,20 +2220,9 @@ export function determineEndOfNightCinematic(params: {
   beforePlayers?: Player[];
   afterPlayers: Player[];
   nightResult: NightResult;
-  hunterShotEvent?: {
-    hunterId?: string;
-    hunterName: string;
-    hunterSeat: number;
-    targetId: string;
-    targetName: string;
-    targetSeat: number;
-    extraLoverId?: string;
-    extraLoverName?: string;
-    extraLoverSeat?: number;
-  } | null;
   lang: Language;
 }): NightDeathCinematicState | null {
-  const { beforeHuman, beforePlayers = [], afterPlayers, nightResult, hunterShotEvent, lang } = params;
+  const { beforeHuman, beforePlayers = [], afterPlayers, nightResult, lang } = params;
   const afterHuman = afterPlayers.find((p) => p.id === beforeHuman.id);
   const humanDiedTonight = Boolean(beforeHuman.isAlive && afterHuman && !afterHuman.isAlive);
 
@@ -2233,50 +2297,36 @@ export function determineEndOfNightCinematic(params: {
       };
     }
 
-    if (hunterShotEvent && hunterShotEvent.targetId === beforeHuman.id) {
+    const hunterShotOnHuman = (nightResult.hunterShots ?? []).find(
+      (s) => s.targetId === beforeHuman.id
+    );
+    if (hunterShotOnHuman) {
       const hunterObj =
-        beforePlayers.find((p) => p.id === hunterShotEvent.hunterId) ||
-        beforePlayers.find((p) => p.name === hunterShotEvent.hunterName);
+        beforePlayers.find((p) => p.id === hunterShotOnHuman.hunterId) ||
+        afterPlayers.find((p) => p.id === hunterShotOnHuman.hunterId);
+      const hunterName = hunterObj?.name || 'Thợ Săn';
+      const hunterSeat = getSeatNumber(afterPlayers, hunterShotOnHuman.hunterId);
       return {
         mode: 'victim_death',
         revealKiller: true,
         victimId: beforeHuman.id,
         victimName: beforeHuman.name,
         causeType: 'hunter_shot',
-        killerId: hunterObj?.id ?? hunterShotEvent.hunterId ?? null,
-        killerName: hunterShotEvent.hunterName,
+        killerId: hunterObj?.id ?? hunterShotOnHuman.hunterId,
+        killerName: hunterName,
         killerRoleId: 'hunter',
         linkedLoverId: null,
         linkedLoverName: null,
         reasonText:
           lang === 'vi'
-            ? `🎯 Thợ Săn ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) tử trận đêm qua và đã bóp cò bắn kéo bạn theo!`
+            ? `🎯 Thợ Săn ${hunterName} (#${hunterSeat}) tử trận đêm qua và phát đạn ghim đã bắn kéo bạn theo!`
             : lang === 'fr'
-            ? `🎯 Le Chasseur ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) vous a abattu dans son dernier souffle !`
+            ? `🎯 Le Chasseur ${hunterName} (#${hunterSeat}) vous a abattu dans son dernier souffle !`
             : lang === 'es'
-            ? `🎯 ¡El Cazador ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) te disparó al caer!`
+            ? `🎯 ¡El Cazador ${hunterName} (#${hunterSeat}) te disparó al caer!`
             : lang === 'ja'
-            ? `🎯 狩人 ${hunterShotEvent.hunterName}（#${hunterShotEvent.hunterSeat}）の道連れショットに撃たれました！`
-            : `🎯 Hunter ${hunterShotEvent.hunterName} (#${hunterShotEvent.hunterSeat}) died last night and shot you on the way out!`,
-      };
-    }
-
-    if (hunterShotEvent && hunterShotEvent.extraLoverId === beforeHuman.id) {
-      return {
-        mode: 'victim_death',
-        revealKiller: true,
-        victimId: beforeHuman.id,
-        victimName: beforeHuman.name,
-        causeType: 'cupid_lover',
-        killerId: null,
-        killerName: null,
-        killerRoleId: null,
-        linkedLoverId: hunterShotEvent.targetId,
-        linkedLoverName: hunterShotEvent.targetName,
-        reasonText:
-          lang === 'vi'
-            ? `💘 Tình nhân ${hunterShotEvent.targetName} của bạn bị Thợ Săn ${hunterShotEvent.hunterName} bắn hạ — bạn tử trận theo lời nguyền Cupid!`
-            : `💘 Your Lover ${hunterShotEvent.targetName} was shot by Hunter ${hunterShotEvent.hunterName} — you perished from Cupid's bond!`,
+            ? `🎯 狩人 ${hunterName}（#${hunterSeat}）の道連れショットに撃たれました！`
+            : `🎯 Hunter ${hunterName} (#${hunterSeat}) died last night and shot you on the way out!`,
       };
     }
 

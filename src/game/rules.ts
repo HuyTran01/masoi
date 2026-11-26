@@ -3,6 +3,7 @@ import type {
   RoleId,
   NightActions,
   NightResult,
+  HunterShotRecord,
   VoteRecord,
   RoleDefinition,
   NightVictimDetail,
@@ -26,6 +27,7 @@ function applyDoppelgangerInheritance(
     doppel.hasUsedPoison = false;
   } else if (inheritedRole === 'hunter') {
     doppel.hasUsedPower = false;
+    doppel.hunterMarkId = undefined;
   }
   if (elderSealActive && ROLES[inheritedRole].faction === 'villager') {
     doppel.hasUsedPower = true;
@@ -180,7 +182,7 @@ export function getDyingWolfVictimsForWitch(
 ): string[] {
   const livingGuard = players.find((p) => p.roleId === 'bodyguard' && p.isAlive);
   let guardedId: string | null = null;
-  if (actions.guardTargetId && (!livingGuard || !livingGuard.hasUsedPower)) {
+  if (actions.guardTargetId && livingGuard && !livingGuard.hasUsedPower) {
     const guardedPlayer = players.find((p) => p.id === actions.guardTargetId && p.isAlive);
     if (guardedPlayer && !guardedPlayer.protectedLastNight) {
       guardedId = guardedPlayer.id;
@@ -216,7 +218,7 @@ export function resolveNightActions(
   players: Player[],
   actions: NightActions,
   options: { wolfPupTriggered?: boolean; roundNumber?: number; elderSealActive?: boolean } = {}
-): { updatedPlayers: Player[]; result: NightResult & { triggeredHunterIds: string[] } } {
+): { updatedPlayers: Player[]; result: NightResult & { hunterShots: HunterShotRecord[] } } {
   const previousProtectedIds = new Set(
     players.filter((p) => p.protectedLastNight).map((p) => p.id)
   );
@@ -269,7 +271,7 @@ export function resolveNightActions(
 
   let elderAttacked = false;
   let wolfPupTriggeredNextNight = false;
-  const triggeredHunterIds: string[] = [];
+  const hunterShots: HunterShotRecord[] = [];
 
   // 1. Doppelganger link (night 1 only)
   if (actions.doppelgangerTargetId && (options.roundNumber ?? 1) === 1) {
@@ -315,7 +317,7 @@ export function resolveNightActions(
   let guardedId: string | null = null;
   if (
     actions.guardTargetId &&
-    (!livingGuard || !livingGuard.hasUsedPower) &&
+    livingGuard && !livingGuard.hasUsedPower &&
     !previousProtectedIds.has(actions.guardTargetId)
   ) {
     const guardedPlayer = updated.find((p) => p.id === actions.guardTargetId && p.isAlive);
@@ -339,6 +341,61 @@ export function resolveNightActions(
         detail: `${repeatPlayer.name} đã được bảo vệ ở đêm ngay trước đó nên theo luật không thể nhận khiên 2 đêm liên tục.`,
         category: 'info',
       });
+    }
+  }
+
+  // 3.4. Seer inspection runs on pre-resolution roles, so a Cursed bitten tonight still reads as Villager (Traitor appears as Villager; Werewolf and Wolf Pup appear as Werewolf)
+  const livingSeer = updated.find((p) => p.roleId === 'seer' && p.isAlive);
+  let seerInspection: NightResult['seerInspection'] = null;
+  if (actions.seerTargetId && livingSeer && !livingSeer.hasUsedPower) {
+    const target = updated.find((p) => p.id === actions.seerTargetId);
+    if (target) {
+      const isWerewolf = target.roleId === 'werewolf' || target.roleId === 'wolf_pup';
+      seerInspection = {
+        playerId: target.id,
+        roleId: target.roleId,
+        isWerewolf,
+      };
+      summary.push(`Tiên Tri đã soi thấu ${target.name} thuộc ${isWerewolf ? 'Phe Ma Sói' : 'Phe Dân Làng'}.`);
+      const stealthNote =
+        target.roleId === 'traitor'
+          ? ' (Lưu ý cho Quản Trò: Kẻ Phản Bội tuy theo phe Sói nhưng khi Tiên Tri soi sẽ luôn hiện là Dân Làng 👍).'
+          : target.roleId === 'wolf_pup'
+          ? ' (Lưu ý: Sói Con hiện kết quả là Ma Sói 👎).'
+          : '';
+      logicExplanations.push({
+        badge: '🔮 Tiên Tri Soi',
+        title: `Tiên Tri soi ${target.name} → Kết quả báo: ${isWerewolf ? '👎 MA SÓI' : '👍 DÂN LÀNG'}`,
+        detail: `Vai thật của ${target.name} là ${ROLES[target.roleId].name.vi}.${stealthNote}`,
+        category: 'info',
+      });
+    }
+  }
+
+  // 3.5. Hunter Night-Aim mark (wakeOrder 18 — overwrites previous night's mark, or clears on Không ghim)
+  const livingHunters = updated.filter(
+    (p) => p.roleId === 'hunter' && p.isAlive && !p.hasUsedPower
+  );
+  for (const hunter of livingHunters) {
+    if (options.elderSealActive) {
+      hunter.hasUsedPower = true;
+      hunter.hunterMarkId = undefined;
+      continue;
+    }
+    const markTarget =
+      actions.hunterTargetId && actions.hunterTargetId !== hunter.id
+        ? updated.find((p) => p.id === actions.hunterTargetId && p.isAlive)
+        : undefined;
+    if (markTarget) {
+      hunter.hunterMarkId = markTarget.id;
+      logicExplanations.push({
+        badge: '🎯 Ghim Đạn Thợ Săn',
+        title: `Thợ Săn ${hunter.name} ghim đạn vào ${markTarget.name}`,
+        detail: `Nếu ${hunter.name} chết đêm nay hoặc bị treo cổ ngày mai, phát đạn ghim sẽ tự động bắn hạ ${markTarget.name} (xuyên qua cả Khiên Bảo Vệ và Bình Cứu Phù Thủy).`,
+        category: 'info',
+      });
+    } else {
+      hunter.hunterMarkId = undefined;
     }
   }
 
@@ -399,14 +456,14 @@ export function resolveNightActions(
   if (
     actions.witchHealTargetId &&
     victimsOfWolves.includes(actions.witchHealTargetId) &&
-    (!witchPlayer || (!witchPlayer.hasUsedHeal && !witchPlayer.hasUsedPower))
+    witchPlayer && !witchPlayer.hasUsedHeal && !witchPlayer.hasUsedPower
   ) {
     const savedPlayer = updated.find((p) => p.id === actions.witchHealTargetId);
     if (savedPlayer) {
       savedPlayerIds.add(actions.witchHealTargetId);
       const idx = victimsOfWolves.indexOf(actions.witchHealTargetId);
       if (idx !== -1) victimsOfWolves.splice(idx, 1);
-      if (witchPlayer) witchPlayer.hasUsedHeal = true;
+      witchPlayer.hasUsedHeal = true;
       summary.push(`Phù Thủy đã trao bình thuốc Cứu Sống cho ${savedPlayer.name}!`);
       logicExplanations.push({
         badge: '💚 Cứu Sống (Phù Thủy)',
@@ -451,12 +508,12 @@ export function resolveNightActions(
   // 6. Witch Poison potion (1 use per game; bypasses Bodyguard shield and Elder 2-lives)
   if (
     actions.witchPoisonTargetId &&
-    (!witchPlayer || (!witchPlayer.hasUsedPoison && !witchPlayer.hasUsedPower))
+    witchPlayer && !witchPlayer.hasUsedPoison && !witchPlayer.hasUsedPower
   ) {
     const poisoned = updated.find((p) => p.id === actions.witchPoisonTargetId && p.isAlive);
     if (poisoned) {
       killedPlayerIds.add(actions.witchPoisonTargetId);
-      if (witchPlayer) witchPlayer.hasUsedPoison = true;
+      witchPlayer.hasUsedPoison = true;
       summary.push(`Bình độc kịch độc của Phù Thủy đã hạ gục ${poisoned.name}.`);
       const wasAlsoGuarded = guardedId === poisoned.id;
       const poisonDetail = wasAlsoGuarded
@@ -473,34 +530,6 @@ export function resolveNightActions(
         title: `${poisoned.name} tử vong do trúng Bình Độc của Phù Thủy`,
         detail: poisonDetail,
         category: 'death',
-      });
-    }
-  }
-
-  // 7. Seer inspection (Traitor appears as Villager; Werewolf and Wolf Pup appear as Werewolf)
-  const livingSeer = updated.find((p) => p.roleId === 'seer' && p.isAlive);
-  let seerInspection: NightResult['seerInspection'] = null;
-  if (actions.seerTargetId && (!livingSeer || !livingSeer.hasUsedPower)) {
-    const target = updated.find((p) => p.id === actions.seerTargetId);
-    if (target) {
-      const isWerewolf = target.roleId === 'werewolf' || target.roleId === 'wolf_pup';
-      seerInspection = {
-        playerId: target.id,
-        roleId: target.roleId,
-        isWerewolf,
-      };
-      summary.push(`Tiên Tri đã soi thấu ${target.name} thuộc ${isWerewolf ? 'Phe Ma Sói' : 'Phe Dân Làng'}.`);
-      const stealthNote =
-        target.roleId === 'traitor'
-          ? ' (Lưu ý cho Quản Trò: Kẻ Phản Bội tuy theo phe Sói nhưng khi Tiên Tri soi sẽ luôn hiện là Dân Làng 👍).'
-          : target.roleId === 'wolf_pup'
-          ? ' (Lưu ý: Sói Con hiện kết quả là Ma Sói 👎).'
-          : '';
-      logicExplanations.push({
-        badge: '🔮 Tiên Tri Soi',
-        title: `Tiên Tri soi ${target.name} → Kết quả báo: ${isWerewolf ? '👎 MA SÓI' : '👍 DÂN LÀNG'}`,
-        detail: `Vai thật của ${target.name} là ${ROLES[target.roleId].name.vi}.${stealthNote}`,
-        category: 'info',
       });
     }
   }
@@ -525,16 +554,29 @@ export function resolveNightActions(
       }
 
       if (victim.roleId === 'hunter' && !victim.hasUsedPower) {
-        if (!triggeredHunterIds.includes(victim.id)) {
-          triggeredHunterIds.push(victim.id);
+        victim.hasUsedPower = true;
+        if (victim.hunterMarkId) {
+          const mark = updated.find((p) => p.id === victim.hunterMarkId);
+          if (mark && mark.isAlive && !killedPlayerIds.has(mark.id)) {
+            killedPlayerIds.add(mark.id);
+            toProcess.push(mark.id);
+            hunterShots.push({ hunterId: victim.id, targetId: mark.id });
+            summary.push(`Thợ Săn ${victim.name} tử trận đã kéo theo ${mark.name} bằng phát đạn đã ghim!`);
+            const shotDetail = `${mark.name} (${ROLES[mark.roleId].name.vi}) bị Thợ Săn ${victim.name} ghim đạn ban đêm bắn hạ theo cùng (xuyên qua cả Khiên Bảo Vệ và Bình Cứu Phù Thủy) → Tử vong.`;
+            addVictimReason(mark.id, '🎯 Trúng đạn Thợ Săn', shotDetail, {
+              causeType: 'hunter_shot',
+              killerId: victim.id,
+              killerName: victim.name,
+              killerRoleId: 'hunter',
+            });
+            logicExplanations.push({
+              badge: '🎯 Phát Đạn Thợ Săn',
+              title: `Thợ Săn ${victim.name} chết → ${mark.name} trúng đạn ghim theo cùng`,
+              detail: shotDetail,
+              category: 'death',
+            });
+          }
         }
-        summary.push(`Thợ Săn ${victim.name} bị sát hại trong đêm nhưng kịp rút súng trả thù!`);
-        logicExplanations.push({
-          badge: '🎯 Phản Đòn Thợ Săn',
-          title: `Thợ Săn ${victim.name} chết → Kích hoạt phát súng kéo theo 1 người!`,
-          detail: `${victim.name} là Thợ Săn. Ngay khi công bố ${victim.name} chết sáng nay, Quản Trò yêu cầu ${victim.name} chỉ định bắn hạ ngay 1 người chơi đang sống.`,
-          category: 'special',
-        });
       }
 
       // Check if Doppelganger inherits from this specific victim
@@ -542,6 +584,7 @@ export function resolveNightActions(
         (p) =>
           p.roleId === 'doppelganger' &&
           p.isAlive &&
+          !killedPlayerIds.has(p.id) &&
           (p.targetPlayerId === victim.id || (!p.targetPlayerId && p.targetRoleId === victim.roleId))
       );
       if (doppel && victim.roleId !== 'doppelganger') {
@@ -624,8 +667,7 @@ export function resolveNightActions(
       loversLinked,
       wolfPupTriggeredNextNight,
       elderAttacked,
-      triggeredHunterId: triggeredHunterIds[0] ?? null,
-      triggeredHunterIds,
+      hunterShots,
       summary,
       killedDetails,
       logicExplanations,
@@ -634,7 +676,7 @@ export function resolveNightActions(
 }
 
 /**
- * Applies Day Lynch execution with full cascade logic (Lovers, Wolf Pup, Doppelganger, Hunter, Elder Penalty)
+ * Applies Day Lynch execution with full cascade logic (Lovers, Wolf Pup, Doppelganger, Hunter Night-Aim mark, Elder Penalty)
  */
 export function applyDayLynch(
   players: Player[],
@@ -643,15 +685,14 @@ export function applyDayLynch(
 ): {
   updatedPlayers: Player[];
   wolfPupTriggeredNextNight: boolean;
-  triggeredHunterId: string | null;
-  triggeredHunterIds: string[];
+  hunterShots: HunterShotRecord[];
   elderLynchedPenalty: boolean;
   cascadeMessages: string[];
 } {
   const updated = players.map((p) => ({ ...p }));
   const cascadeMessages: string[] = [];
   let wolfPupTriggeredNextNight = false;
-  const triggeredHunterIds: string[] = [];
+  const hunterShots: HunterShotRecord[] = [];
   let elderLynchedPenalty = false;
 
   const toKill = [lynchedId];
@@ -675,6 +716,7 @@ export function applyDayLynch(
           p.hasUsedPower = true;
           p.hasUsedHeal = true;
           p.hasUsedPoison = true;
+          if (p.roleId === 'hunter') p.hunterMarkId = undefined;
         }
       }
       cascadeMessages.push(
@@ -688,8 +730,16 @@ export function applyDayLynch(
     }
 
     if (victim.roleId === 'hunter' && !victim.hasUsedPower) {
-      if (!triggeredHunterIds.includes(victim.id)) {
-        triggeredHunterIds.push(victim.id);
+      victim.hasUsedPower = true;
+      if (victim.hunterMarkId) {
+        const mark = updated.find((p) => p.id === victim.hunterMarkId);
+        if (mark && mark.isAlive && !processed.has(mark.id)) {
+          toKill.push(mark.id);
+          hunterShots.push({ hunterId: victim.id, targetId: mark.id });
+          cascadeMessages.push(
+            `🎯 Thợ Săn ${victim.name} bị hành hình và phát đạn ghim tự động bắn hạ ${mark.name}!`
+          );
+        }
       }
     }
 
@@ -720,8 +770,7 @@ export function applyDayLynch(
   return {
     updatedPlayers: updated,
     wolfPupTriggeredNextNight,
-    triggeredHunterId: triggeredHunterIds[0] ?? null,
-    triggeredHunterIds,
+    hunterShots,
     elderLynchedPenalty,
     cascadeMessages,
   };
@@ -850,96 +899,6 @@ export function tallyVotes(votes: VoteRecord[]): {
 }
 
 /**
- * Hunter shot resolution with full cascade (Lover suicide, Wolf Pup frenzy, Doppelganger inheritance, chained Hunter)
- */
-export function resolveHunterShot(
-  players: Player[],
-  hunterId: string,
-  targetId: string,
-  options: { elderSealActive?: boolean } = {}
-): {
-  updatedPlayers: Player[];
-  victimName: string;
-  extraVictimId: string | null;
-  wolfPupTriggeredNextNight: boolean;
-  triggeredHunterId: string | null;
-  triggeredHunterIds: string[];
-  cascadeMessages: string[];
-} {
-  const updated = players.map((p) => ({ ...p }));
-  const hunter = updated.find((p) => p.id === hunterId);
-  if (hunter) {
-    hunter.hasUsedPower = true;
-  }
-
-  let extraVictimId: string | null = null;
-  let victimName = '';
-  let wolfPupTriggeredNextNight = false;
-  const triggeredHunterIds: string[] = [];
-  const cascadeMessages: string[] = [];
-
-  const toKill = [targetId];
-  const processed = new Set<string>();
-
-  while (toKill.length > 0) {
-    const id = toKill.shift()!;
-    if (processed.has(id)) continue;
-    processed.add(id);
-
-    const victim = updated.find((p) => p.id === id);
-    if (!victim || !victim.isAlive) continue;
-
-    victim.isAlive = false;
-    if (id === targetId) {
-      victimName = victim.name;
-    } else {
-      extraVictimId = victim.id;
-    }
-
-    if (victim.roleId === 'wolf_pup') {
-      wolfPupTriggeredNextNight = true;
-      cascadeMessages.push(`Phát súng Thợ Săn bắn trúng Sói Con ${victim.name}! Đêm tới Sói cắn 2 người!`);
-    }
-
-    if (victim.roleId === 'hunter' && !victim.hasUsedPower && victim.id !== hunterId) {
-      if (!triggeredHunterIds.includes(victim.id)) {
-        triggeredHunterIds.push(victim.id);
-      }
-      cascadeMessages.push(`🎯 Thợ Săn ${victim.name} trúng đạn nhưng vẫn kịp rút súng phản công!`);
-    }
-
-    const doppel = updated.find(
-      (p) =>
-        p.roleId === 'doppelganger' &&
-        p.isAlive &&
-        (p.targetPlayerId === victim.id || (!p.targetPlayerId && p.targetRoleId === victim.roleId))
-    );
-    if (doppel && victim.roleId !== 'doppelganger') {
-      applyDoppelgangerInheritance(doppel, victim.roleId, Boolean(options.elderSealActive));
-      cascadeMessages.push(`Nhân Bản ${doppel.name} đã kế thừa thân phận ${ROLES[victim.roleId].name.vi}!`);
-    }
-
-    if (victim.loverId) {
-      const lover = updated.find((p) => p.id === victim.loverId);
-      if (lover && lover.isAlive && !processed.has(lover.id)) {
-        toKill.push(lover.id);
-        cascadeMessages.push(`💔 Tình nhân ${lover.name} đã quyên sinh theo ${victim.name}!`);
-      }
-    }
-  }
-
-  return {
-    updatedPlayers: updated,
-    victimName,
-    extraVictimId,
-    wolfPupTriggeredNextNight,
-    triggeredHunterId: triggeredHunterIds[0] ?? null,
-    triggeredHunterIds,
-    cascadeMessages,
-  };
-}
-
-/**
  * Separates living player counts into 3 explicit factions for Practice Mode HUD (BUG-10):
  * - wolves: living biting Werewolves (werewolf, wolf_pup)
  * - villagers: living Villager-faction players
@@ -1057,7 +1016,12 @@ export function checkWinCondition(
       alivePlayers.some((p) => {
         if (!p.loverId) return false;
         const partner = alivePlayers.find((o) => o.id === p.loverId);
-        return Boolean(partner && ROLES[p.roleId].faction !== ROLES[partner.roleId].faction);
+        const isBiting = (r: RoleId) => r === 'werewolf' || r === 'wolf_pup';
+        return Boolean(
+          partner &&
+            ROLES[p.roleId].faction !== ROLES[partner.roleId].faction &&
+            (isBiting(p.roleId) || isBiting(partner.roleId))
+        );
       });
 
     if (!hasCrossFactionLoversWithOutsider) {

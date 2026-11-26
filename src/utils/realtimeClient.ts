@@ -15,6 +15,7 @@ export type TransportMode = 'ws' | 'http';
 
 export type ServerWsEvent =
   | { type: 'room:state'; room: RealtimeRoomState }
+  | { type: 'room:joined'; code: string; userId?: string; playerSecret: string }
   | { type: 'room:list'; rooms: OpenRoomSummary[] }
   | { type: 'room:kicked'; code: string; targetId: string; reason: string }
   | { type: 'room:match_started'; room: RealtimeRoomState }
@@ -239,7 +240,17 @@ class WerewolfRealtimeClient {
         this.setStatus('connected');
         if (isReconnect) {
           if (this.activeRoomJoin && socket.readyState === WebSocket.OPEN) {
-            socket.send(JSON.stringify({ type: 'room:join', ...this.activeRoomJoin }));
+            const secret = this.getPlayerSecret(
+              this.activeRoomJoin.code,
+              this.activeRoomJoin.user.id
+            );
+            socket.send(
+              JSON.stringify({
+                type: 'room:join',
+                ...this.activeRoomJoin,
+                ...(secret ? { playerSecret: secret } : {}),
+              })
+            );
           }
           if (this.activeGmSub && socket.readyState === WebSocket.OPEN) {
             socket.send(JSON.stringify(this.toGmWsPayload(this.activeGmSub)));
@@ -254,6 +265,12 @@ class WerewolfRealtimeClient {
       socket.onmessage = (evt) => {
         try {
           const data = JSON.parse(String(evt.data)) as ServerWsEvent;
+          if (data.type === 'room:joined') {
+            const uid = data.userId || this.activeRoomJoin?.user.id;
+            if (uid && data.playerSecret) {
+              this.setPlayerSecret(data.code, uid, data.playerSecret);
+            }
+          }
           this.emit(data);
         } catch {
           // ignore malformed frames
@@ -717,13 +734,14 @@ class WerewolfRealtimeClient {
         });
         break;
       }
-      case 'room:hunter_shot':
-        void this.sendRoomActionHttp(code, 'hunter_shot', {
-          targetId: payload.targetId ?? null,
-        });
-        break;
       case 'room:advance_phase':
-        void this.sendRoomActionHttp(code, 'advance_phase', {});
+        void this.sendRoomActionHttp(
+          code,
+          'advance_phase',
+          typeof payload.expectedStepIndex === 'number'
+            ? { expectedStepIndex: payload.expectedStepIndex }
+            : {}
+        );
         break;
       case 'gm:subscribe_host':
       case 'gm:subscribe_player':
@@ -763,12 +781,18 @@ class WerewolfRealtimeClient {
     this.seenPropIds.clear();
     this.lastRoomUpdatedAt = 0;
     this.lastVotesJson = '';
-    this.send({ type: 'room:join', ...params });
+    const secret = this.getPlayerSecret(params.code, params.user.id);
+    this.send({ type: 'room:join', ...params, ...(secret ? { playerSecret: secret } : {}) });
   }
 
   leaveRoom(code: string, userId: string) {
-    this.activeRoomJoin = null;
-    this.stopRoomHttpPolling();
+    if (
+      this.activeRoomJoin &&
+      normalizeClientCode(this.activeRoomJoin.code) === normalizeClientCode(code)
+    ) {
+      this.activeRoomJoin = null;
+      this.stopRoomHttpPolling();
+    }
     this.launchedMatchIds.delete(normalizeClientCode(code));
     this.send({ type: 'room:leave', code, userId });
   }
@@ -824,12 +848,12 @@ class WerewolfRealtimeClient {
     this.send({ type: 'room:night_action', code, action });
   }
 
-  sendHunterShot(code: string, targetId: string | null) {
-    this.send({ type: 'room:hunter_shot', code, targetId });
-  }
-
-  sendAdvancePhase(code: string) {
-    this.send({ type: 'room:advance_phase', code });
+  sendAdvancePhase(code: string, expectedStepIndex?: number) {
+    this.send({
+      type: 'room:advance_phase',
+      code,
+      ...(typeof expectedStepIndex === 'number' ? { expectedStepIndex } : {}),
+    });
   }
 
   subscribeGMHost(code: string, hostSecret?: string) {

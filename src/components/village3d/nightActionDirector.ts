@@ -751,10 +751,6 @@ export function createNightActionDirector(scene: THREE.Scene): NightActionDirect
           _quat.setFromUnitVectors(_vUp, _vDir);
           bulletStreak.quaternion.copy(_quat);
         } else {
-          // ONLY hunter_shot knocks down its target during hunter_revenge
-          const knockT = Math.min(1, (sceneTime - 0.79) / 0.45);
-          primarySeat.koProgress = Math.max(primarySeat.koProgress, knockT);
-          primarySeat.bodyGroup.rotation.x = -primarySeat.koProgress * 1.15;
           if (!flinchFiredPrimary) {
             flinchFiredPrimary = true;
             triggerFlinch(primarySeat, leadActor.homePos);

@@ -48,6 +48,7 @@ const VALID_NIGHT_ACTIONS = new Set<OnlineNightActionType>([
   'wolf_bite',
   'wolf_second_bite',
   'guard',
+  'hunter_mark',
   'seer_inspect',
   'witch_heal',
   'witch_poison',
@@ -425,13 +426,36 @@ async function startServer() {
           const cleanUserId = String(user.id).slice(0, 64);
           const rawAuthToken = typeof msg.authToken === 'string' ? msg.authToken.trim() : '';
           let verifiedAccountUserId: string | null = null;
-          if (cleanUserId.startsWith('acc_') && rawAuthToken) {
+          if (cleanUserId.startsWith('acc_')) {
+            if (!rawAuthToken) {
+              sendJson(ws, { type: 'error', message: 'Cần đăng nhập lại.' });
+              return;
+            }
             const session = verifySessionToken(rawAuthToken, sessionSecret);
             if (!session || session.userId !== cleanUserId) {
               sendJson(ws, { type: 'error', message: 'Phiên đăng nhập không hợp lệ.' });
               return;
             }
             verifiedAccountUserId = session.userId;
+          }
+
+          const existingRoom = roomManager.getRoom(code);
+          const alreadyParticipant = Boolean(
+            existingRoom?.participants.some((p) => !p.isBot && p.id === cleanUserId)
+          );
+          const providedSecret =
+            typeof msg.playerSecret === 'string' ? msg.playerSecret.trim() : undefined;
+          if (
+            alreadyParticipant &&
+            roomManager.hasPlayerSecret(code, cleanUserId) &&
+            !roomManager.verifyPlayerSecret(code, cleanUserId, providedSecret) &&
+            verifiedAccountUserId !== cleanUserId
+          ) {
+            sendJson(ws, {
+              type: 'error',
+              message: 'Người chơi này đang hoạt động trong phòng với phiên khác.',
+            });
+            return;
           }
 
           const existingSockets = roomSockets.get(code);
@@ -489,7 +513,7 @@ async function startServer() {
             detachSocketFromRoom(ws);
           }
 
-          roomManager.getOrIssuePlayerSecret(result.room.code, cleanUserId);
+          const playerSecret = roomManager.getOrIssuePlayerSecret(result.room.code, cleanUserId);
 
           if (meta) {
             meta.roomCode = result.room.code;
@@ -503,13 +527,23 @@ async function startServer() {
           }
           set.add(ws);
 
+          sendJson(ws, {
+            type: 'room:joined',
+            code: result.room.code,
+            userId: cleanUserId,
+            playerSecret,
+          });
           broadcastRoomState(result.room.code, 'room:state');
           broadcastOpenRooms();
           return;
         }
 
         if (type === 'room:leave') {
-          detachSocketFromRoom(ws);
+          const targetCode = normalizeRoomCode(String(msg.code || ''));
+          const currentCode = socketMeta.get(ws)?.roomCode;
+          if (!targetCode || currentCode === targetCode) {
+            detachSocketFromRoom(ws);
+          }
           sendJson(ws, { type: 'room:list', rooms: roomManager.listOpenRooms() });
           return;
         }
@@ -641,29 +675,15 @@ async function startServer() {
           return;
         }
 
-        if (type === 'room:hunter_shot') {
-          const code = normalizeRoomCode(String(msg.code || ''));
-          const meta = requireBoundSocket(ws, code);
-          if (!meta) return;
-          const targetId =
-            msg.targetId === null || msg.targetId === undefined || msg.targetId === ''
-              ? null
-              : String(msg.targetId).slice(0, 64);
-          const res = roomManager.submitHunterShot(code, meta.userId!, targetId);
-          if (!res.ok) {
-            sendJson(ws, { type: 'error', message: res.error });
-            return;
-          }
-          applyEloIfNeeded(code, res.eloUpdates);
-          broadcastRoomState(code, 'room:state');
-          return;
-        }
-
         if (type === 'room:advance_phase') {
           const code = normalizeRoomCode(String(msg.code || ''));
           const meta = requireBoundSocket(ws, code);
           if (!meta) return;
-          const res = roomManager.advancePhase(code, meta.userId!);
+          const expectedStepIndex =
+            typeof msg.expectedStepIndex === 'number' && !Number.isNaN(msg.expectedStepIndex)
+              ? msg.expectedStepIndex
+              : undefined;
+          const res = roomManager.advancePhase(code, meta.userId!, Date.now(), expectedStepIndex);
           if (!res.ok) {
             sendJson(ws, { type: 'error', message: res.error });
             return;

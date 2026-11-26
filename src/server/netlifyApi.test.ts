@@ -107,13 +107,25 @@ test('Netlify Function /api/health and /api/accounts register, login, me, update
   const selfUpdate = await netlifyApiHandler(
     req('/api/accounts/update', {
       headers: { authorization: `Bearer ${loginData.token}` },
-      body: { displayName: 'Sói Vương', elo: 1650 },
+      body: { displayName: 'Sói Vương', elo: 9999, wins: 50 },
     })
   );
   assert.equal(selfUpdate.status, 200);
   const updated = await selfUpdate.json();
   assert.equal(updated.account.displayName, 'Sói Vương');
-  assert.equal(updated.account.elo, 1650);
+  assert.equal(updated.account.elo, loginData.account.elo);
+  assert.equal(updated.account.wins, 0);
+
+  // Reject acc_ room join with missing authToken (auth bypass guard)
+  const accNoTokenRes = await netlifyApiHandler(
+    req('/api/rooms/AUTH-01/join', {
+      body: {
+        user: { id: 'acc_netlify_wolf', name: 'Sói Vương', avatar: '🐺', elo: 1500 },
+        villageSize: 4,
+      },
+    })
+  );
+  assert.equal(accNoTokenRes.status, 401);
 });
 
 test('Netlify Function 2-player Online Room HTTP flow works end-to-end with zero WebSocket', async () => {

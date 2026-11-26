@@ -84,6 +84,7 @@ const VALID_NIGHT_ACTIONS = new Set<OnlineNightActionType>([
   'wolf_bite',
   'wolf_second_bite',
   'guard',
+  'hunter_mark',
   'seer_inspect',
   'witch_heal',
   'witch_poison',
@@ -649,22 +650,6 @@ export function createApiRouter(options: ApiRouterOptions) {
       if (body.region === 'VN' || body.region === 'SEA' || body.region === 'GLOBAL') {
         current.region = body.region;
       }
-      if (typeof body.elo === 'number' && !Number.isNaN(body.elo)) {
-        const clampedDelta = Math.max(-80, Math.min(80, Math.round(body.elo - current.elo)));
-        current.elo = Math.max(0, Math.min(10000, current.elo + clampedDelta));
-      }
-      if (typeof body.matchesPlayed === 'number' && !Number.isNaN(body.matchesPlayed)) {
-        current.matchesPlayed = Math.max(
-          current.matchesPlayed,
-          Math.min(current.matchesPlayed + 1, Math.round(body.matchesPlayed))
-        );
-      }
-      if (typeof body.wins === 'number' && !Number.isNaN(body.wins)) {
-        current.wins = Math.min(
-          current.matchesPlayed,
-          Math.max(current.wins, Math.min(current.wins + 1, Math.round(body.wins)))
-        );
-      }
 
       current.updatedAt = now;
       accounts[idx] = current;
@@ -765,6 +750,11 @@ export function createApiRouter(options: ApiRouterOptions) {
         if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, parsed.status);
         const body = parsed.body;
         const user = (body.user || {}) as { id?: string; name?: string; avatar?: string };
+        const playerToken =
+          readHeader(req, 'x-gm-player-token') ??
+          (typeof body.playerToken === 'string' && body.playerToken.trim()
+            ? body.playerToken.trim()
+            : undefined);
         const { mgr } = await loadGMRoomManager(code);
         const result = mgr.joinAsPlayer(
           code,
@@ -773,7 +763,7 @@ export function createApiRouter(options: ApiRouterOptions) {
             name: String(user.name || ''),
             avatar: typeof user.avatar === 'string' ? user.avatar : undefined,
           },
-          { seatId: typeof body.seatId === 'string' ? body.seatId : undefined }
+          { seatId: typeof body.seatId === 'string' ? body.seatId : undefined, playerToken }
         );
         if (!result.ok) return jsonResponse(result, 400);
         await saveGMRoomManager(mgr, code);
@@ -871,7 +861,10 @@ export function createApiRouter(options: ApiRouterOptions) {
           extractBearerToken(readHeader(req, 'authorization')) ||
           '';
         let verifiedAccountUserId: string | null = null;
-        if (cleanUserId.startsWith('acc_') && rawAuthToken) {
+        if (cleanUserId.startsWith('acc_')) {
+          if (!rawAuthToken) {
+            return jsonResponse({ ok: false, error: 'Cần đăng nhập lại.' }, 401);
+          }
           const secret = await resolveClusterSessionSecret(store);
           const session = verifySessionToken(rawAuthToken, secret);
           if (!session || session.userId !== cleanUserId) {
@@ -1177,16 +1170,12 @@ export function createApiRouter(options: ApiRouterOptions) {
             base.updatedAt = now;
             await store.setJSON(shardKey, base);
           }
-        } else if (action === 'hunter_shot') {
-          const targetId =
-            body.targetId === null || body.targetId === undefined || body.targetId === ''
-              ? null
-              : String(body.targetId).slice(0, 64);
-          const res = mgr.submitHunterShot(code, userId, targetId, now);
-          if (!res.ok) return jsonResponse(res, 400);
-          eloUpdates = res.eloUpdates;
         } else if (action === 'advance_phase') {
-          const res = mgr.advancePhase(code, userId, now);
+          const expectedStepIndex =
+            typeof body.expectedStepIndex === 'number' && !Number.isNaN(body.expectedStepIndex)
+              ? body.expectedStepIndex
+              : undefined;
+          const res = mgr.advancePhase(code, userId, now, expectedStepIndex);
           if (!res.ok) return jsonResponse(res, 400);
           eloUpdates = res.eloUpdates;
         } else {

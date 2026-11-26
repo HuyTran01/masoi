@@ -20,13 +20,106 @@ const LOCALIZED_ROLE_BADGES: Record<RoleId, Record<Language, string>> = {
   traitor: { vi: '🗡️ Gián điệp', en: '🗡️ Spy', fr: '🗡️ Espion', es: '🗡️ Espía', ja: '🗡️ 間者' },
 };
 
+const ENCYCLOPEDIA_TEXT = {
+  vi: {
+    intro: 'Toàn thư bách khoa về luật chơi, quyền năng, thời điểm thức dậy và chiến thuật dành cho cả người mới bắt đầu lẫn cao thủ ma sói.',
+    searchPlaceholder: 'Tìm vai trò hoặc kỹ năng...',
+    searchAria: 'Tìm vai trò',
+    all: (n: number) => `Tất Cả (${n})`,
+    villagers: 'Dân Làng',
+    werewolves: 'Ma Sói',
+    thirdParty: 'Phe Thứ Ba',
+    noMatch: 'Không tìm thấy vai trò phù hợp với từ khóa của bạn.',
+    factionWolf: 'Phe Ma Sói',
+    factionNeutral: 'Phe Độc Lập / Thứ Ba',
+    factionVillager: 'Phe Dân Làng',
+    wakePassive: 'Ngủ ban đêm (Nội tại)',
+    wakeNight1: 'Chỉ đêm 1',
+    wakeNight: 'Thức ban đêm',
+    callout: 'Lời gọi của Quản Trò:',
+    tip: 'Mẹo Cho Người Mới:',
+  },
+  en: {
+    intro: 'Complete guide to rules, role abilities, night schedule, and winning tactics for both beginners and veteran Werewolf players.',
+    searchPlaceholder: 'Search role or ability...',
+    searchAria: 'Search roles',
+    all: (n: number) => `All (${n})`,
+    villagers: 'Villagers',
+    werewolves: 'Werewolves',
+    thirdParty: 'Third Party',
+    noMatch: 'No roles match your search query.',
+    factionWolf: 'Werewolf Team',
+    factionNeutral: 'Independent / Third Party',
+    factionVillager: 'Villager Team',
+    wakePassive: 'Sleeps at night (Passive)',
+    wakeNight1: 'Night 1 only',
+    wakeNight: 'Wakes at night',
+    callout: 'Game Master Callout:',
+    tip: 'Tip for New Players:',
+  },
+  fr: {
+    intro: 'Guide complet des règles, pouvoirs des rôles, ordre de la nuit et tactiques gagnantes pour débutants comme vétérans du Loup-Garou.',
+    searchPlaceholder: 'Rechercher un rôle ou un pouvoir...',
+    searchAria: 'Rechercher des rôles',
+    all: (n: number) => `Tous (${n})`,
+    villagers: 'Villageois',
+    werewolves: 'Loups-garous',
+    thirdParty: 'Tiers parti',
+    noMatch: 'Aucun rôle ne correspond à votre recherche.',
+    factionWolf: 'Équipe des loups-garous',
+    factionNeutral: 'Indépendant / Tiers parti',
+    factionVillager: 'Équipe des villageois',
+    wakePassive: 'Dort la nuit (passif)',
+    wakeNight1: 'Nuit 1 uniquement',
+    wakeNight: 'Se réveille la nuit',
+    callout: 'Annonce du Maître du Jeu :',
+    tip: 'Conseil pour les nouveaux joueurs :',
+  },
+  es: {
+    intro: 'Guía completa de reglas, habilidades de los roles, horario nocturno y tácticas ganadoras para principiantes y veteranos de Hombres Lobo.',
+    searchPlaceholder: 'Buscar rol o habilidad...',
+    searchAria: 'Buscar roles',
+    all: (n: number) => `Todos (${n})`,
+    villagers: 'Aldeanos',
+    werewolves: 'Hombres lobo',
+    thirdParty: 'Tercer bando',
+    noMatch: 'Ningún rol coincide con tu búsqueda.',
+    factionWolf: 'Equipo de los hombres lobo',
+    factionNeutral: 'Independiente / Tercer bando',
+    factionVillager: 'Equipo de los aldeanos',
+    wakePassive: 'Duerme de noche (pasivo)',
+    wakeNight1: 'Solo la noche 1',
+    wakeNight: 'Despierta de noche',
+    callout: 'Llamada del Narrador:',
+    tip: 'Consejo para nuevos jugadores:',
+  },
+  ja: {
+    intro: 'ルール、役職の能力、夜の進行、勝利のための戦術を網羅した、初心者からベテランの人狼プレイヤーまで使えるガイド。',
+    searchPlaceholder: '役職やスキルを検索...',
+    searchAria: '役職を検索',
+    all: (n: number) => `すべて (${n})`,
+    villagers: '村人',
+    werewolves: '人狼',
+    thirdParty: '第三陣営',
+    noMatch: '検索に一致する役職がありません。',
+    factionWolf: '人狼陣営',
+    factionNeutral: '独立 / 第三陣営',
+    factionVillager: '村人陣営',
+    wakePassive: '夜は眠る（パッシブ）',
+    wakeNight1: '1日目の夜のみ',
+    wakeNight: '夜に起きる',
+    callout: 'GMのコール:',
+    tip: '初心者へのヒント:',
+  },
+} as const;
+
 interface RoleEncyclopediaViewProps {
   lang: Language;
 }
 
 export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang }) => {
   const t = TRANSLATIONS[lang];
-  const isVi = lang === 'vi';
+  const L = ENCYCLOPEDIA_TEXT[lang];
   const [filterFaction, setFilterFaction] = useState<Faction | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -57,9 +150,7 @@ export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang
             </h2>
           </div>
           <p className="text-xs text-slate-300 mt-1 max-w-xl">
-            {isVi
-              ? 'Toàn thư bách khoa về luật chơi, quyền năng, thời điểm thức dậy và chiến thuật dành cho cả người mới bắt đầu lẫn cao thủ ma sói.'
-              : 'Complete guide to rules, role abilities, night schedule, and winning tactics for both beginners and veteran Werewolf players.'}
+            {L.intro}
           </p>
         </div>
 
@@ -72,8 +163,8 @@ export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang
               data-testid="role-encyclopedia-search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={isVi ? 'Tìm vai trò hoặc kỹ năng...' : 'Search role or ability...'}
-              aria-label={isVi ? 'Tìm vai trò' : 'Search roles'}
+              placeholder={L.searchPlaceholder}
+              aria-label={L.searchAria}
               className="w-full sm:w-52 bg-slate-950/90 border border-slate-700 focus:border-emerald-400 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none"
             />
           </div>
@@ -89,7 +180,7 @@ export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {isVi ? `Tất Cả (${rolesList.length})` : `All (${rolesList.length})`}
+              {L.all(rolesList.length)}
             </button>
             <button
               type="button"
@@ -100,7 +191,7 @@ export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {isVi ? 'Dân Làng' : 'Villagers'}
+              {L.villagers}
             </button>
             <button
               type="button"
@@ -111,7 +202,7 @@ export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {isVi ? 'Ma Sói' : 'Werewolves'}
+              {L.werewolves}
             </button>
             <button
               type="button"
@@ -122,7 +213,7 @@ export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang
                   : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              {isVi ? 'Phe Thứ Ba' : 'Third Party'}
+              {L.thirdParty}
             </button>
           </div>
         </div>
@@ -131,9 +222,7 @@ export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang
       {/* Roles Grid */}
       {filtered.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-xs text-slate-400">
-          {isVi
-            ? 'Không tìm thấy vai trò phù hợp với từ khóa của bạn.'
-            : 'No roles match your search query.'}
+          {L.noMatch}
         </div>
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -147,30 +236,18 @@ export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang
 
           const factionLabel =
             role.faction === 'werewolf'
-              ? isVi
-                ? 'Phe Ma Sói'
-                : 'Werewolf Team'
+              ? L.factionWolf
               : role.faction === 'neutral'
-              ? isVi
-                ? 'Phe Độc Lập / Thứ Ba'
-                : 'Independent / Third Party'
-              : isVi
-              ? 'Phe Dân Làng'
-              : 'Villager Team';
+              ? L.factionNeutral
+              : L.factionVillager;
 
           const isFirstNightOnly = role.id === 'cupid' || role.id === 'doppelganger';
           const wakeLabel =
             role.wakeOrder === 0
-              ? isVi
-                ? 'Ngủ ban đêm (Nội tại)'
-                : 'Sleeps at night (Passive)'
+              ? L.wakePassive
               : isFirstNightOnly
-              ? isVi
-                ? 'Chỉ đêm 1'
-                : 'Night 1 only'
-              : isVi
-              ? 'Thức ban đêm'
-              : 'Wakes at night';
+              ? L.wakeNight1
+              : L.wakeNight;
 
           return (
             <div
@@ -234,7 +311,7 @@ export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang
               {/* Moderator Instruction */}
               <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 text-[11px] text-slate-400">
                 <strong className="text-slate-300 block mb-0.5">
-                  {isVi ? 'Lời gọi của Quản Trò:' : 'Game Master Callout:'}
+                  {L.callout}
                 </strong>
                 {role.instructions[lang] || role.instructions.vi}
               </div>
@@ -243,7 +320,7 @@ export const RoleEncyclopediaView: React.FC<RoleEncyclopediaViewProps> = ({ lang
               <div className="bg-amber-950/20 border border-amber-900/40 rounded-xl p-2.5 text-[11px] text-amber-200">
                 <div className="flex items-center gap-1 font-bold text-amber-400 mb-0.5">
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>{isVi ? 'Mẹo Cho Người Mới:' : 'Tip for New Players:'}</span>
+                  <span>{L.tip}</span>
                 </div>
                 <p className="leading-relaxed">
                   {role.guideForNewbie[lang] || role.guideForNewbie.vi}

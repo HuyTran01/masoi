@@ -451,7 +451,7 @@ export class GMRoomManager {
   joinAsPlayer(
     rawCode: string,
     user: { id: string; name: string; avatar?: string },
-    options?: { seatId?: string }
+    options?: { seatId?: string; playerToken?: string }
   ):
     | { ok: true; view: GMRoomPlayerView; room: GMRoomHostState; playerToken: string }
     | { ok: false; error: string } {
@@ -484,6 +484,12 @@ export class GMRoomManager {
     // 1. Idempotent reconnect if this player already claimed a seat
     const existingSeat = room.seats.find((s) => s.claimedByUserId === cleanUserId);
     if (existingSeat) {
+      if (
+        this.hasPlayerToken(code, cleanUserId) &&
+        !this.verifyPlayerToken(code, cleanUserId, options?.playerToken)
+      ) {
+        return { ok: false, error: 'Ghế này đang được sử dụng bởi phiên khác.' };
+      }
       if (options?.seatId && options.seatId !== existingSeat.id && room.status === 'setup') {
         const target = room.seats.find(
           (s) => s.id === options.seatId && !s.claimedByUserId

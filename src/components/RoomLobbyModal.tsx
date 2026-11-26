@@ -476,6 +476,10 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, isStarting, clearJoinTimeout, onClose]);
 
+  // Latest requested size, so rapid +/- clicks accumulate instead of reusing a stale render value.
+  // (Declared before the early return below to keep hook order stable.)
+  const latestSizeRef = useRef(villageSize);
+
   if (!isOpen) return null;
 
   const isInJoinedOnlineRoom = modeTab === 'online' && Boolean(liveRoom);
@@ -490,7 +494,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
       : actionTab === 'create' && !isJoinedGuestRoomRef.current && !pendingJoinCodeRef.current;
   const isHostSyncing = modeTab === 'online' && isHost && !liveRoom;
 
-  const activeRoomCode = liveRoom?.code || createdRoomId;
+  const activeRoomCode = modeTab === 'online' ? liveRoom?.code || createdRoomId : createdRoomId;
   const participants: LobbyParticipant[] = liveRoom
     ? liveRoom.participants.map((p) => ({
         id: p.id,
@@ -586,10 +590,13 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  latestSizeRef.current = effectiveSize;
+
   const handleChangeSize = (nextSize: number) => {
     if (modeTab === 'online' && !isHost) return;
     const minAllowed = modeTab === 'online' ? Math.max(4, humanCount) : 4;
     const clamped = Math.max(minAllowed, Math.min(20, nextSize));
+    latestSizeRef.current = clamped;
     onChangeVillageSize(clamped);
     if (modeTab === 'online' && isHost && liveRoom) {
       realtimeClient.updateConfig(liveRoom.code, currentUser.id, { villageSize: clamped });
@@ -628,9 +635,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     if (isStarting) return;
     if (!isHost || !liveRoom) {
       setLobbyNotice(
-        lang === 'vi'
-          ? 'Đang chờ Chủ phòng bấm Bắt đầu ván đấu...'
-          : 'Waiting for the Room Host to start the match...'
+        t.lbWaitingHostStart
       );
       return;
     }
@@ -651,11 +656,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     const clean = (overrideCode ?? joinCodeInput).trim().toUpperCase();
     if (!clean || clean.length < 3) {
       setJoinError(
-        lang === 'vi'
-          ? modeTab === 'online'
-            ? 'Nhập mã phòng hợp lệ (VD: ONL-4821)'
-            : 'Nhập mã phòng Quản Trò hợp lệ (VD: GM-4821)'
-          : 'Enter a valid room code'
+        modeTab === 'online' ? t.lbEnterCodeOnline : t.lbEnterCodeGM
       );
       return;
     }
@@ -674,9 +675,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         const data = await res.json().catch(() => ({ exists: false }));
         if (!res.ok || !data.exists) {
           setJoinError(
-            lang === 'vi'
-              ? `Không tìm thấy phòng Quản Trò "${clean}". Hãy kiểm tra lại mã phòng từ Quản Trò.`
-              : `GM room "${clean}" not found. Check the code with your Game Master.`
+            t.lbGMRoomNotFound(clean)
           );
           setIsJoining(false);
           return;
@@ -685,9 +684,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         onLaunchGMPlayerCard(clean);
       } catch {
         setJoinError(
-          lang === 'vi'
-            ? 'Không thể kiểm tra phòng Quản Trò. Vui lòng thử lại.'
-            : 'Could not reach GM server. Please try again.'
+          t.lbGMUnreachable
         );
         setIsJoining(false);
       }
@@ -706,9 +703,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         pendingJoinCodeRef.current = null;
         setIsJoining(false);
         setJoinError(
-          lang === 'vi'
-            ? `Quá thời gian kết nối máy chủ phòng "${clean}" (10s). Kiểm tra mạng hoặc bấm Thử lại.`
-            : `Connection timed out while joining "${clean}" (10s). Please retry.`
+          t.lbJoinTimeout(clean)
         );
       }
     }, 10000);
@@ -767,12 +762,8 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                     )}
                     <span>
                       {wsStatus === 'connected'
-                        ? lang === 'vi'
-                          ? 'Máy chủ trực tuyến'
-                          : 'Live Server'
-                        : lang === 'vi'
-                        ? 'Đang kết nối...'
-                        : 'Connecting...'}
+                        ? t.lbLiveServer
+                        : t.lbConnecting}
                     </span>
                   </span>
                 )}
@@ -814,7 +805,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
             }`}
           >
             <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-            <span className="sm:hidden">{lang === 'vi' ? '1. Online 3D' : '1. Online 3D'}</span>
+            <span className="sm:hidden">1. Online 3D</span>
             <span className="hidden sm:inline truncate">{t.tabOnline3D}</span>
           </button>
 
@@ -837,7 +828,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
             }`}
           >
             <Shield className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-            <span className="sm:hidden">{lang === 'vi' ? '2. Quản Trò' : '2. GM Tool'}</span>
+            <span className="sm:hidden">{t.lbGMToolShort}</span>
             <span className="hidden sm:inline truncate">{t.tabGMOffline}</span>
           </button>
         </div>
@@ -852,12 +843,8 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
             }`}
           >
             {transportMode === 'ws'
-              ? lang === 'vi'
-                ? '⚡ Đồng bộ Thời Gian Thực (WebSocket · Server-Authoritative)'
-                : '⚡ Real-Time Sync (WebSocket · Server-Authoritative)'
-              : lang === 'vi'
-              ? '☁️ Đồng bộ Cloud (HTTP Sync · Server-Authoritative)'
-              : '☁️ Cloud Sync (HTTP Sync · Server-Authoritative)'}
+              ? t.lbSyncWs
+              : t.lbSyncHttp}
           </div>
         )}
 
@@ -870,9 +857,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
             >
               <Lock className="w-3.5 h-3.5 text-sky-400 shrink-0" />
               <span>
-                {lang === 'vi'
-                  ? 'Khách mời · Chỉ Chủ phòng được tùy chỉnh thông tin phòng'
-                  : 'Guest · Only the Room Host can modify room settings'}
+                {t.lbGuestReadonly}
               </span>
             </div>
 
@@ -883,7 +868,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
               className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-bold text-slate-200 flex items-center gap-1.5 cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
-              <span>{lang === 'vi' ? 'Rời phòng' : 'Leave Room'}</span>
+              <span>{t.lbLeaveRoom}</span>
             </button>
           </div>
         ) : (
@@ -936,14 +921,14 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
               </button>
             </div>
 
-            {isInJoinedOnlineRoom && isHost && (
+            {isInJoinedOnlineRoom && isHost && actionTab === 'create' && (
               <div className="flex items-center gap-1.5">
                 <span
                   data-testid="lobby-host-badge"
                   className="px-2.5 py-1 rounded-lg bg-amber-950/70 border border-amber-500/40 text-[11px] font-bold text-amber-300 flex items-center gap-1"
                 >
                   <Crown className="w-3.5 h-3.5" />
-                  <span>{lang === 'vi' ? 'Chủ phòng' : 'Room Host'}</span>
+                  <span>{t.lbRoomHost}</span>
                 </span>
                 <button
                   type="button"
@@ -953,7 +938,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                   className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-40 border border-slate-700 text-[11px] font-bold text-slate-200 flex items-center gap-1 cursor-pointer"
                 >
                   <LogOut className="w-3 h-3" />
-                  <span>{lang === 'vi' ? 'Rời phòng' : 'Leave Room'}</span>
+                  <span>{t.lbLeaveRoom}</span>
                 </button>
               </div>
             )}
@@ -968,9 +953,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
                   {isGuestInOnlineRoom
-                    ? lang === 'vi'
-                      ? 'MÃ PHÒNG ĐANG THAM GIA'
-                      : 'JOINED ROOM CODE'
+                    ? t.lbJoinedRoomCode
                     : t.yourRoomCodeLabel}
                 </span>
                 <div className="flex items-center gap-2.5 mt-1">
@@ -1026,7 +1009,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                         type="button"
                         data-testid="lobby-custom-size-dec"
                         disabled={effectiveSize <= Math.max(4, modeTab === 'online' ? humanCount : 4)}
-                        onClick={() => handleChangeSize(effectiveSize - 1)}
+                        onClick={() => handleChangeSize(latestSizeRef.current - 1)}
                         className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
                         aria-label="Decrease player count"
                       >
@@ -1036,7 +1019,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                         min={modeTab === 'online' ? Math.max(4, humanCount) : 4}
                         max={20}
                         data-testid="lobby-custom-size-input"
-                        aria-label={lang === 'vi' ? 'Số ghế tối đa' : 'Maximum seats'}
+                        aria-label={t.lbMaxSeats}
                         value={effectiveSize}
                         onCommit={handleChangeSize}
                         className="w-10 text-center bg-slate-950 border border-slate-700 rounded py-0.5 text-xs font-mono font-extrabold text-amber-300 focus:outline-none"
@@ -1045,7 +1028,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                         type="button"
                         data-testid="lobby-custom-size-inc"
                         disabled={effectiveSize >= 20}
-                        onClick={() => handleChangeSize(effectiveSize + 1)}
+                        onClick={() => handleChangeSize(latestSizeRef.current + 1)}
                         className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
                         aria-label="Increase player count"
                       >
@@ -1060,10 +1043,10 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                   className="bg-slate-950/80 border border-slate-800 rounded-xl px-3.5 py-2 text-right space-y-0.5"
                 >
                   <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                    {lang === 'vi' ? 'Cấu hình phòng (Chủ phòng đặt)' : 'Room Settings (Host Only)'}
+                    {t.lbRoomHost}
                   </div>
                   <div className="text-xs font-extrabold text-amber-300">
-                    {effectiveSize} {lang === 'vi' ? 'ghế' : 'seats'} · 🌙 {effectiveTimer.nightActionSec}s · ☀️ {effectiveTimer.dayDiscussSec}s · ⚖️ {effectiveTimer.dayVoteSec}s
+                    {effectiveSize} {t.lbSeats} · 🌙 {effectiveTimer.nightActionSec}s · ☀️ {effectiveTimer.dayDiscussSec}s · ⚖️ {effectiveTimer.dayVoteSec}s
                   </div>
                 </div>
               )}
@@ -1123,12 +1106,8 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
 
                   <p className="text-[11px] text-slate-400">
                     {isHost
-                      ? lang === 'vi'
-                        ? `Gửi mã ${activeRoomCode} cho bạn bè ở thiết bị khác nhập tại tab "Nhập Mã Phòng Để Vào" để cùng chơi trực tuyến thời gian thực.`
-                        : `Share code ${activeRoomCode} with friends on other devices to enter in "Join with Room Code" and play live.`
-                      : lang === 'vi'
-                      ? 'Danh sách thành viên và cấu hình phòng được đồng bộ trực tiếp từ Chủ phòng.'
-                      : 'Participant list and room rules are synced live from the Room Host.'}
+                      ? t.lbShareCode(activeRoomCode)
+                      : t.lbRoomHost}
                   </p>
 
                   {connectTimedOut && isHostSyncing && (
@@ -1138,9 +1117,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                       className="px-3 py-2.5 rounded-xl bg-rose-950/70 border border-rose-500/60 text-xs text-rose-200 font-semibold flex flex-wrap items-center justify-between gap-2"
                     >
                       <span>
-                        {lang === 'vi'
-                          ? 'Không thể kết nối máy chủ phòng trực tuyến sau 10 giây. Vui lòng thử lại.'
-                          : 'Could not reach the live room server after 10s. Please retry.'}
+                        {t.lbConnectTimeout}
                       </span>
                       <button
                         type="button"
@@ -1148,7 +1125,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                         className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                       >
                         <RefreshCw className="w-3 h-3" />
-                        <span>{lang === 'vi' ? 'Thử lại' : 'Retry'}</span>
+                        <span>{t.lbRetry}</span>
                       </button>
                     </div>
                   )}
@@ -1190,7 +1167,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                                     {peer.name}
                                     {isSelf && (
                                       <span className="ml-1 text-[9px] text-amber-300">
-                                        ({lang === 'vi' ? 'Bạn' : 'You'})
+                                        ({t.lbYou})
                                       </span>
                                     )}
                                   </div>
@@ -1232,7 +1209,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                       <div className="bg-slate-950/80 border border-amber-500/35 rounded-xl p-2.5 space-y-2">
                         <div className="flex items-center justify-between flex-wrap gap-1">
                           <span className="text-[11px] font-extrabold text-amber-300">
-                            ⏱️ {lang === 'vi' ? 'Thời gian mỗi pha:' : 'Phase timers:'}
+                            ⏱️ {t.lbPhaseTimers}
                           </span>
                           <div className="flex items-center gap-1">
                             <button
@@ -1248,14 +1225,14 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                               }
                               className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-sky-300 cursor-pointer"
                             >
-                              ⚡ {lang === 'vi' ? 'Nhanh' : 'Fast'}
+                              ⚡ {t.lbTimerFast}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleChangeTimers(DEFAULT_TIMER_CONFIG)}
                               className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-amber-300 cursor-pointer"
                             >
-                              ⚖️ {lang === 'vi' ? 'Chuẩn' : 'Standard'}
+                              ⚖️ {t.lbTimerStandard}
                             </button>
                             <button
                               type="button"
@@ -1270,7 +1247,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                               }
                               className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-emerald-300 cursor-pointer"
                             >
-                              🐢 {lang === 'vi' ? 'Thư thả' : 'Relaxed'}
+                              🐢 {t.lbTimerRelaxed}
                             </button>
                           </div>
                         </div>
@@ -1278,10 +1255,10 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
                           <label className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg px-2 py-1">
                             <span className="text-slate-300 font-semibold">
-                              🌙 {lang === 'vi' ? 'Đêm:' : 'Night:'}
+                              🌙 {t.lbTimerNight}
                             </span>
                             <NumericDraftInput
-                              min={5}
+                              min={15}
                               max={120}
                               value={effectiveTimer.nightActionSec}
                               onCommit={(v) =>
@@ -1295,10 +1272,10 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                           </label>
                           <label className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg px-2 py-1">
                             <span className="text-slate-300 font-semibold">
-                              ☀️ {lang === 'vi' ? 'Thảo luận:' : 'Debate:'}
+                              ☀️ {t.lbTimerDebate}
                             </span>
                             <NumericDraftInput
-                              min={10}
+                              min={20}
                               max={300}
                               value={effectiveTimer.dayDiscussSec}
                               onCommit={(v) =>
@@ -1312,10 +1289,10 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                           </label>
                           <label className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg px-2 py-1">
                             <span className="text-slate-300 font-semibold">
-                              ⚖️ {lang === 'vi' ? 'Bỏ phiếu:' : 'Vote:'}
+                              ⚖️ {t.lbTimerVote}
                             </span>
                             <NumericDraftInput
-                              min={10}
+                              min={15}
                               max={180}
                               value={effectiveTimer.dayVoteSec}
                               onCommit={(v) =>
@@ -1353,18 +1330,12 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                   )}
                   <span>
                     {isStarting
-                      ? lang === 'vi'
-                        ? 'Đang bắt đầu ván đấu...'
-                        : 'Starting match...'
+                      ? t.lbStarting
                       : isHostSyncing
-                      ? lang === 'vi'
-                        ? 'Đang đồng bộ phòng với máy chủ...'
-                        : 'Syncing room with server...'
+                      ? t.lbSyncingRoom
                       : isHost
                       ? t.startOnlineMatchBtn(participants.length, activeRoomCode)
-                      : lang === 'vi'
-                      ? 'Đang chờ Chủ phòng bắt đầu ván đấu...'
-                      : 'Waiting for Host to start the match...'}
+                      : t.lbWaitingHostStart}
                   </span>
                 </button>
               </>
@@ -1385,12 +1356,10 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                     }`}
                   >
                     <div className="text-xs font-black">
-                      🃏 {lang === 'vi' ? 'Không có bộ bài ngoài đời' : 'No physical deck (Virtual)'}
+                      🃏 {t.lbNoPhysicalDeck}
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                      {lang === 'vi'
-                        ? 'App chia vai tự động. Người chơi vào mã phòng chỉ thấy duy nhất vai trò của riêng mình.'
-                        : 'App deals balanced roles. Players join with the room code and see ONLY their own role.'}
+                      {t.lbNoPhysicalDeckDesc}
                     </p>
                   </button>
 
@@ -1408,31 +1377,23 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                     }`}
                   >
                     <div className="text-xs font-black">
-                      🎴 {lang === 'vi' ? 'Đã có bộ bài giấy ngoài đời' : 'Have physical deck'}
+                      🎴 {t.lbHavePhysicalDeck}
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                      {lang === 'vi'
-                        ? 'Người chơi tự nhập lá bài mình bốc trước trận đấu, hoặc Quản Trò nhập hộ trực tiếp.'
-                        : 'Players submit their own drawn card before match starts, or GM enters it for them.'}
+                      {t.lbHavePhysicalDeckDesc}
                     </p>
                   </button>
                 </div>
 
                 <div className="bg-[#070a14] border border-slate-800 rounded-2xl p-3.5 text-xs text-slate-300 space-y-1.5 leading-relaxed">
                   <p className="font-bold text-amber-300">
-                    {lang === 'vi'
-                      ? 'Chế độ hỗ trợ chơi ngoài đời (tách biệt hoàn toàn với game 3D Online/Bot):'
-                      : 'Real-life companion mode (completely isolated from 3D Online/Bot matches):'}
+                    {t.lbCompanionTitle}
                   </p>
                   <p>
-                    {lang === 'vi'
-                      ? `1. Quản Trò mở bảng điều khiển phòng ${createdRoomId} để gọi đêm, ghi nhớ Bảo Vệ/Phù Thủy/Sói Con.`
-                      : `1. GM opens room ${createdRoomId} to track nights, potions, lovers, and wolf pup frenzy.`}
+                    {t.lbCompanionStep1(createdRoomId)}
                   </p>
                   <p>
-                    {lang === 'vi'
-                      ? `2. Người chơi nhập mã ${createdRoomId} ở tab "Nhập Mã Phòng Để Vào" — chỉ xem được mỗi vai trò của mình hoặc tự nhập bài trước khi bắt đầu.`
-                      : `2. Players enter ${createdRoomId} in "Join with Room Code" to view ONLY their own secret role or enter their physical card.`}
+                    {t.lbCompanionStep2(createdRoomId)}
                   </p>
                 </div>
 
@@ -1482,7 +1443,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
               <div className="bg-[#070a14] border border-slate-800 rounded-2xl p-3.5 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-slate-300">
-                    {lang === 'vi' ? 'Phòng Online đang mở trên máy chủ:' : 'Open Online rooms on server:'}
+                    {t.lbOpenOnlineRooms}
                   </span>
                   <button
                     type="button"
@@ -1493,15 +1454,13 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                     className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-sky-300 flex items-center gap-1 cursor-pointer"
                   >
                     <RefreshCw className="w-3 h-3" />
-                    <span>{lang === 'vi' ? 'Làm mới' : 'Refresh'}</span>
+                    <span>{t.lbRefresh}</span>
                   </button>
                 </div>
 
                 {openRooms.length === 0 ? (
                   <p className="text-[11px] text-slate-500 py-2 text-center">
-                    {lang === 'vi'
-                      ? 'Chưa có phòng nào đang mở. Hãy tạo phòng mới hoặc nhập mã từ bạn bè!'
-                      : 'No open rooms yet. Create one or enter a friend’s room code!'}
+                    {t.lbNoOpenRooms}
                   </p>
                 ) : (
                   <div className="space-y-1.5 max-h-44 overflow-y-auto" data-testid="lobby-open-rooms-list">
@@ -1516,7 +1475,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                             {r.hostName} · {r.playerCount}/{r.villageSize}
                             {r.status === 'in_match' && (
                               <span className="ml-1.5 text-rose-400 font-bold">
-                                ({lang === 'vi' ? 'Đang chơi' : 'In match'})
+                                ({t.lbInMatch})
                               </span>
                             )}
                           </span>
@@ -1527,7 +1486,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                           onClick={() => handleJoinRoomSubmit(r.code)}
                           className="px-2.5 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white font-bold text-[11px] cursor-pointer"
                         >
-                          {lang === 'vi' ? 'Vào ngay' : 'Join'}
+                          {t.lbJoin}
                         </button>
                       </div>
                     ))}
@@ -1538,7 +1497,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
               <div className="bg-[#070a14] border border-slate-800 rounded-2xl p-3.5 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold text-slate-300">
-                    {lang === 'vi' ? 'Phòng Quản Trò đang mở:' : 'Active GM rooms on server:'}
+                    {t.lbOpenGMRooms}
                   </span>
                   <button
                     type="button"
@@ -1546,15 +1505,13 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                     className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-amber-300 flex items-center gap-1 cursor-pointer"
                   >
                     <RefreshCw className="w-3 h-3" />
-                    <span>{lang === 'vi' ? 'Làm mới' : 'Refresh'}</span>
+                    <span>{t.lbRefresh}</span>
                   </button>
                 </div>
 
                 {openGMRooms.length === 0 ? (
                   <p className="text-[11px] text-slate-500 py-2 text-center">
-                    {lang === 'vi'
-                      ? 'Chưa có phòng Quản Trò nào đang mở. Hãy tạo phòng hoặc nhập mã từ Quản Trò!'
-                      : 'No active GM rooms yet. Create one or enter your Game Master’s code!'}
+                    {t.lbNoGMRooms}
                   </p>
                 ) : (
                   <div className="space-y-1.5 max-h-44 overflow-y-auto" data-testid="lobby-open-gm-rooms-list">
@@ -1567,12 +1524,8 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                           <span className="font-mono font-black text-amber-300">{r.code}</span>
                           <span className="text-slate-400 ml-2">
                             {r.deckMode === 'physical_cards'
-                              ? lang === 'vi'
-                                ? '🎴 Bài giấy'
-                                : '🎴 Physical'
-                              : lang === 'vi'
-                              ? '🃏 Chia bài ảo'
-                              : '🃏 Virtual'}{' '}
+                              ? t.lbPhysical
+                              : t.lbVirtual}{' '}
                             · {r.claimedCount}/{r.playerCount}
                           </span>
                         </div>
@@ -1582,7 +1535,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                           onClick={() => handleJoinRoomSubmit(r.code)}
                           className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-[11px] cursor-pointer"
                         >
-                          {lang === 'vi' ? 'Vào ngay' : 'Join'}
+                          {t.lbJoin}
                         </button>
                       </div>
                     ))}
@@ -1603,9 +1556,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                   <LogIn className="w-4 h-4" />
                   <span>
                     {isJoining
-                      ? lang === 'vi'
-                        ? 'Đang vào phòng...'
-                        : 'Joining room...'
+                      ? t.lbJoining
                       : t.joinOnlineBtn}
                   </span>
                 </>
@@ -1614,9 +1565,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                   <Smartphone className="w-4 h-4" />
                   <span>
                     {isJoining
-                      ? lang === 'vi'
-                        ? 'Đang kiểm tra mã phòng...'
-                        : 'Checking room...'
+                      ? t.lbChecking
                       : t.joinGMCardBtn}
                   </span>
                 </>

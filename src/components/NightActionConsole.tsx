@@ -30,6 +30,7 @@ interface NightActionConsoleProps {
   onSkipStepFast?: () => void;
   onSelectWitchHealTarget: (victimId: string | null) => void;
   onConfirmSeerInspect?: () => void;
+  onHunterNoMark?: () => void;
   onConfirmNightAction: () => void;
   onAdvanceBotStep: () => void;
   onCloseEyes: () => void;
@@ -62,6 +63,10 @@ function formatGhostNightLiveAction(
   if (stepKey === 'bodyguard') {
     const t = nameOf(actions.guardTargetId);
     return t ? `🛡️ → ${t}` : null;
+  }
+  if (stepKey === 'hunter') {
+    const t = nameOf(actions.hunterTargetId);
+    return t ? `🎯 → ${t}` : null;
   }
   if (stepKey === 'werewolf') {
     const t1 = nameOf(actions.wolfTargetId);
@@ -136,6 +141,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
   onSkipStepFast,
   onSelectWitchHealTarget,
   onConfirmSeerInspect,
+  onHunterNoMark,
   onConfirmNightAction,
   onAdvanceBotStep,
   onCloseEyes,
@@ -189,6 +195,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
               doppelganger: '🎭',
               cupid: '💘',
               bodyguard: '🛡️',
+              hunter: '🎯',
               werewolf: '🐺',
               witch: '🧪',
               seer: '🔮',
@@ -256,6 +263,13 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
   const cupidDistinctCount = new Set(cupidSelectedIds).size;
   const isCupidIncomplete =
     me.roleId === 'cupid' && currentNightStep.key === 'cupid' && cupidDistinctCount < 2;
+  // A picked Seer target must be inspected via the purple button; the green skip button would silently discard it.
+  const isSeerAwaitingInspect =
+    me.roleId === 'seer' &&
+    currentNightStep.key === 'seer' &&
+    Boolean(selectedTargetId) &&
+    Boolean(onConfirmSeerInspect) &&
+    !seerInspectResult;
 
   const hasSelectedAction =
     me.roleId === 'cupid' && currentNightStep.key === 'cupid'
@@ -361,12 +375,12 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
           <button
             type="button"
             data-testid="role-console-confirm-btn"
-            disabled={isOnlineWaitingConfirm || isCupidIncomplete}
+            disabled={isOnlineWaitingConfirm || isCupidIncomplete || isSeerAwaitingInspect}
             onClick={onConfirmNightAction}
             className={`px-2.5 py-1 rounded-xl border font-extrabold text-[11px] sm:text-xs flex items-center gap-1 shadow ${
               isOnlineWaitingConfirm
                 ? 'bg-[#1c3621] border-[#6ee7b7]/60 text-[#bbf7d0] cursor-default'
-                : isCupidIncomplete
+                : isCupidIncomplete || isSeerAwaitingInspect
                 ? 'bg-[#3a2819] border-[#785334] text-[#d6bfa2] opacity-80 cursor-not-allowed'
                 : 'bg-[#2f7d4d] hover:bg-[#38945b] border-[#86efac]/70 text-white cursor-pointer'
             }`}
@@ -411,6 +425,33 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
         {currentNightStep.playerInstruction[lang]}{' '}
         <span className="text-[#f5b82e] font-semibold">{t.tapTargetHint}</span>
       </p>
+
+      {/* Hunter Night-Aim Controls (Chọn ghim hoặc Không ghim) */}
+      {me.roleId === 'hunter' && currentNightStep.key === 'hunter' && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-[#2a1911] border border-amber-500/60">
+          <span className="text-[11px] font-bold text-[#fde7c3]">
+            🎯{' '}
+            {selectedTargetId
+              ? `${t.selectedPrefix} ${players.find((p) => p.id === selectedTargetId)?.name || ''}`
+              : t.hunterNoMarkStatus}
+          </span>
+          {onHunterNoMark && (
+            <button
+              type="button"
+              data-testid="role-console-hunter-no-mark-btn"
+              disabled={isOnlineWaitingConfirm}
+              onClick={onHunterNoMark}
+              className={`px-2.5 py-1 rounded-lg border text-[11px] font-extrabold cursor-pointer ${
+                isOnlineWaitingConfirm
+                  ? 'bg-[#3a2819] border-[#785334] text-[#d6bfa2] opacity-60 cursor-default'
+                  : 'bg-[#1b120b] hover:bg-[#312115] border-[#f5b82e]/80 text-[#fde7c3]'
+              }`}
+            >
+              🚫 {t.hunterNoMarkBtn}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Witch Heal & Poison Controls — STRICT ZERO META-LEAK: Only show genuinely dying wolf victims */}
       {me.roleId === 'witch' && currentNightStep.key === 'witch' && (

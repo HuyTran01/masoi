@@ -495,10 +495,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       stateRef.current.isUserRoaming = false;
       stateRef.current.dashTargetPos = null;
       stateRef.current.crouchToggled = false;
-      if (
-        (prevPhase === 'night' && phase === 'day_discussion') ||
-        (prevPhase === 'hunter_revenge' && phase !== 'hunter_revenge')
-      ) {
+      if (prevPhase === 'night' && phase === 'day_discussion') {
         stateRef.current.needsDawnReset = true;
       }
       if (phase !== prevPhase && isDirectLookCameraPreset(cameraPreset)) {
@@ -1805,10 +1802,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       const biome = AGROU_BIOMES[activeBiomeKey];
       const isDay =
         !activeDeathCinematic &&
-        (st.isTitleScreen ||
-          st.phase === 'day_discussion' ||
-          st.phase === 'day_voting' ||
-          st.phase === 'hunter_revenge');
+        (st.isTitleScreen || st.phase === 'day_discussion' || st.phase === 'day_voting');
       const isVotingPhase = st.phase === 'day_voting' && !st.isTitleScreen;
       const isAbstaining = st.selectedTargetId === CAMPFIRE_ABSTAIN_ID;
 
@@ -2744,9 +2738,9 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         const isTitlePointing = st.isTitleScreen && p.isAlive && (i === 0 || i === 1 || i === 5);
         const isUnderHeavySuspicion =
           isVotingPhase && p.isAlive && (st.votesMap[p.id] || 0) >= 2 && !isPointingVote;
-        const isHunterAiming =
-          (st.phase === 'hunter_revenge' && p.roleId === 'hunter') ||
-          (isDeathKiller && activeDeathCinematic?.causeType === 'hunter_shot');
+        const isHunterAiming = Boolean(
+          isDeathKiller && activeDeathCinematic?.causeType === 'hunter_shot'
+        );
 
         seat.musketGroup.visible = isHunterAiming;
         if (isHunterAiming) {

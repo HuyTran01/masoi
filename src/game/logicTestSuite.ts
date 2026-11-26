@@ -4,7 +4,6 @@ import {
   resolveNightActions,
   applyDayLynch,
   tallyVotes,
-  resolveHunterShot,
   checkWinCondition,
 } from './rules';
 import { Player } from '../types/game';
@@ -92,14 +91,15 @@ export const LOGIC_TEST_SCENARIOS: LogicTestScenario[] = [
     category: 'Roster & Setup',
     title: 'Thứ tự gọi thức dậy ban đêm (Wake Order)',
     description:
-      'Đảm bảo Nhân Bản (5) -> Cupid (10) -> Bảo Vệ (15) -> Ma Sói (20) -> Sói Con (22) -> Phù Thủy (30) -> Tiên Tri (40).',
-    expectedSummary: 'doppelganger -> cupid -> bodyguard -> werewolf -> wolf_pup -> witch -> seer',
+      'Đảm bảo Nhân Bản (5) -> Cupid (10) -> Bảo Vệ (15) -> Thợ Săn (18) -> Ma Sói (20) -> Sói Con (22) -> Phù Thủy (30) -> Tiên Tri (40).',
+    expectedSummary: 'doppelganger -> cupid -> bodyguard -> hunter -> werewolf -> wolf_pup -> witch -> seer',
     run: () => {
       const order = getNightCallOrder().map((r) => r.id);
       const expected = [
         'doppelganger',
         'cupid',
         'bodyguard',
+        'hunter',
         'werewolf',
         'wolf_pup',
         'witch',
@@ -443,28 +443,29 @@ export const LOGIC_TEST_SCENARIOS: LogicTestScenario[] = [
     },
   },
 
-  // 14. Hunter Revenge Cascade (Shooting a Lover who is Wolf Pup)
+  // 14. Night-Aim Hunter lynched -> pre-marked bullet auto-fires (Lover who is Wolf Pup)
   {
     id: 'test-14-hunter-shot-cascade',
     category: 'Special Roles & Cascades',
-    title: 'Thợ Săn bắn trúng Tình Nhân kéo theo Sói Con chết & kích hoạt Cuồng Nộ',
+    title: 'Thợ Săn bị treo cổ tự bắn mục tiêu đã ghim, kéo theo Sói Con chết & kích hoạt Cuồng Nộ',
     description:
-      'Thợ Săn nổ súng bắn hạ p2 (đang yêu p3 là Sói Con). Cả p2 và p3 đều chết, đồng thời kích hoạt wolfPupTriggeredNextNight!',
+      'Thợ Săn đã ghim p2 (đang yêu p3 là Sói Con). Khi Thợ Săn bị treo cổ, phát đạn ghim tự nổ: cả p2 và p3 đều chết, đồng thời kích hoạt wolfPupTriggeredNextNight!',
     expectedSummary: 'p2 chết, p3 (Sói Con) chết theo, wolfPupTriggeredNextNight=true',
     run: () => {
       const players: Player[] = [
-        { id: 'p1', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: false },
+        { id: 'p1', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: true, hunterMarkId: 'p2' },
         { id: 'p2', name: 'Dân Làng', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, loverId: 'p3' },
         { id: 'p3', name: 'Sói Con', avatar: '🔥', roleId: 'wolf_pup', isAlive: true, loverId: 'p2' },
         { id: 'p4', name: 'Sói Chúa', avatar: '🐺', roleId: 'werewolf', isAlive: true },
       ];
-      const res = resolveHunterShot(players, 'p1', 'p2');
-      const p2 = res.updatedPlayers.find((p) => p.id === 'p2')!;
-      const p3 = res.updatedPlayers.find((p) => p.id === 'p3')!;
+      const res = applyDayLynch(players, 'p1');
+      const p2 = res.updatedPlayers.find((p: Player) => p.id === 'p2')!;
+      const p3 = res.updatedPlayers.find((p: Player) => p.id === 'p3')!;
       const passed =
         !p2.isAlive &&
         !p3.isAlive &&
-        res.extraVictimId === 'p3' &&
+        res.hunterShots.length === 1 &&
+        res.hunterShots[0].targetId === 'p2' &&
         res.wolfPupTriggeredNextNight === true;
       return {
         passed,
@@ -628,20 +629,19 @@ export const LOGIC_TEST_SCENARIOS: LogicTestScenario[] = [
     category: 'Voting & Win Conditions',
     title: 'Xử lý Hòa (Draw) khi 2 người cuối cùng chết cùng lúc',
     description:
-      'Khi Sói cắn chết Thợ Săn cuối cùng và Thợ Săn bắn chết lại Sói (0 người sống sót), kết quả trả về "draw".',
+      'Khi Sói cắn chết Thợ Săn cuối cùng và phát đạn ghim bắn chết lại Sói (0 người sống sót), kết quả trả về "draw".',
     expectedSummary: 'winner="draw", isOver=true',
     run: () => {
       const players: Player[] = [
         { id: 'p1', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
         { id: 'p2', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: true },
       ];
-      const night = resolveNightActions(players, { wolfTargetId: 'p2' });
-      const afterShot = resolveHunterShot(night.updatedPlayers, 'p2', 'p1');
-      const win = checkWinCondition(afterShot.updatedPlayers);
+      const night = resolveNightActions(players, { wolfTargetId: 'p2', hunterTargetId: 'p1' });
+      const win = checkWinCondition(night.updatedPlayers);
       const passed = win.isOver === true && win.winner === 'draw';
       return {
         passed,
-        actualSummary: `Alive=${afterShot.updatedPlayers.filter((p) => p.isAlive).length}, winner=${win.winner}`,
+        actualSummary: `Alive=${night.updatedPlayers.filter((p: Player) => p.isAlive).length}, winner=${win.winner}`,
       };
     },
   },

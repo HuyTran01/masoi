@@ -212,11 +212,13 @@ test('in_match disconnect preserves participant as disconnected until all humans
     assert.equal(reconn.room.participants.find((p) => p.id === 'h2')?.connected, true);
   }
 
-  // Disconnecting ALL humans deletes the in_match room
+  // Disconnecting ALL humans keeps active in_match room alive (rely on idle TTL, not instant deletion)
   mgr.leaveRoom('ONL-8888', 'h2', { isDisconnect: true });
   const dcAll = mgr.leaveRoom('ONL-8888', 'h1', { isDisconnect: true });
-  assert.equal(dcAll.deleted, true);
-  assert.equal(mgr.getRoom('ONL-8888'), null);
+  assert.equal(dcAll.deleted, false);
+  const savedRoom = mgr.getRoom('ONL-8888');
+  assert.ok(savedRoom, 'active in_match room must survive brief disconnects');
+  assert.equal(savedRoom.participants.find((p) => p.id === 'h1')?.connected, false);
 });
 
 test('recordProp anti-cheat blocks dead Ghosts, Night throws, self-throws, and dead targets while allowing living Day throws', () => {

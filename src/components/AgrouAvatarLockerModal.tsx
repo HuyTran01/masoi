@@ -14,6 +14,64 @@ import { sound } from '../utils/sound';
 import { AvatarPreview3D } from './AvatarPreview3D';
 import { BIOME_DESCRIPTIONS, BiomeThumbSvg } from './BiomeThumbSvg';
 
+const LOCKER_TEXT = {
+  vi: {
+    lockerTitle: 'Tủ Đồ Nhân Vật & Bản Đồ 3D',
+    lockerSubtitle: 'Xem trực tiếp nhân vật 3D đứng bên cạnh khi đổi mũ, áo choàng và bản đồ',
+    lockerClose: 'Đóng Tủ Đồ',
+    lockerDrag: 'Kéo để xoay 360°',
+    lockerHats: '1. Mũ & Phụ Kiện Đầu 3D',
+    lockerCloak: '2. Màu Áo Choàng',
+    lockerMap: '3. Bản Đồ Lửa Trại 3D',
+    lockerTitles: '4. Danh Hiệu Lửa Trại',
+    lockerSave: 'Lưu & Quay Lại Lửa Trại',
+  },
+  en: {
+    lockerTitle: '3D Character Locker & Maps',
+    lockerSubtitle: 'Preview your standing 3D character live as you customize hat, cloak & map',
+    lockerClose: 'Close Locker',
+    lockerDrag: 'Drag to spin 360°',
+    lockerHats: '1. 3D Headgear & Hats',
+    lockerCloak: '2. Cloak Color',
+    lockerMap: '3. 3D Campfire Map',
+    lockerTitles: '4. Campfire Title',
+    lockerSave: 'Save & Return to Campfire',
+  },
+  fr: {
+    lockerTitle: 'Casier du personnage & cartes 3D',
+    lockerSubtitle: 'Aperçu en direct de votre personnage 3D pendant que vous personnalisez chapeau, cape et carte',
+    lockerClose: 'Fermer le casier',
+    lockerDrag: 'Faites glisser pour tourner à 360°',
+    lockerHats: '1. Chapeaux & accessoires 3D',
+    lockerCloak: '2. Couleur de la cape',
+    lockerMap: '3. Carte du feu de camp 3D',
+    lockerTitles: '4. Titre du feu de camp',
+    lockerSave: 'Enregistrer & retourner au feu de camp',
+  },
+  es: {
+    lockerTitle: 'Taquilla de personaje y mapas 3D',
+    lockerSubtitle: 'Previsualiza tu personaje 3D en vivo mientras personalizas sombrero, capa y mapa',
+    lockerClose: 'Cerrar taquilla',
+    lockerDrag: 'Arrastra para girar 360°',
+    lockerHats: '1. Sombreros y accesorios 3D',
+    lockerCloak: '2. Color de la capa',
+    lockerMap: '3. Mapa de la fogata 3D',
+    lockerTitles: '4. Título de la fogata',
+    lockerSave: 'Guardar y volver a la fogata',
+  },
+  ja: {
+    lockerTitle: '3Dキャラクターロッカー＆マップ',
+    lockerSubtitle: '帽子・マント・マップを変えながら、立っている3Dキャラクターをリアルタイムでプレビュー',
+    lockerClose: 'ロッカーを閉じる',
+    lockerDrag: 'ドラッグで360°回転',
+    lockerHats: '1. 3D帽子・頭アクセサリー',
+    lockerCloak: '2. マントの色',
+    lockerMap: '3. 3D焚き火マップ',
+    lockerTitles: '4. 焚き火の称号',
+    lockerSave: '保存して焚き火に戻る',
+  },
+} as const;
+
 interface AgrouAvatarLockerModalProps {
   isOpen: boolean;
   lang: Language;
@@ -31,6 +89,7 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
   onChange,
   onClose,
 }) => {
+  const L = LOCKER_TEXT[lang];
   const [draftHat, setDraftHat] = useState<AgrouHatId>(config.hat);
   const [draftCloak, setDraftCloak] = useState<number>(config.cloakColor);
   const [draftBiome, setDraftBiome] = useState<AgrouMapBiome>(config.mapBiome);
@@ -85,7 +144,7 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={lang === 'vi' ? 'Tủ Đồ Nhân Vật & Bản Đồ 3D' : '3D Character Locker & Maps'}
+      aria-label={L.lockerTitle}
       data-testid="agrou-avatar-locker-modal"
       onClick={(e) => {
         if (e.target === e.currentTarget) handleDiscardAndClose();
@@ -99,19 +158,17 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
           <div className="min-w-0">
             <h2 className="text-sm sm:text-base font-extrabold text-[#fce8c3] flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-[#f59e0b] shrink-0" />
-              <span>{lang === 'vi' ? 'Tủ Đồ Nhân Vật & Bản Đồ 3D' : '3D Character Locker & Maps'}</span>
+              <span>{L.lockerTitle}</span>
             </h2>
             <p className="text-[11px] text-[#c7ae8e]">
-              {lang === 'vi'
-                ? 'Xem trực tiếp nhân vật 3D đứng bên cạnh khi đổi mũ, áo choàng và bản đồ'
-                : 'Preview your standing 3D character live as you customize hat, cloak & map'}
+              {L.lockerSubtitle}
             </p>
           </div>
           <button
             type="button"
             data-testid="close-avatar-locker-btn"
             onClick={handleDiscardAndClose}
-            aria-label={lang === 'vi' ? 'Đóng Tủ Đồ' : 'Close Locker'}
+            aria-label={L.lockerClose}
             className="p-1.5 rounded-xl bg-[#2f2117] hover:bg-[#422f20] border border-[#7c532e] text-[#f6ebd8] cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
@@ -132,7 +189,7 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
               />
               <div className="pointer-events-none absolute top-2 left-2 px-2 py-0.5 rounded-lg bg-[#160f09]/85 border border-[#8e6338]/70 text-[10px] font-bold text-[#fde7c3] flex items-center gap-1">
                 <RotateCw className="w-3 h-3 text-[#f59e0b]" />
-                <span>{lang === 'vi' ? 'Kéo để xoay 360°' : 'Drag to spin 360°'}</span>
+                <span>{L.lockerDrag}</span>
               </div>
               <div className="pointer-events-none absolute bottom-2 inset-x-2 px-2.5 py-1 rounded-xl bg-[#160f09]/90 border border-[#7c532e]/80 text-center">
                 <div className="text-xs font-extrabold text-[#fff4de] truncate">{playerName}</div>
@@ -161,7 +218,7 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
             {/* 1. 3D Low-Poly Hat Selector */}
             <div className="space-y-1.5">
               <div className="text-[11px] font-extrabold text-[#f2be6b]">
-                {lang === 'vi' ? '1. Mũ & Phụ Kiện Đầu 3D' : '1. 3D Headgear & Hats'}
+                {L.lockerHats}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                 {AGROU_HATS.map((hat) => {
@@ -193,7 +250,7 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
             <div className="space-y-1.5 pt-2 border-t border-[#593c23]/70">
               <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-[#f2be6b]">
                 <Palette className="w-3.5 h-3.5" />
-                <span>{lang === 'vi' ? '2. Màu Áo Choàng' : '2. Cloak Color'}</span>
+                <span>{L.lockerCloak}</span>
               </div>
               <div className="grid grid-cols-4 gap-1.5">
                 {AGROU_CLOAK_COLORS.map((swatch) => {
@@ -230,7 +287,7 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
             <div className="space-y-1.5 pt-2 border-t border-[#593c23]/70">
               <div className="flex items-center gap-1.5 text-[11px] font-extrabold text-[#f2be6b]">
                 <Map className="w-3.5 h-3.5" />
-                <span>{lang === 'vi' ? '3. Bản Đồ Lửa Trại 3D' : '3. 3D Campfire Map'}</span>
+                <span>{L.lockerMap}</span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {(Object.keys(AGROU_BIOMES) as AgrouMapBiome[]).map((bKey) => {
@@ -276,7 +333,7 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
             {/* 4. Campfire Title */}
             <div className="space-y-1.5 pt-2 border-t border-[#593c23]/70">
               <div className="text-[11px] font-extrabold text-[#f2be6b]">
-                {lang === 'vi' ? '4. Danh Hiệu Lửa Trại' : '4. Campfire Title'}
+                {L.lockerTitles}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
                 {AGROU_TITLES.map((title) => {
@@ -312,7 +369,7 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
             onClick={handleSaveAndClose}
             className="w-full py-2.5 rounded-xl bg-[#e86f24] hover:bg-[#f28038] text-[#1a0f08] font-extrabold text-xs sm:text-sm shadow-lg cursor-pointer transition-colors"
           >
-            {lang === 'vi' ? 'Lưu & Quay Lại Lửa Trại' : 'Save & Return to Campfire'}
+            {L.lockerSave}
           </button>
         </div>
       </div>

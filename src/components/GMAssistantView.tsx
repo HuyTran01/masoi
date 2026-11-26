@@ -37,7 +37,6 @@ import {
   resolveNightActions,
   applyDayLynch,
   checkWinCondition,
-  resolveHunterShot,
 } from '../game/rules';
 import { sound, ROLE_CALLOUT_LINES } from '../utils/sound';
 import { TRANSLATIONS, UI_TEXT } from '../utils/i18n';
@@ -263,7 +262,6 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   );
 
   const [copyToast, setCopyToast] = useState<string>('');
-  const [hunterTriggerPhase, setHunterTriggerPhase] = useState<'night' | 'day'>('day');
   const [hideRolesForPrivacy, setHideRolesForPrivacy] = useState<boolean>(false);
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
   const [undoSnapshot, setUndoSnapshot] = useState<GMUndoSnapshot | null>(null);
@@ -440,15 +438,13 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     witchPoisonTargetId: null,
     cupidLovers: null,
     doppelgangerTargetId: null,
+    hunterTargetId: null,
   });
 
   const [timerSeconds, setTimerSeconds] = useState<number>(60);
   const [customDiscussDefaultSec, setCustomDiscussDefaultSec] = useState<number>(90);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
   const [selectedLynchTargetId, setSelectedLynchTargetId] = useState<string>('');
-  const [hunterVictimId, setHunterVictimId] = useState<string>('');
-  const [showHunterModal, setShowHunterModal] = useState<boolean>(false);
-  const [activeHunterId, setActiveHunterId] = useState<string>('');
 
   const [lastNightSummary, setLastNightSummary] = useState<string[]>([]);
   const [lastNightResult, setLastNightResult] = useState<NightResult | null>(null);
@@ -501,9 +497,6 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     pendingResetMatchRef.current = true;
     setIsGameStarted(false);
     setGameResult(null);
-    setShowHunterModal(false);
-    setActiveHunterId('');
-    setHunterVictimId('');
     setRoundNumber(1);
     setCurrentPhase('night');
     setNightStep(0);
@@ -730,6 +723,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       witchPoisonTargetId: null,
       cupidLovers: null,
       doppelgangerTargetId: null,
+      hunterTargetId: null,
     });
     setLastNightSummary([]);
     setLastNightResult(null);
@@ -760,7 +754,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     prompt: string;
   }
 
-  // BUG-12: Canonical wake order: #5 Nhân Bản → #10 Cupid → #15 Bảo Vệ → #20 Ma Sói & Sói Con → #30 Phù Thủy → #40 Tiên Tri
+  // BUG-12: Canonical wake order: #5 Nhân Bản → #10 Cupid → #15 Bảo Vệ → #18 Thợ Săn → #20 Ma Sói & Sói Con → #30 Phù Thủy → #40 Tiên Tri
   const nightSteps: NightStepDef[] = [];
 
   if (hasDoppel) {
@@ -790,6 +784,18 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       title: 'Bảo Vệ Thức Dậy',
       description: 'Quản trò gọi: "Bảo Vệ thức dậy, chọn 1 người để che chở đêm nay."',
       prompt: 'Lưu ý: Không được bảo vệ cùng 1 người 2 đêm liên tiếp!',
+    });
+  }
+
+  if (players.some((p) => p.roleId === 'hunter' && p.isAlive && !p.hasUsedPower)) {
+    nightSteps.push({
+      id: 'hunter',
+      roleId: 'hunter',
+      title: 'Thợ Săn Thức Dậy (Ghim Đạn)',
+      description:
+        'Quản trò gọi: "Thợ Săn thức dậy, chỉ 1 người để ghim đạn hoặc lắc đầu Không ghim."',
+      prompt:
+        'Nếu Thợ Săn chết đêm nay hoặc bị treo cổ ngày mai, người bị ghim chết theo (xuyên Bảo Vệ & Bình Cứu).',
     });
   }
 
@@ -864,9 +870,6 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setSelectedLynchTargetId('');
     setTimerSeconds(undoSnapshot.timerSeconds);
     setIsTimerRunning(false);
-    setShowHunterModal(false);
-    setActiveHunterId('');
-    setHunterVictimId('');
     setGameResult(null);
     setUndoSnapshot(null);
     showToast(`Đã hoàn tác: ${undoSnapshot.label}`);
@@ -914,14 +917,6 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setTimerSeconds(customDiscussDefaultSec);
     setIsTimerRunning(false);
 
-    if (result.triggeredHunterId) {
-      triggerRoleVoice('hunter');
-      setHunterTriggerPhase('night');
-      setActiveHunterId(result.triggeredHunterId);
-      setShowHunterModal(true);
-      return;
-    }
-
     const winCheck = checkWinCondition(updatedPlayers);
     if (winCheck.isOver) {
       recordVictory(winCheck, updatedPlayers, 'Quản Trò Vận Hành');
@@ -940,7 +935,6 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     const {
       updatedPlayers,
       wolfPupTriggeredNextNight,
-      triggeredHunterId,
       elderLynchedPenalty,
       cascadeMessages,
     } = applyDayLynch(players, selectedLynchTargetId, { elderSealActive });
@@ -959,7 +953,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     const lynchedId = selectedLynchTargetId;
     setSelectedLynchTargetId('');
 
-    // Tanner wins immediately on lynch BEFORE any linked Hunter shot modal opens
+    // Tanner wins immediately on lynch (auto-fired Hunter mark already applied inside applyDayLynch)
     if (target.roleId === 'tanner') {
       const tannerWin = checkWinCondition(updatedPlayers, lynchedId);
       if (tannerWin.isOver) {
@@ -968,71 +962,10 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       }
     }
 
-    if (triggeredHunterId) {
-      triggerRoleVoice('hunter');
-      setHunterTriggerPhase('day');
-      setActiveHunterId(triggeredHunterId);
-      setShowHunterModal(true);
-      return;
-    }
-
     const winCheck = checkWinCondition(updatedPlayers, lynchedId);
     if (winCheck.isOver) {
       recordVictory(winCheck, updatedPlayers, target.name);
     } else {
-      handleNextNight();
-    }
-  };
-
-  const handleConfirmHunterShot = () => {
-    if (!hunterVictimId) return;
-    sound.playDeath();
-    const { updatedPlayers, wolfPupTriggeredNextNight, triggeredHunterId, cascadeMessages } =
-      resolveHunterShot(players, activeHunterId, hunterVictimId, { elderSealActive });
-    if (wolfPupTriggeredNextNight) {
-      setWolfPupFrenzy(true);
-    }
-    if (cascadeMessages.length > 0) {
-      setLastNightSummary((prev) => [...prev, ...cascadeMessages]);
-    }
-    setHunterVictimId('');
-    setPlayers(updatedPlayers);
-
-    // BUG-08: Chained Hunter must resolve BEFORE win condition
-    if (triggeredHunterId) {
-      triggerRoleVoice('hunter');
-      setActiveHunterId(triggeredHunterId);
-      setShowHunterModal(true);
-      return;
-    }
-
-    setShowHunterModal(false);
-    setActiveHunterId('');
-
-    const winCheck = checkWinCondition(updatedPlayers);
-    if (winCheck.isOver) {
-      recordVictory(winCheck, updatedPlayers, 'Phát Súng Thợ Săn');
-    } else if (hunterTriggerPhase === 'day') {
-      // BUG-07: After a Day-lynched Hunter resolves without game over, transition cleanly to Next Night!
-      handleNextNight();
-    }
-  };
-
-  const handleSkipHunterShot = () => {
-    sound.playCardFlip();
-    const hunterName = players.find((p) => p.id === activeHunterId)?.name || 'Thợ Săn';
-    setLastNightSummary((prev) => [
-      ...prev,
-      `🎯 ${hunterName} đã chọn giữ súng (không bắn ai).`,
-    ]);
-    setShowHunterModal(false);
-    setHunterVictimId('');
-    setActiveHunterId('');
-
-    const winCheck = checkWinCondition(players);
-    if (winCheck.isOver) {
-      recordVictory(winCheck, players, 'Quản Trò Vận Hành');
-    } else if (hunterTriggerPhase === 'day') {
       handleNextNight();
     }
   };
@@ -1052,6 +985,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       witchPoisonTargetId: null,
       cupidLovers: null,
       doppelgangerTargetId: null,
+      hunterTargetId: null,
     });
     setLastNightSummary([]);
     setLastNightResult(null);
@@ -1973,6 +1907,44 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     </div>
                   )}
 
+                  {activeNightStep.roleId === 'hunter' && (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {players
+                          .filter((p) => p.isAlive && p.roleId !== 'hunter')
+                          .map((p) => {
+                            const isSelected = nightActions.hunterTargetId === p.id;
+                            return (
+                              <button
+                                key={p.id}
+                                onClick={() =>
+                                  setNightActions({
+                                    ...nightActions,
+                                    hunterTargetId: isSelected ? null : p.id,
+                                  })
+                                }
+                                className={`p-2.5 rounded-xl border text-xs font-semibold cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-yellow-950 border-yellow-500 text-yellow-200'
+                                    : 'bg-slate-900 border-slate-800 text-slate-300'
+                                }`}
+                              >
+                                🎯 {p.name}
+                              </button>
+                            );
+                          })}
+                      </div>
+                      <button
+                        type="button"
+                        data-testid="gm-hunter-no-mark-btn"
+                        onClick={() => setNightActions({ ...nightActions, hunterTargetId: null })}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 cursor-pointer"
+                      >
+                        🚫 Không ghim
+                      </button>
+                    </div>
+                  )}
+
                   <div className="flex items-center justify-between pt-3 border-t border-slate-800">
                     <button
                       type="button"
@@ -2347,61 +2319,6 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {showHunterModal && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label="Phát Súng Thợ Săn"
-          data-testid="gm-hunter-modal"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: 'rgba(5, 8, 17, 0.9)' }}
-        >
-          <div className="w-full max-w-md bg-[#0f172a] border border-yellow-500/50 rounded-2xl p-6 space-y-4 text-center">
-            <h3 className="text-lg font-bold text-yellow-200">🎯 Phát Súng Thợ Săn: "Tao có súng đó nha!"</h3>
-            <p className="text-xs text-slate-300">
-              Chọn 1 người chơi bị Thợ Săn bắn hạ theo cùng — hoặc chọn giữ súng không bắn:
-            </p>
-            <div className="grid grid-cols-2 gap-2 text-left">
-              {players
-                .filter((p) => p.isAlive && p.id !== activeHunterId)
-                .map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => setHunterVictimId(p.id)}
-                    className={`p-2.5 rounded-xl border text-xs font-semibold cursor-pointer ${
-                      hunterVictimId === p.id
-                        ? 'bg-yellow-950 border-yellow-500 text-yellow-200'
-                        : 'bg-slate-900 border-slate-800 text-slate-300'
-                    }`}
-                  >
-                    {p.name}
-                  </button>
-                ))}
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                data-testid="gm-hunter-hold-fire-btn"
-                onClick={handleSkipHunterShot}
-                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs cursor-pointer"
-              >
-                Giữ súng (Không bắn)
-              </button>
-              <button
-                type="button"
-                data-testid="gm-hunter-confirm-shot-btn"
-                disabled={!hunterVictimId}
-                onClick={handleConfirmHunterShot}
-                className="flex-1 py-2.5 rounded-xl bg-yellow-500 hover:bg-yellow-400 disabled:opacity-40 text-slate-950 font-extrabold text-xs cursor-pointer"
-              >
-                Xác Nhận Phát Bắn
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

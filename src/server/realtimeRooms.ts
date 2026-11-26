@@ -3,7 +3,6 @@ import type { RoleId } from '../types/game.ts';
 import {
   applyHostAdvancePhase,
   applyOnlineDayVote,
-  applyOnlineHunterShot,
   applyOnlineNightAction,
   buildPlayerMatchView,
   createOnlineMatchState,
@@ -356,9 +355,9 @@ export class RealtimeRoomManager {
       }
       const villageSize = Math.max(4, Math.min(20, Math.round(options?.villageSize ?? 8)));
       const timerConfig: RealtimeTimerConfig = {
-        nightActionSec: Math.max(5, Math.min(180, options?.timerConfig?.nightActionSec ?? DEFAULT_TIMER.nightActionSec)),
-        dayDiscussSec: Math.max(10, Math.min(600, options?.timerConfig?.dayDiscussSec ?? DEFAULT_TIMER.dayDiscussSec)),
-        dayVoteSec: Math.max(10, Math.min(300, options?.timerConfig?.dayVoteSec ?? DEFAULT_TIMER.dayVoteSec)),
+        nightActionSec: Math.max(15, Math.min(180, options?.timerConfig?.nightActionSec ?? DEFAULT_TIMER.nightActionSec)),
+        dayDiscussSec: Math.max(20, Math.min(600, options?.timerConfig?.dayDiscussSec ?? DEFAULT_TIMER.dayDiscussSec)),
+        dayVoteSec: Math.max(15, Math.min(300, options?.timerConfig?.dayVoteSec ?? DEFAULT_TIMER.dayVoteSec)),
       };
       const newRoom: RealtimeRoomState = {
         code,
@@ -448,13 +447,7 @@ export class RealtimeRoomManager {
       if (participant) {
         participant.connected = false;
       }
-      const connectedHumans = room.participants.filter(
-        (p) => !p.isBot && p.connected !== false
-      );
-      if (connectedHumans.length === 0) {
-        this.deleteRoomInternal(code);
-        return { room: null, deleted: true };
-      }
+      // ponytail: never delete active in_match rooms on brief WS drops; idle TTL pruneRooms handles cleanup
       room.updatedAt = Date.now();
       return { room: this.cloneRoom(room), deleted: false };
     }
@@ -602,15 +595,15 @@ export class RealtimeRoomManager {
     if (config.timerConfig) {
       room.timerConfig = {
         nightActionSec: Math.max(
-          5,
+          15,
           Math.min(180, config.timerConfig.nightActionSec ?? room.timerConfig.nightActionSec)
         ),
         dayDiscussSec: Math.max(
-          10,
+          20,
           Math.min(600, config.timerConfig.dayDiscussSec ?? room.timerConfig.dayDiscussSec)
         ),
         dayVoteSec: Math.max(
-          10,
+          15,
           Math.min(300, config.timerConfig.dayVoteSec ?? room.timerConfig.dayVoteSec)
         ),
       };
@@ -709,35 +702,24 @@ export class RealtimeRoomManager {
     return { ok: true, room: this.cloneRoom(room), eloUpdates: res.eloUpdates };
   }
 
-  submitHunterShot(
-    rawCode: string,
-    userId: string,
-    targetId: string | null,
-    now: number = Date.now()
-  ): { ok: true; room: RealtimeRoomState; eloUpdates?: EloUpdateEntry[] } | { ok: false; error: string } {
-    const code = normalizeRoomCode(rawCode);
-    const room = this.rooms.get(code);
-    const match = this.matchStates.get(code);
-    if (!room || !match) return { ok: false, error: 'Phòng chưa vào ván đấu.' };
-
-    const res = applyOnlineHunterShot(match, this.createBridge(room), userId, targetId, now);
-    if (!res.ok) return res;
-
-    room.updatedAt = now;
-    return { ok: true, room: this.cloneRoom(room), eloUpdates: res.eloUpdates };
-  }
-
   advancePhase(
     rawCode: string,
     requesterId: string,
-    now: number = Date.now()
+    now: number = Date.now(),
+    expectedStepIndex?: number
   ): { ok: true; room: RealtimeRoomState; eloUpdates?: EloUpdateEntry[] } | { ok: false; error: string } {
     const code = normalizeRoomCode(rawCode);
     const room = this.rooms.get(code);
     const match = this.matchStates.get(code);
     if (!room || !match) return { ok: false, error: 'Phòng chưa vào ván đấu.' };
 
-    const res = applyHostAdvancePhase(match, this.createBridge(room), requesterId, now);
+    const res = applyHostAdvancePhase(
+      match,
+      this.createBridge(room),
+      requesterId,
+      now,
+      expectedStepIndex
+    );
     if (!res.ok) return res;
 
     room.updatedAt = now;

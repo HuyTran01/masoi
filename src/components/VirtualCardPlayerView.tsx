@@ -209,15 +209,19 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
         } catch {
           // ignore
         }
+        const existingToken = loadStoredGMPlayerToken(code, playerUid);
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (existingToken) headers['x-gm-player-token'] = existingToken;
         const res = await fetch(`/api/gm-rooms/${encodeURIComponent(code)}/join`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             user: {
               id: playerUid,
               name,
               avatar: currentUser.avatar || '🐺',
             },
+            ...(existingToken ? { playerToken: existingToken } : {}),
           }),
         });
         const data = await res.json();
