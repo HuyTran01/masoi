@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, Medal, Flame, Star, Award, Search, TrendingUp } from 'lucide-react';
+import { Trophy, TrendingUp } from 'lucide-react';
 import { LeaderboardUser, Language } from '../types/game';
 import { loadLeaderboard } from '../utils/storage';
 import { ROLES } from '../game/roles';
@@ -11,6 +11,7 @@ interface LeaderboardViewProps {
 
 export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ lang }) => {
   const t = TRANSLATIONS[lang];
+  const isVi = lang === 'vi';
   const users: LeaderboardUser[] = loadLeaderboard();
 
   return (
@@ -22,12 +23,14 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ lang }) => {
             <span className="p-2 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/30">
               <Trophy className="w-5 h-5" />
             </span>
-            <h2 className="text-xl sm:text-2xl font-bold font-['Cinzel'] text-amber-200">
+            <h2 className="text-xl sm:text-2xl font-bold font-display text-amber-200">
               {t.leaderboard}
             </h2>
           </div>
           <p className="text-xs text-slate-300 mt-1 max-w-lg">
-            Bảng vinh danh những người chơi có điểm số ELO, tỷ lệ thắng và tư duy suy luận xuất sắc nhất mùa giải.
+            {isVi
+              ? 'Bảng vinh danh những người chơi có điểm số ELO, tỷ lệ thắng và tư duy suy luận xuất sắc nhất mùa giải.'
+              : 'Top-ranked players this season by ELO rating, win rate, and deduction mastery.'}
           </p>
         </div>
 
@@ -35,10 +38,10 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ lang }) => {
           <TrendingUp className="w-6 h-6 text-amber-400" />
           <div>
             <span className="text-[10px] text-slate-400 uppercase tracking-wider block">
-              Mùa Giải Hiện Tại
+              {isVi ? 'Mùa Giải Hiện Tại' : 'Current Season'}
             </span>
             <span className="text-sm font-bold text-amber-300">
-              Season 4: Trăng Máu
+              {isVi ? 'Season 4: Trăng Máu' : 'Season 4: Blood Moon'}
             </span>
           </div>
         </div>
@@ -50,13 +53,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ lang }) => {
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-950/90 text-slate-400 uppercase font-mono tracking-wider border-b border-slate-800 text-[11px]">
               <tr>
-                <th className="py-3.5 px-4">Hạng</th>
-                <th className="py-3.5 px-4">Người Chơi</th>
-                <th className="py-3.5 px-4">Điểm ELO</th>
-                <th className="py-3.5 px-4">Số Trận / Thắng</th>
-                <th className="py-3.5 px-4">Tỷ Lệ Thắng</th>
-                <th className="py-3.5 px-4">Vai Trò Sở Trường</th>
-                <th className="py-3.5 px-4">Danh Hiệu</th>
+                <th className="py-3.5 px-4">{isVi ? 'Hạng' : 'Rank'}</th>
+                <th className="py-3.5 px-4">{isVi ? 'Người Chơi' : 'Player'}</th>
+                <th className="py-3.5 px-4">{isVi ? 'Điểm ELO' : 'ELO'}</th>
+                <th className="py-3.5 px-4">{isVi ? 'Số Trận / Thắng' : 'Matches / Wins'}</th>
+                <th className="py-3.5 px-4">{isVi ? 'Tỷ Lệ Thắng' : 'Win Rate'}</th>
+                <th className="py-3.5 px-4">{isVi ? 'Vai Trò Sở Trường' : 'Favorite Role'}</th>
+                <th className="py-3.5 px-4">{isVi ? 'Danh Hiệu' : 'Badges'}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80">

@@ -514,6 +514,28 @@ export function getContextualInteractionPrompt(params: {
 
   if (!target) return null;
 
+  // Dying Hunter firing their revenge shot is already dead (isAlive=false), so check before Ghost block
+  if (phase === 'hunter_revenge' && me.roleId === 'hunter' && !me.hasUsedPower) {
+    if (!target.isAlive) {
+      return {
+        icon: '🪦',
+        actionLabel: isVi ? `${target.name} đã tử vong` : `${target.name} is eliminated`,
+        targetName: target.name,
+        detail: isVi ? 'Không thể chọn mục tiêu đã chết' : 'Cannot target eliminated players',
+        canInteract: false,
+        tone: 'blocked',
+      };
+    }
+    return {
+      icon: '🏹',
+      actionLabel: isVi ? `Bắn kéo theo ${target.name}` : `Shoot & drag down ${target.name}`,
+      targetName: target.name,
+      detail: isVi ? 'Nhấn [E] hoặc Click để khai hỏa' : 'Press [E] or Click to fire revenge shot',
+      canInteract: true,
+      tone: 'night',
+    };
+  }
+
   if (!me.isAlive) {
     return {
       icon: '👻',
@@ -567,16 +589,6 @@ export function getContextualInteractionPrompt(params: {
   }
 
   if (phase === 'hunter_revenge') {
-    if (me.roleId === 'hunter') {
-      return {
-        icon: '🏹',
-        actionLabel: isVi ? `Bắn kéo theo ${target.name}` : `Shoot & drag down ${target.name}`,
-        targetName: target.name,
-        detail: isVi ? 'Nhấn [E] hoặc Click để khai hỏa' : 'Press [E] or Click to fire revenge shot',
-        canInteract: true,
-        tone: 'night',
-      };
-    }
     return {
       icon: '👀',
       actionLabel: isVi ? `Theo dõi ${target.name}` : `Watch ${target.name}`,

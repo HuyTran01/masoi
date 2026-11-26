@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { RoleId } from '../types/game.ts';
 import { ROLES } from '../game/roles.ts';
 import { generateBalancedRoster } from '../game/rules.ts';
@@ -103,6 +104,17 @@ export function isValidRoleId(roleId: unknown): roleId is RoleId {
   return typeof roleId === 'string' && VALID_ROLE_IDS.has(roleId);
 }
 
+const IDLE_ROOM_TTL_MS = 2 * 60 * 60 * 1000;
+const MAX_ACTIVE_ROOMS = 500;
+
+function safeTokenEqual(expected: string, provided?: string): boolean {
+  if (typeof provided !== 'string' || !provided) return false;
+  const a = Buffer.from(expected, 'utf-8');
+  const b = Buffer.from(provided, 'utf-8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
 /**
  * Server-authoritative real-life Game Master room manager.
  * Completely isolated from online 3D match rooms (RealtimeRoomManager).
@@ -110,6 +122,65 @@ export function isValidRoleId(roleId: unknown): roleId is RoleId {
  */
 export class GMRoomManager {
   private rooms = new Map<string, GMRoomHostState>();
+  private hostSecrets = new Map<string, string>();
+  private playerTokens = new Map<string, Map<string, string>>();
+
+  private deleteRoom(code: string) {
+    this.rooms.delete(code);
+    this.hostSecrets.delete(code);
+    this.playerTokens.delete(code);
+  }
+
+  private pruneRooms(now = Date.now()) {
+    for (const [code, room] of this.rooms.entries()) {
+      if (now - room.updatedAt > IDLE_ROOM_TTL_MS) {
+        this.deleteRoom(code);
+      }
+    }
+    if (this.rooms.size >= MAX_ACTIVE_ROOMS) {
+      const oldest = Array.from(this.rooms.values()).sort((a, b) => a.updatedAt - b.updatedAt);
+      const excess = this.rooms.size - MAX_ACTIVE_ROOMS + 1;
+      for (let i = 0; i < excess && i < oldest.length; i++) {
+        this.deleteRoom(oldest[i].code);
+      }
+    }
+  }
+
+  verifyHostSecret(rawCode: string, secret?: string): boolean {
+    const code = normalizeRoomCode(rawCode);
+    const expected = this.hostSecrets.get(code);
+    if (!expected) return false;
+    return safeTokenEqual(expected, secret);
+  }
+
+  hasPlayerToken(rawCode: string, userId: string): boolean {
+    const code = normalizeRoomCode(rawCode);
+    const cleanUserId = String(userId || '').trim().slice(0, 64);
+    if (!cleanUserId) return false;
+    return Boolean(this.playerTokens.get(code)?.has(cleanUserId));
+  }
+
+  verifyPlayerToken(rawCode: string, userId: string, token?: string): boolean {
+    const code = normalizeRoomCode(rawCode);
+    const cleanUserId = String(userId || '').trim().slice(0, 64);
+    const expected = this.playerTokens.get(code)?.get(cleanUserId);
+    if (!expected) return false;
+    return safeTokenEqual(expected, token);
+  }
+
+  private getOrIssuePlayerToken(code: string, userId: string): string {
+    let map = this.playerTokens.get(code);
+    if (!map) {
+      map = new Map<string, string>();
+      this.playerTokens.set(code, map);
+    }
+    let token = map.get(userId);
+    if (!token) {
+      token = crypto.randomBytes(12).toString('hex');
+      map.set(userId, token);
+    }
+    return token;
+  }
 
   listRooms(): GMRoomSummary[] {
     const list: GMRoomSummary[] = [];
@@ -154,10 +225,12 @@ export class GMRoomManager {
         roleSource?: GMRoleSource;
         isAlive?: boolean;
         claimedByUserId?: string | null;
+        elderLives?: number;
       }>;
       playerCount?: number;
-    }
-  ): { ok: true; room: GMRoomHostState } | { ok: false; error: string } {
+    },
+    hostSecret?: string
+  ): { ok: true; room: GMRoomHostState; hostSecret: string } | { ok: false; error: string } {
     const code = normalizeRoomCode(rawCode);
     if (code.length < 3) {
       return { ok: false, error: 'Mã phòng Quản Trò không hợp lệ (tối thiểu 3 ký tự).' };
@@ -173,6 +246,12 @@ export class GMRoomManager {
       return {
         ok: false,
         error: 'Chỉ Quản Trò tạo phòng mới có quyền chỉnh sửa cấu hình phòng này.',
+      };
+    }
+    if (existing && hostSecret !== undefined && !this.verifyHostSecret(code, hostSecret)) {
+      return {
+        ok: false,
+        error: 'Chỉ Quản Trò sở hữu phòng mới có quyền chỉnh sửa cấu hình phòng này.',
       };
     }
 
@@ -270,17 +349,28 @@ export class GMRoomManager {
           roleSource,
           isAlive: isReset ? true : incoming.isAlive !== undefined ? Boolean(incoming.isAlive) : prev?.isAlive ?? true,
           claimedByUserId: preservedClaim,
-          elderLives: safeRoleId === 'elder' ? 2 : undefined,
+          elderLives:
+            safeRoleId === 'elder'
+              ? isReset
+                ? 2
+                : typeof incoming.elderLives === 'number'
+                ? incoming.elderLives
+                : prev?.elderLives ?? 2
+              : undefined,
         };
       });
     } else if (existing) {
-      nextSeats = existing.seats.map((s, idx) => ({
-        ...s,
-        seatNumber: idx + 1,
-        isAlive: isReset ? true : s.isAlive,
-        roleId: isReset && deckMode === 'physical_cards' ? null : s.roleId,
-        roleSource: isReset && deckMode === 'physical_cards' ? 'unassigned' : s.roleSource,
-      }));
+      nextSeats = existing.seats.map((s, idx) => {
+        const nextRole = isReset && deckMode === 'physical_cards' ? null : s.roleId;
+        return {
+          ...s,
+          seatNumber: idx + 1,
+          isAlive: isReset ? true : s.isAlive,
+          roleId: nextRole,
+          roleSource: isReset && deckMode === 'physical_cards' ? 'unassigned' : s.roleSource,
+          elderLives: nextRole === 'elder' ? (isReset ? 2 : s.elderLives ?? 2) : undefined,
+        };
+      });
     } else {
       const count = Math.max(4, Math.min(20, Math.round(payload.playerCount ?? 8)));
       const autoRoles = deckMode === 'virtual_deck' ? generateBalancedRoster(count) : [];
@@ -313,8 +403,18 @@ export class GMRoomManager {
       updatedAt: now,
     };
 
+    if (!existing) {
+      this.pruneRooms(now);
+    }
+
+    let secret = this.hostSecrets.get(code);
+    if (!secret) {
+      secret = crypto.randomBytes(16).toString('hex');
+      this.hostSecrets.set(code, secret);
+    }
+
     this.rooms.set(code, updated);
-    return { ok: true, room: this.cloneHostState(updated) };
+    return { ok: true, room: this.cloneHostState(updated), hostSecret: secret };
   }
 
   /**
@@ -326,7 +426,7 @@ export class GMRoomManager {
     user: { id: string; name: string; avatar?: string },
     options?: { seatId?: string }
   ):
-    | { ok: true; view: GMRoomPlayerView; room: GMRoomHostState }
+    | { ok: true; view: GMRoomPlayerView; room: GMRoomHostState; playerToken: string }
     | { ok: false; error: string } {
     const code = normalizeRoomCode(rawCode);
     const room = this.rooms.get(code);
@@ -347,6 +447,13 @@ export class GMRoomManager {
 
     const now = Date.now();
 
+    const okJoin = () => ({
+      ok: true as const,
+      view: this.buildPlayerView(room, cleanUserId),
+      room: this.cloneHostState(room),
+      playerToken: this.getOrIssuePlayerToken(code, cleanUserId),
+    });
+
     // 1. Idempotent reconnect if this player already claimed a seat
     const existingSeat = room.seats.find((s) => s.claimedByUserId === cleanUserId);
     if (existingSeat) {
@@ -365,11 +472,7 @@ export class GMRoomManager {
         existingSeat.avatar = cleanAvatar;
       }
       room.updatedAt = now;
-      return {
-        ok: true,
-        view: this.buildPlayerView(room, cleanUserId),
-        room: this.cloneHostState(room),
-      };
+      return okJoin();
     }
 
     // 2. Claim explicitly requested seat if open
@@ -385,11 +488,7 @@ export class GMRoomManager {
       requested.name = cleanName;
       requested.avatar = cleanAvatar;
       room.updatedAt = now;
-      return {
-        ok: true,
-        view: this.buildPlayerView(room, cleanUserId),
-        room: this.cloneHostState(room),
-      };
+      return okJoin();
     }
 
     // 3. Match an unclaimed seat with identical name first (case-insensitive)
@@ -400,11 +499,7 @@ export class GMRoomManager {
       nameMatch.claimedByUserId = cleanUserId;
       nameMatch.avatar = cleanAvatar;
       room.updatedAt = now;
-      return {
-        ok: true,
-        view: this.buildPlayerView(room, cleanUserId),
-        room: this.cloneHostState(room),
-      };
+      return okJoin();
     }
 
     // 4. Otherwise claim the first open unclaimed seat
@@ -414,11 +509,7 @@ export class GMRoomManager {
       firstOpen.name = cleanName;
       firstOpen.avatar = cleanAvatar;
       room.updatedAt = now;
-      return {
-        ok: true,
-        view: this.buildPlayerView(room, cleanUserId),
-        room: this.cloneHostState(room),
-      };
+      return okJoin();
     }
 
     // 5. If all seats are claimed and room is still in setup with < 20 players, append a new seat
@@ -436,11 +527,7 @@ export class GMRoomManager {
       };
       room.seats.push(newSeat);
       room.updatedAt = now;
-      return {
-        ok: true,
-        view: this.buildPlayerView(room, cleanUserId),
-        room: this.cloneHostState(room),
-      };
+      return okJoin();
     }
 
     return {
@@ -519,6 +606,7 @@ export class GMRoomManager {
       seat.claimedByUserId = null;
       room.updatedAt = Date.now();
     }
+    this.playerTokens.get(code)?.delete(cleanUserId);
     return { ok: true, room: this.cloneHostState(room) };
   }
 

@@ -54,6 +54,30 @@ function getOrCreateGMPlayerUid(): string {
   }
 }
 
+function loadStoredGMPlayerToken(code: string, userId: string): string {
+  try {
+    return sessionStorage.getItem(`gm_player_token_${code}_${userId}`) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveStoredGMPlayerToken(code: string, userId: string, token: string): void {
+  try {
+    sessionStorage.setItem(`gm_player_token_${code}_${userId}`, token);
+  } catch {
+    // ignore
+  }
+}
+
+function clearStoredGMPlayerToken(code: string, userId: string): void {
+  try {
+    sessionStorage.removeItem(`gm_player_token_${code}_${userId}`);
+  } catch {
+    // ignore
+  }
+}
+
 export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
   initialRoomId,
   currentUser,
@@ -84,6 +108,9 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
   const [isEditingOwnRole, setIsEditingOwnRole] = useState<boolean>(false);
   const [pickedRoleId, setPickedRoleId] = useState<RoleId>('villager');
   const [isSavingRole, setIsSavingRole] = useState<boolean>(false);
+  const [playerToken, setPlayerToken] = useState<string>('');
+  const playerTokenRef = useRef<string>('');
+  const nameInputRef = useRef<HTMLInputElement>(null);
   const lastMatchIdRef = useRef<string | null>(null);
 
   const isVi = lang === 'vi';
@@ -119,6 +146,8 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
         );
       } else if (!nextView.canSelfInputRole) {
         setIsEditingOwnRole(false);
+      } else if (!nextView.mySeat?.roleId) {
+        setIsRevealed(false);
       }
     },
     [isVi]
@@ -164,6 +193,8 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
         setErrorMsg(
           isVi ? 'Vui lòng nhập tên của bạn trước khi vào phòng.' : 'Please enter your name.'
         );
+        nameInputRef.current?.focus();
+        nameInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
       }
 
@@ -200,6 +231,15 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
         }
 
         const view = data.view as GMRoomPlayerView;
+        const issuedToken =
+          typeof data.playerToken === 'string' && data.playerToken.trim()
+            ? data.playerToken.trim()
+            : loadStoredGMPlayerToken(view.code, playerUid);
+        if (issuedToken) {
+          saveStoredGMPlayerToken(view.code, playerUid, issuedToken);
+          playerTokenRef.current = issuedToken;
+          setPlayerToken(issuedToken);
+        }
         setRoomIdInput(view.code);
         lastMatchIdRef.current = view.matchId || null;
         setPlayerView(view);
@@ -244,6 +284,8 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
   useEffect(() => {
     if (!playerView?.code) return;
     const roomCode = playerView.code;
+    const activeToken =
+      playerToken || playerTokenRef.current || loadStoredGMPlayerToken(roomCode, playerUid);
 
     const unsub = realtimeClient.subscribe((evt) => {
       if (evt.type === 'gm:player_state' && evt.view.code === roomCode) {
@@ -251,12 +293,17 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
       }
     });
 
-    realtimeClient.subscribeGMPlayer(roomCode, playerUid);
+    realtimeClient.subscribeGMPlayer(roomCode, playerUid, activeToken || undefined);
 
     const pollInterval = window.setInterval(async () => {
       try {
+        const token =
+          playerTokenRef.current || activeToken || loadStoredGMPlayerToken(roomCode, playerUid);
+        const headers: Record<string, string> = {};
+        if (token) headers['x-gm-player-token'] = token;
         const res = await fetch(
-          `/api/gm-rooms/${encodeURIComponent(roomCode)}/player/${encodeURIComponent(playerUid)}`
+          `/api/gm-rooms/${encodeURIComponent(roomCode)}/player/${encodeURIComponent(playerUid)}`,
+          { headers }
         );
         const data = await res.json();
         if (data?.ok && data.view) {
@@ -272,7 +319,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
       unsub();
       realtimeClient.unsubscribeGM();
     };
-  }, [playerView?.code, playerUid, applyIncomingPlayerView]);
+  }, [playerView?.code, playerUid, playerToken, applyIncomingPlayerView]);
 
   const handleSubmitSelfRole = async () => {
     if (!playerView?.code) return;
@@ -280,14 +327,21 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
     setErrorMsg('');
     setStatusNotice('');
     try {
+      const token =
+        playerTokenRef.current ||
+        playerToken ||
+        loadStoredGMPlayerToken(playerView.code, playerUid);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) headers['x-gm-player-token'] = token;
       const res = await fetch(
         `/api/gm-rooms/${encodeURIComponent(playerView.code)}/self-role`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           body: JSON.stringify({
             userId: playerUid,
             roleId: pickedRoleId,
+            ...(token ? { playerToken: token } : {}),
           }),
         }
       );
@@ -320,8 +374,15 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
   const handleRefreshMyCard = async () => {
     if (!playerView?.code) return;
     try {
+      const token =
+        playerTokenRef.current ||
+        playerToken ||
+        loadStoredGMPlayerToken(playerView.code, playerUid);
+      const headers: Record<string, string> = {};
+      if (token) headers['x-gm-player-token'] = token;
       const res = await fetch(
-        `/api/gm-rooms/${encodeURIComponent(playerView.code)}/player/${encodeURIComponent(playerUid)}`
+        `/api/gm-rooms/${encodeURIComponent(playerView.code)}/player/${encodeURIComponent(playerUid)}`,
+        { headers }
       );
       const data = await res.json();
       if (data?.ok && data.view) {
@@ -337,16 +398,28 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
     const leavingCode = playerView?.code;
     realtimeClient.unsubscribeGM();
     if (leavingCode) {
+      const token =
+        playerTokenRef.current ||
+        playerToken ||
+        loadStoredGMPlayerToken(leavingCode, playerUid);
       try {
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (token) headers['x-gm-player-token'] = token;
         await fetch(`/api/gm-rooms/${encodeURIComponent(leavingCode)}/leave`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userId: playerUid }),
+          headers,
+          body: JSON.stringify({
+            userId: playerUid,
+            ...(token ? { playerToken: token } : {}),
+          }),
         });
       } catch {
         // ignore network errors during leave
       }
+      clearStoredGMPlayerToken(leavingCode, playerUid);
     }
+    playerTokenRef.current = '';
+    setPlayerToken('');
     setPlayerView(null);
     setIsRevealed(false);
     setIsEditingOwnRole(false);
@@ -396,8 +469,10 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
               <div className="relative">
                 <User className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
+                  ref={nameInputRef}
                   id="gm-player-name-input"
                   data-testid="gm-player-name-input"
+                  aria-label={isVi ? 'Tên của bạn ngoài đời' : 'Your Name'}
                   type="text"
                   maxLength={32}
                   value={playerNameInput}
@@ -418,6 +493,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
               <input
                 id="gm-player-room-code-input"
                 data-testid="gm-player-room-code-input"
+                aria-label={isVi ? 'Mã phòng từ Quản Trò' : 'GM Room Code'}
                 type="text"
                 value={roomIdInput}
                 onChange={(e) => {
@@ -629,10 +705,10 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
                     >
                       <span className="text-lg shrink-0">{ROLE_ICONS[role.id]}</span>
                       <div className="min-w-0">
-                        <div className="text-xs font-bold truncate">
+                        <div className="text-xs font-bold whitespace-normal leading-snug break-words">
                           {role.name[lang] || role.name.vi}
                         </div>
-                        <div className="text-[10px] text-slate-400 truncate">
+                        <div className="text-[10px] text-slate-400 leading-tight mt-0.5">
                           {role.faction === 'werewolf'
                             ? isVi
                               ? 'Phe Sói'

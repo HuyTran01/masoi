@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { RealtimeRoomManager, normalizeRoomCode } from './realtimeRooms';
+import { RealtimeRoomManager, normalizeRoomCode, type RealtimePropEvent } from './realtimeRooms';
 
 test('normalizeRoomCode strips invalid symbols and uppercases cleanly', () => {
   assert.equal(normalizeRoomCode(' wolf-123!@# '), 'WOLF-123');
@@ -175,5 +175,47 @@ test('startMatch requires >= 4 players, assigns authoritative matchRoles, and bl
     { createIfMissing: false }
   );
   assert.equal(lateJoin.ok, false);
+});
+
+test('in_match disconnect preserves participant as disconnected until all humans disconnect, and supports water prop type', () => {
+  const waterProp: RealtimePropEvent = {
+    id: 'prop_water_1',
+    propType: 'water',
+    fromPlayerId: 'h1',
+    targetPlayerId: 'h2',
+    timestamp: Date.now(),
+  };
+  assert.equal(waterProp.propType, 'water');
+
+  const mgr = new RealtimeRoomManager();
+  mgr.createOrJoinRoom('ONL-8888', { id: 'h1', name: 'Host', avatar: '🐺', elo: 1600 }, { villageSize: 4 });
+  mgr.createOrJoinRoom('ONL-8888', { id: 'h2', name: 'Guest', avatar: '🔮', elo: 1550 });
+  mgr.fillBots('ONL-8888', 'h1');
+  const started = mgr.startMatch('ONL-8888', 'h1');
+  assert.equal(started.ok, true);
+
+  // Disconnect during in_match keeps participant with connected=false
+  const dc1 = mgr.leaveRoom('ONL-8888', 'h2', { isDisconnect: true });
+  assert.equal(dc1.deleted, false);
+  const h2AfterDc = dc1.room?.participants.find((p) => p.id === 'h2');
+  assert.ok(h2AfterDc, 'disconnected in_match participant must remain in roster');
+  assert.equal(h2AfterDc?.connected, false);
+
+  // Reconnecting restores connected=true without blocking
+  const reconn = mgr.createOrJoinRoom(
+    'ONL-8888',
+    { id: 'h2', name: 'Guest', avatar: '🔮', elo: 1550 },
+    { createIfMissing: false }
+  );
+  assert.equal(reconn.ok, true);
+  if (reconn.ok) {
+    assert.equal(reconn.room.participants.find((p) => p.id === 'h2')?.connected, true);
+  }
+
+  // Disconnecting ALL humans deletes the in_match room
+  mgr.leaveRoom('ONL-8888', 'h2', { isDisconnect: true });
+  const dcAll = mgr.leaveRoom('ONL-8888', 'h1', { isDisconnect: true });
+  assert.equal(dcAll.deleted, true);
+  assert.equal(mgr.getRoom('ONL-8888'), null);
 });
 

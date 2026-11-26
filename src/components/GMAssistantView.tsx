@@ -11,6 +11,7 @@ import {
   Skull,
   Heart,
   Eye,
+  EyeOff,
   Plus,
   Trash2,
   Timer,
@@ -25,6 +26,9 @@ import {
   Copy,
   Check,
   Link2,
+  ZoomIn,
+  Undo2,
+  X,
 } from 'lucide-react';
 import { Player, RoleId, Language, NightActions, NightResult } from '../types/game';
 import { ROLES } from '../game/roles';
@@ -78,6 +82,37 @@ const DEFAULT_PLAYERS: string[] = [
 
 const SEAT_AVATARS = ['🐺', '🔮', '🛡️', '🧪', '🎯', '💘', '🎭', '👑', '🔥', '🧑‍🌾'];
 
+interface GMUndoSnapshot {
+  label: string;
+  players: Player[];
+  roundNumber: number;
+  currentPhase: 'night' | 'day';
+  nightStep: number;
+  wolfPupFrenzy: boolean;
+  elderSealActive: boolean;
+  nightActions: NightActions;
+  lastNightSummary: string[];
+  lastNightResult: NightResult | null;
+  selectedLynchTargetId: string;
+  timerSeconds: number;
+}
+
+function loadStoredGMHostSecret(code: string): string {
+  try {
+    return sessionStorage.getItem(`gm_host_secret_${code}`) || '';
+  } catch {
+    return '';
+  }
+}
+
+function saveStoredGMHostSecret(code: string, secret: string): void {
+  try {
+    sessionStorage.setItem(`gm_host_secret_${code}`, secret);
+  } catch {
+    // ignore
+  }
+}
+
 function buildInitialSeats(count: number, mode: GMDeckMode): GMPlayerSeat[] {
   const clamped = Math.max(4, Math.min(20, count));
   const roles = mode === 'virtual_deck' ? generateBalancedRoster(clamped) : [];
@@ -127,12 +162,23 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   const [nightStep, setNightStep] = useState<number>(0);
   const [players, setPlayers] = useState<Player[]>([]);
   const [wolfPupFrenzy, setWolfPupFrenzy] = useState<boolean>(false);
+  const [elderSealActive, setElderSealActive] = useState<boolean>(false);
   const [activeCalloutBanner, setActiveCalloutBanner] = useState<string>(
     'Bấm các nút Âm Hiệu bên dưới để phát tiếng Sói Hú, Phù Thủy Ma Mị hoặc Thợ Săn "Tao có súng đó nha!"'
   );
 
   const [copyToast, setCopyToast] = useState<string>('');
   const [hunterTriggerPhase, setHunterTriggerPhase] = useState<'night' | 'day'>('day');
+  const [hideRolesForPrivacy, setHideRolesForPrivacy] = useState<boolean>(false);
+  const [showQrModal, setShowQrModal] = useState<boolean>(false);
+  const [undoSnapshot, setUndoSnapshot] = useState<GMUndoSnapshot | null>(null);
+  const [confirmReset, setConfirmReset] = useState<boolean>(false);
+  const [hostSecret, setHostSecret] = useState<string>(() =>
+    loadStoredGMHostSecret(roomId)
+  );
+  const hostSecretRef = React.useRef<string>(hostSecret);
+  const syncQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const syncInFlightCountRef = React.useRef<number>(0);
   const pendingResetMatchRef = React.useRef<boolean>(false);
 
   const skipNextSyncRef = React.useRef<boolean>(false);
@@ -140,8 +186,29 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   isGameStartedRef.current = isGameStarted;
 
   useEffect(() => {
-    if (initialRoomId) setRoomId(initialRoomId.trim().toUpperCase());
+    if (initialRoomId) {
+      const clean = initialRoomId.trim().toUpperCase();
+      setRoomId(clean);
+      const stored = loadStoredGMHostSecret(clean);
+      hostSecretRef.current = stored;
+      setHostSecret(stored);
+    }
   }, [initialRoomId]);
+
+  useEffect(() => {
+    if (!showQrModal) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowQrModal(false);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [showQrModal]);
+
+  useEffect(() => {
+    if (!confirmReset) return;
+    const timer = window.setTimeout(() => setConfirmReset(false), 6000);
+    return () => window.clearTimeout(timer);
+  }, [confirmReset]);
 
   const applyIncomingHostSeats = React.useCallback((incomingSeats: GMPlayerSeat[]) => {
     if (!isGameStartedRef.current) {
@@ -159,24 +226,32 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     }
   }, []);
 
-  // Subscribe to real-time updates + resilient 2.5s HTTP polling fallback so Tab 1 always syncs claims & self-input roles (BUG-05)
+  // Subscribe to real-time updates + resilient 2.5s HTTP polling fallback AFTER hostSecret is available (BUG-05)
   useEffect(() => {
     const cleanCode = roomId.trim().toUpperCase();
     if (cleanCode.length < 3) return;
+    const activeSecret = hostSecret || hostSecretRef.current || loadStoredGMHostSecret(cleanCode);
+    if (!activeSecret) return;
 
     const unsub = realtimeClient.subscribe((evt) => {
       if (evt.type === 'gm:host_state' && evt.room.code === cleanCode) {
+        if (syncInFlightCountRef.current > 0) return;
         applyIncomingHostSeats(evt.room.seats);
       }
     });
 
-    realtimeClient.subscribeGMHost(cleanCode);
+    realtimeClient.subscribeGMHost(cleanCode, activeSecret);
 
     const pollInterval = window.setInterval(async () => {
+      if (syncInFlightCountRef.current > 0) return;
+      const secret = hostSecretRef.current || activeSecret;
+      if (!secret) return;
       try {
-        const res = await fetch(`/api/gm-rooms/${encodeURIComponent(cleanCode)}/host`);
+        const res = await fetch(`/api/gm-rooms/${encodeURIComponent(cleanCode)}/host`, {
+          headers: { 'x-gm-host-secret': secret },
+        });
         const data = await res.json();
-        if (data?.ok && data.room?.seats) {
+        if (syncInFlightCountRef.current === 0 && data?.ok && data.room?.seats) {
           applyIncomingHostSeats(data.room.seats);
         }
       } catch {
@@ -189,9 +264,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       unsub();
       realtimeClient.unsubscribeGM();
     };
-  }, [roomId, applyIncomingHostSeats]);
+  }, [roomId, hostSecret, applyIncomingHostSeats]);
 
-  // Sync GM room state to server (cross-device live sync + strict per-player privacy)
+  // Sync GM room state to server (cross-device live sync + strict per-player privacy + hostSecret auth)
   useEffect(() => {
     if (skipNextSyncRef.current) {
       skipNextSyncRef.current = false;
@@ -219,21 +294,47 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     const shouldResetMatch = pendingResetMatchRef.current;
     pendingResetMatchRef.current = false;
 
-    fetch(`/api/gm-rooms/${encodeURIComponent(cleanCode)}/sync`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        hostId,
-        deckMode,
-        status: isGameStarted ? 'in_match' : 'setup',
-        round: roundNumber,
-        phase: isGameStarted ? currentPhase : 'setup',
-        seats: syncSeats,
-        resetMatch: shouldResetMatch,
-      }),
-    }).catch(() => {
-      // ignore transient network errors
-    });
+    let cancelled = false;
+    const runSync = async () => {
+      if (cancelled) return;
+      const secret = hostSecretRef.current || loadStoredGMHostSecret(cleanCode);
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (secret) headers['x-gm-host-secret'] = secret;
+      syncInFlightCountRef.current += 1;
+      try {
+        const res = await fetch(`/api/gm-rooms/${encodeURIComponent(cleanCode)}/sync`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            hostId,
+            ...(secret ? { hostSecret: secret } : {}),
+            deckMode,
+            status: isGameStarted ? 'in_match' : 'setup',
+            round: roundNumber,
+            phase: isGameStarted ? currentPhase : 'setup',
+            seats: syncSeats,
+            resetMatch: shouldResetMatch,
+          }),
+        });
+        const data = await res.json().catch(() => null);
+        if (data?.ok && typeof data.hostSecret === 'string' && data.hostSecret) {
+          saveStoredGMHostSecret(cleanCode, data.hostSecret);
+          hostSecretRef.current = data.hostSecret;
+          if (!cancelled) {
+            setHostSecret((prev) => (prev === data.hostSecret ? prev : data.hostSecret));
+          }
+        }
+      } catch {
+        // ignore transient network errors
+      } finally {
+        syncInFlightCountRef.current = Math.max(0, syncInFlightCountRef.current - 1);
+      }
+    };
+
+    syncQueueRef.current = syncQueueRef.current.then(runSync, runSync);
+    return () => {
+      cancelled = true;
+    };
   }, [roomId, hostId, deckMode, seats, players, isGameStarted, currentPhase, roundNumber]);
 
   const [nightActions, setNightActions] = useState<NightActions>({
@@ -313,6 +414,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setCurrentPhase('night');
     setNightStep(0);
     setWolfPupFrenzy(false);
+    setElderSealActive(false);
+    setUndoSnapshot(null);
+    setConfirmReset(false);
     setLastNightSummary([]);
     setLastNightResult(null);
     setSelectedLynchTargetId('');
@@ -353,12 +457,12 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
         }))
       );
     } else {
-      // Physical deck mode: clear auto-dealt placeholders so players can enter their physical cards (keep manually assigned or self-input)
+      // Physical deck mode: clear all non-self-input (stale auto_dealt) roles so players see a clean un-prefilled picker
       setSeats((prev) =>
         prev.map((s) =>
-          s.roleSource === 'auto_dealt'
-            ? { ...s, roleId: null, roleSource: 'unassigned', elderLives: undefined }
-            : s
+          s.roleSource === 'self_input'
+            ? s
+            : { ...s, roleId: null, roleSource: 'unassigned', elderLives: undefined }
         )
       );
     }
@@ -523,6 +627,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setCurrentPhase('night');
     setNightStep(0);
     setWolfPupFrenzy(false);
+    setElderSealActive(false);
+    setUndoSnapshot(null);
+    setConfirmReset(false);
     setNightActions({
       wolfTargetId: null,
       secondWolfTargetId: null,
@@ -585,7 +692,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     });
   }
 
-  if (players.some((p) => p.roleId === 'bodyguard' && p.isAlive)) {
+  if (players.some((p) => p.roleId === 'bodyguard' && p.isAlive && !p.hasUsedPower)) {
     nightSteps.push({
       id: 'bodyguard',
       roleId: 'bodyguard',
@@ -607,7 +714,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       : 'Chọn người bị bầy sói thống nhất cắn đêm nay:',
   });
 
-  if (players.some((p) => p.roleId === 'witch' && p.isAlive)) {
+  if (players.some((p) => p.roleId === 'witch' && p.isAlive && !p.hasUsedPower)) {
     nightSteps.push({
       id: 'witch',
       roleId: 'witch',
@@ -618,7 +725,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     });
   }
 
-  if (players.some((p) => p.roleId === 'seer' && p.isAlive)) {
+  if (players.some((p) => p.roleId === 'seer' && p.isAlive && !p.hasUsedPower)) {
     nightSteps.push({
       id: 'seer',
       roleId: 'seer',
@@ -627,6 +734,52 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       prompt: 'Quản trò ra dấu: Ngón cái lên = Dân Làng, Chỉ xuống = Ma Sói:',
     });
   }
+
+  const safeNightStepIndex = Math.min(nightStep, Math.max(0, nightSteps.length - 1));
+  const activeNightStep = nightSteps[safeNightStepIndex];
+
+  const captureUndoSnapshot = (label: string): GMUndoSnapshot => ({
+    label,
+    players: players.map((p) => ({ ...p })),
+    roundNumber,
+    currentPhase,
+    nightStep: safeNightStepIndex,
+    wolfPupFrenzy,
+    elderSealActive,
+    nightActions: {
+      ...nightActions,
+      cupidLovers: nightActions.cupidLovers
+        ? ([...nightActions.cupidLovers] as [string, string])
+        : null,
+    },
+    lastNightSummary: [...lastNightSummary],
+    lastNightResult,
+    selectedLynchTargetId,
+    timerSeconds,
+  });
+
+  const handleUndoLastStep = () => {
+    if (!undoSnapshot) return;
+    sound.playCardFlip();
+    setPlayers(undoSnapshot.players);
+    setRoundNumber(undoSnapshot.roundNumber);
+    setCurrentPhase(undoSnapshot.currentPhase);
+    setNightStep(undoSnapshot.nightStep);
+    setWolfPupFrenzy(undoSnapshot.wolfPupFrenzy);
+    setElderSealActive(undoSnapshot.elderSealActive);
+    setNightActions(undoSnapshot.nightActions);
+    setLastNightSummary(undoSnapshot.lastNightSummary);
+    setLastNightResult(undoSnapshot.lastNightResult);
+    setSelectedLynchTargetId(undoSnapshot.selectedLynchTargetId);
+    setTimerSeconds(undoSnapshot.timerSeconds);
+    setIsTimerRunning(false);
+    setShowHunterModal(false);
+    setActiveHunterId('');
+    setHunterVictimId('');
+    setGameResult(null);
+    setUndoSnapshot(null);
+    showToast(`↩️ Đã hoàn tác: ${undoSnapshot.label}`);
+  };
 
   const recordVictory = (
     winCheck: { isOver: boolean; winner: string | null; reason: string },
@@ -653,10 +806,12 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   };
 
   const handleResolveNight = () => {
+    setUndoSnapshot(captureUndoSnapshot(`Kết thúc Đêm ${roundNumber}`));
     sound.playDayGong();
     const { updatedPlayers, result } = resolveNightActions(players, nightActions, {
       wolfPupTriggered: wolfPupFrenzy,
       roundNumber,
+      elderSealActive,
     });
 
     setPlayers(updatedPlayers);
@@ -685,13 +840,23 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   const handleExecuteLynch = () => {
     if (!selectedLynchTargetId) return;
 
-    sound.playGavel();
     const target = players.find((p) => p.id === selectedLynchTargetId);
     if (!target) return;
 
-    const { updatedPlayers, wolfPupTriggeredNextNight, triggeredHunterId, cascadeMessages } =
-      applyDayLynch(players, selectedLynchTargetId);
+    setUndoSnapshot(captureUndoSnapshot(`Treo cổ ${target.name} (Ngày ${roundNumber})`));
+    sound.playGavel();
 
+    const {
+      updatedPlayers,
+      wolfPupTriggeredNextNight,
+      triggeredHunterId,
+      elderLynchedPenalty,
+      cascadeMessages,
+    } = applyDayLynch(players, selectedLynchTargetId, { elderSealActive });
+
+    if (elderLynchedPenalty) {
+      setElderSealActive(true);
+    }
     if (wolfPupTriggeredNextNight) {
       setWolfPupFrenzy(true);
     }
@@ -702,6 +867,15 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setPlayers(updatedPlayers);
     const lynchedId = selectedLynchTargetId;
     setSelectedLynchTargetId('');
+
+    // Tanner wins immediately on lynch BEFORE any linked Hunter shot modal opens
+    if (target.roleId === 'tanner') {
+      const tannerWin = checkWinCondition(updatedPlayers, lynchedId);
+      if (tannerWin.isOver) {
+        recordVictory(tannerWin, updatedPlayers, target.name);
+        return;
+      }
+    }
 
     if (triggeredHunterId) {
       triggerRoleVoice('hunter');
@@ -723,7 +897,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     if (!hunterVictimId) return;
     sound.playDeath();
     const { updatedPlayers, wolfPupTriggeredNextNight, triggeredHunterId, cascadeMessages } =
-      resolveHunterShot(players, activeHunterId, hunterVictimId);
+      resolveHunterShot(players, activeHunterId, hunterVictimId, { elderSealActive });
     if (wolfPupTriggeredNextNight) {
       setWolfPupFrenzy(true);
     }
@@ -795,26 +969,62 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     <div className="max-w-5xl mx-auto space-y-4 text-slate-100">
       {/* Header Banner */}
       <div className="bg-[#0f172a] border border-amber-700/50 rounded-2xl p-4 shadow-xl flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="p-2 rounded-xl bg-amber-500/15 text-amber-400 border border-amber-500/30">
               <Shield className="w-5 h-5" />
             </span>
             <h2 className="text-lg sm:text-xl font-extrabold text-amber-200">
               {t.gmAssistant}
             </h2>
+            <button
+              type="button"
+              data-testid="gm-privacy-shield-btn"
+              aria-pressed={hideRolesForPrivacy}
+              onClick={() => {
+                sound.playCardFlip();
+                setHideRolesForPrivacy((prev) => {
+                  const next = !prev;
+                  if (next) setShowSecretGMLog(false);
+                  return next;
+                });
+              }}
+              className={`px-3 py-1.5 rounded-xl border text-xs font-extrabold flex items-center gap-1.5 cursor-pointer transition-colors ${
+                hideRolesForPrivacy
+                  ? 'bg-emerald-950/90 border-emerald-400 text-emerald-200'
+                  : 'bg-slate-800 hover:bg-slate-700 border-amber-500/50 text-amber-200'
+              }`}
+            >
+              {hideRolesForPrivacy ? (
+                <>
+                  <Eye className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                  <span>👁️ Hiện Vai Trò</span>
+                </>
+              ) : (
+                <>
+                  <EyeOff className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                  <span>🙈 Ẩn Vai Trò (Chống nhìn trộm)</span>
+                </>
+              )}
+            </button>
           </div>
-          <p className="text-xs text-slate-300 mt-1 max-w-xl">
+          <p className="text-xs text-slate-300 max-w-xl">
             Công cụ tối ưu cho Quản Trò ngoài đời thực: gọi vai kèm âm thanh & câu thoại ma mị, tự động ghi nhớ Bảo Vệ trùng đêm, Sói Con cuồng nộ, Tình Nhân quyên sinh và phát bài qua ĐT.
           </p>
         </div>
 
         <div className="bg-[#090d18] border border-amber-600/40 rounded-xl px-4 py-2.5 flex items-center gap-3.5">
           {/* BUG-16: Real scannable offline QR code pointing directly to ?gm=ROOM_CODE */}
-          <div
+          <button
+            type="button"
             data-testid="gm-room-qr"
-            title={`Quét QR để vào phòng ${roomId}`}
-            className="bg-white p-1.5 rounded-lg shrink-0 border border-amber-400/50 shadow"
+            onClick={() => {
+              sound.playCardFlip();
+              setShowQrModal(true);
+            }}
+            title={`Bấm để phóng to QR phòng ${roomId}`}
+            aria-label={`Phóng to mã QR phòng ${roomId}`}
+            className="bg-white p-1.5 rounded-lg shrink-0 border border-amber-400/50 shadow cursor-pointer hover:ring-2 hover:ring-amber-400 transition-all"
           >
             <svg
               width={64}
@@ -846,13 +1056,13 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 )
               )}
             </svg>
-          </div>
+          </button>
 
           <div className="text-left space-y-1.5">
             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
               Mã Phòng & QR Cho Người Chơi
             </span>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span
                 data-testid="gm-host-room-code"
                 className="text-base font-mono font-extrabold text-amber-300 tracking-widest"
@@ -866,6 +1076,18 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               >
                 {copiedType === 'code' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                 <span>{copiedType === 'code' ? 'Đã chép' : 'Chép mã'}</span>
+              </button>
+              <button
+                type="button"
+                data-testid="gm-zoom-qr-btn"
+                onClick={() => {
+                  sound.playCardFlip();
+                  setShowQrModal(true);
+                }}
+                className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/50 text-[10px] font-bold text-amber-200 flex items-center gap-1 cursor-pointer"
+              >
+                <ZoomIn className="w-3 h-3" />
+                <span>🔍 Phóng to QR</span>
               </button>
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-0.5">
@@ -1154,27 +1376,33 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       aria-label={`Tên người chơi #${idx + 1}`}
                       className="w-full bg-slate-950/90 border border-slate-800 focus:border-amber-500 rounded-lg px-2 py-1 font-semibold text-xs text-slate-100 focus:outline-none"
                     />
-                    <select
-                      value={seat.roleId || ''}
-                      onChange={(e) => handleUpdateRole(idx, e.target.value as RoleId | '')}
-                      aria-label={`Vai trò của ${seat.name}`}
-                      className={`w-full bg-slate-900 border text-xs font-bold rounded-lg px-2 py-1.5 focus:outline-none ${
-                        seat.roleId
-                          ? 'border-slate-700 text-amber-300'
-                          : 'border-amber-500/60 text-slate-400'
-                      }`}
-                    >
-                      <option value="">-- Chờ nhập vai / Chọn hộ --</option>
-                      {Object.values(ROLES).map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name.vi}
-                        </option>
-                      ))}
-                    </select>
+                    {hideRolesForPrivacy ? (
+                      <div className="w-full bg-slate-900/90 border border-slate-700 text-xs font-mono font-bold text-slate-400 rounded-lg px-2 py-1.5">
+                        ••• (Đã ẩn)
+                      </div>
+                    ) : (
+                      <select
+                        value={seat.roleId || ''}
+                        onChange={(e) => handleUpdateRole(idx, e.target.value as RoleId | '')}
+                        aria-label={`Vai trò của ${seat.name}`}
+                        className={`w-full bg-slate-900 border text-xs font-bold rounded-lg px-2 py-1.5 focus:outline-none ${
+                          seat.roleId
+                            ? 'border-slate-700 text-amber-300'
+                            : 'border-amber-500/60 text-slate-400'
+                        }`}
+                      >
+                        <option value="">-- Chờ nhập vai / Chọn hộ --</option>
+                        {Object.values(ROLES).map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name.vi}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
 
                   <span className="text-[10px] text-slate-400 font-mono">
-                    {roleDef ? roleDef.badge : 'Chưa gán bài'}
+                    {hideRolesForPrivacy ? '••• (Đã ẩn)' : roleDef ? roleDef.badge : 'Chưa gán bài'}
                   </span>
                 </div>
               );
@@ -1238,14 +1466,52 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={handleResetForNewMatch}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              Thiết Lập Lại Ván
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {undoSnapshot && (
+                <button
+                  type="button"
+                  data-testid="gm-undo-btn"
+                  onClick={handleUndoLastStep}
+                  title={`Hoàn tác: ${undoSnapshot.label}`}
+                  className="px-3 py-1.5 rounded-lg bg-amber-950/80 hover:bg-amber-900/80 border border-amber-500/50 text-xs font-bold text-amber-200 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                  <span>↩️ Hoàn tác bước vừa rồi</span>
+                </button>
+              )}
+
+              {confirmReset ? (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    data-testid="gm-confirm-reset-btn"
+                    onClick={handleResetForNewMatch}
+                    className="px-3 py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600 border border-rose-400 text-xs font-extrabold text-white flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span>Xác nhận xóa ván?</span>
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="gm-cancel-reset-btn"
+                    onClick={() => setConfirmReset(false)}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 cursor-pointer"
+                  >
+                    Hủy
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  data-testid="gm-reset-match-btn"
+                  onClick={() => setConfirmReset(true)}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Thiết Lập Lại Ván
+                </button>
+              )}
+            </div>
           </div>
 
           {currentPhase === 'night' && (
@@ -1257,10 +1523,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     type="button"
                     onClick={() => {
                       setNightStep(idx);
-                      triggerRoleVoice(step.roleId);
                     }}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
-                      nightStep === idx
+                      safeNightStepIndex === idx
                         ? 'bg-rose-700 text-white'
                         : 'bg-slate-800 text-slate-300 hover:text-white'
                     }`}
@@ -1271,35 +1536,37 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 ))}
               </div>
 
-              {nightSteps[nightStep] && (
+              {activeNightStep && (
                 <div className="bg-[#090d18] border border-slate-800 rounded-xl p-4 space-y-4">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                     <div>
                       <span className="text-xs font-bold text-rose-400 uppercase tracking-widest">
-                        Bước {nightStep + 1} / {nightSteps.length}
+                        Bước {safeNightStepIndex + 1} / {nightSteps.length}
                       </span>
                       <h4 className="text-base font-bold text-slate-100">
-                        {nightSteps[nightStep].title}
+                        {activeNightStep.title}
                       </h4>
                     </div>
                     <button
-                      onClick={() => triggerRoleVoice(nightSteps[nightStep].roleId)}
+                      type="button"
+                      data-testid="gm-play-callout-btn"
+                      onClick={() => triggerRoleVoice(activeNightStep.roleId)}
                       className="px-3 py-1.5 rounded-lg bg-rose-900/60 hover:bg-rose-800 border border-rose-500/40 text-xs font-bold text-rose-100 flex items-center gap-1.5 cursor-pointer"
                     >
                       <Volume2 className="w-3.5 h-3.5 text-rose-300" />
-                      Phát Tiếng Gọi Vai
+                      🔊 Phát Tiếng Gọi
                     </button>
                   </div>
 
                   <div className="bg-rose-950/40 border border-rose-900/50 rounded-xl p-3 text-xs text-rose-200 space-y-1">
-                    <p className="font-semibold">{nightSteps[nightStep].description}</p>
+                    <p className="font-semibold">{activeNightStep.description}</p>
                     <p className="text-amber-300 italic">
-                      🎙️ Thoại mẫu: "{ROLE_CALLOUT_LINES[nightSteps[nightStep].roleId]?.quote}"
+                      🎙️ Thoại mẫu: "{ROLE_CALLOUT_LINES[activeNightStep.roleId]?.quote}"
                     </p>
-                    <p className="text-slate-300 mt-1">{nightSteps[nightStep].prompt}</p>
+                    <p className="text-slate-300 mt-1">{activeNightStep.prompt}</p>
                   </div>
 
-                  {nightSteps[nightStep].roleId === 'cupid' && (
+                  {activeNightStep.roleId === 'cupid' && (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {players.map((p) => {
                         const isSelected = nightActions.cupidLovers?.includes(p.id);
@@ -1341,7 +1608,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     </div>
                   )}
 
-                  {nightSteps[nightStep].roleId === 'doppelganger' && (
+                  {activeNightStep.roleId === 'doppelganger' && (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {players.map((p) => {
                         const isSelected = nightActions.doppelgangerTargetId === p.id;
@@ -1367,7 +1634,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     </div>
                   )}
 
-                  {nightSteps[nightStep].roleId === 'werewolf' && (
+                  {activeNightStep.roleId === 'werewolf' && (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {players
                         .filter((p) => p.isAlive)
@@ -1379,17 +1646,33 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                             <button
                               key={p.id}
                               onClick={() => {
-                                if (isPrimary) {
-                                  setNightActions({ ...nightActions, wolfTargetId: null });
-                                } else if (isSecondary) {
-                                  setNightActions({ ...nightActions, secondWolfTargetId: null });
-                                } else if (!nightActions.wolfTargetId) {
-                                  setNightActions({ ...nightActions, wolfTargetId: p.id });
-                                } else if (wolfPupFrenzy && !nightActions.secondWolfTargetId) {
-                                  setNightActions({ ...nightActions, secondWolfTargetId: p.id });
-                                } else {
-                                  setNightActions({ ...nightActions, wolfTargetId: p.id });
-                                }
+                                setNightActions((prev) => {
+                                  let nextWolf = prev.wolfTargetId;
+                                  let nextSecond = prev.secondWolfTargetId;
+                                  if (isPrimary) {
+                                    nextWolf = null;
+                                  } else if (isSecondary) {
+                                    nextSecond = null;
+                                  } else if (!prev.wolfTargetId) {
+                                    nextWolf = p.id;
+                                  } else if (wolfPupFrenzy && !prev.secondWolfTargetId) {
+                                    nextSecond = p.id;
+                                  } else {
+                                    nextWolf = p.id;
+                                  }
+                                  const keepHeal =
+                                    prev.witchHealTargetId &&
+                                    (prev.witchHealTargetId === nextWolf ||
+                                      (wolfPupFrenzy && prev.witchHealTargetId === nextSecond))
+                                      ? prev.witchHealTargetId
+                                      : null;
+                                  return {
+                                    ...prev,
+                                    wolfTargetId: nextWolf,
+                                    secondWolfTargetId: nextSecond,
+                                    witchHealTargetId: keepHeal,
+                                  };
+                                });
                               }}
                               className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between cursor-pointer ${
                                 isPrimary || isSecondary
@@ -1401,7 +1684,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                                 <Skull className="w-3.5 h-3.5 text-red-400" />
                                 <span>{p.name}</span>
                               </span>
-                              {isWolfAlly && (
+                              {isWolfAlly && !hideRolesForPrivacy && (
                                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-700/50">
                                   Sói
                                 </span>
@@ -1412,10 +1695,12 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     </div>
                   )}
 
-                  {nightSteps[nightStep].roleId === 'witch' && (() => {
-                    const witchObj = players.find((p) => p.roleId === 'witch' && p.isAlive);
-                    const healUsed = Boolean(witchObj?.hasUsedHeal || witchObj?.hasUsedPower);
-                    const poisonUsed = Boolean(witchObj?.hasUsedPoison || witchObj?.hasUsedPower);
+                  {activeNightStep.roleId === 'witch' && (() => {
+                    const witchObj = players.find(
+                      (p) => p.roleId === 'witch' && p.isAlive && !p.hasUsedPower
+                    );
+                    const healUsed = !witchObj || Boolean(witchObj.hasUsedHeal || witchObj.hasUsedPower);
+                    const poisonUsed = !witchObj || Boolean(witchObj.hasUsedPoison || witchObj.hasUsedPower);
                     const primaryVictim = players.find((p) => p.id === nightActions.wolfTargetId);
                     const secondaryVictim = players.find((p) => p.id === nightActions.secondWolfTargetId);
                     return (
@@ -1497,44 +1782,54 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     );
                   })()}
 
-                  {nightSteps[nightStep].roleId === 'seer' && (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                      {players
-                        .filter((p) => p.isAlive)
-                        .map((p) => {
-                          const isSelected = nightActions.seerTargetId === p.id;
-                          const isWolf = p.roleId === 'werewolf' || p.roleId === 'wolf_pup';
-                          return (
-                            <button
-                              key={p.id}
-                              onClick={() =>
-                                setNightActions({
-                                  ...nightActions,
-                                  seerTargetId: isSelected ? null : p.id,
-                                })
-                              }
-                              className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between cursor-pointer ${
-                                isSelected
-                                  ? 'bg-purple-950 border-purple-500 text-purple-200'
-                                  : 'bg-slate-900 border-slate-800 text-slate-300'
-                              }`}
-                            >
-                              <span className="flex items-center gap-1.5">
-                                <Eye className="w-3.5 h-3.5 text-purple-400" />
-                                {p.name}
-                              </span>
-                              {isSelected && (
-                                <span className="text-[10px] font-bold">
-                                  {isWolf ? '👎 SÓI' : '👍 DÂN'}
+                  {activeNightStep.roleId === 'seer' && (() => {
+                    const activeSeer = players.find(
+                      (p) => p.roleId === 'seer' && p.isAlive && !p.hasUsedPower
+                    );
+                    return (
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {players
+                          .filter((p) => p.isAlive)
+                          .map((p) => {
+                            const isSelected = nightActions.seerTargetId === p.id;
+                            const isWolf = p.roleId === 'werewolf' || p.roleId === 'wolf_pup';
+                            return (
+                              <button
+                                key={p.id}
+                                disabled={!activeSeer}
+                                onClick={() =>
+                                  setNightActions({
+                                    ...nightActions,
+                                    seerTargetId: isSelected ? null : p.id,
+                                  })
+                                }
+                                className={`p-2.5 rounded-xl border text-xs font-semibold flex items-center justify-between cursor-pointer disabled:opacity-40 ${
+                                  isSelected
+                                    ? 'bg-purple-950 border-purple-500 text-purple-200'
+                                    : 'bg-slate-900 border-slate-800 text-slate-300'
+                                }`}
+                              >
+                                <span className="flex items-center gap-1.5">
+                                  <Eye className="w-3.5 h-3.5 text-purple-400" />
+                                  {p.name}
                                 </span>
-                              )}
-                            </button>
-                          );
-                        })}
-                    </div>
-                  )}
+                                {isSelected && activeSeer && (
+                                  <span className="text-[10px] font-bold">
+                                    {hideRolesForPrivacy
+                                      ? '••• (Đã ẩn)'
+                                      : isWolf
+                                      ? '👎 SÓI'
+                                      : '👍 DÂN'}
+                                  </span>
+                                )}
+                              </button>
+                            );
+                          })}
+                      </div>
+                    );
+                  })()}
 
-                  {nightSteps[nightStep].roleId === 'bodyguard' && (
+                  {activeNightStep.roleId === 'bodyguard' && (
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       {players
                         .filter((p) => p.isAlive)
@@ -1567,11 +1862,10 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
                   <div className="flex items-center justify-between pt-3 border-t border-slate-800">
                     <button
-                      disabled={nightStep === 0}
+                      type="button"
+                      disabled={safeNightStepIndex === 0}
                       onClick={() => {
-                        const prev = nightStep - 1;
-                        setNightStep(prev);
-                        if (nightSteps[prev]) triggerRoleVoice(nightSteps[prev].roleId);
+                        setNightStep(Math.max(0, safeNightStepIndex - 1));
                       }}
                       className="px-3 py-1.5 rounded-lg bg-slate-800 text-xs font-semibold text-slate-300 disabled:opacity-40 flex items-center gap-1 cursor-pointer"
                     >
@@ -1579,12 +1873,11 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       Bước Trước
                     </button>
 
-                    {nightStep < nightSteps.length - 1 ? (
+                    {safeNightStepIndex < nightSteps.length - 1 ? (
                       <button
+                        type="button"
                         onClick={() => {
-                          const next = nightStep + 1;
-                          setNightStep(next);
-                          if (nightSteps[next]) triggerRoleVoice(nightSteps[next].roleId);
+                          setNightStep(Math.min(nightSteps.length - 1, safeNightStepIndex + 1));
                         }}
                         className="px-4 py-2 rounded-lg bg-rose-700 hover:bg-rose-600 text-xs font-bold text-white flex items-center gap-1 cursor-pointer"
                       >
@@ -1593,6 +1886,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       </button>
                     ) : (
                       <button
+                        type="button"
                         onClick={handleResolveNight}
                         className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center gap-1.5 cursor-pointer"
                       >
@@ -1721,9 +2015,11 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     </button>
                   </div>
 
-                  {!showSecretGMLog ? (
+                  {!showSecretGMLog || hideRolesForPrivacy ? (
                     <p className="text-xs text-slate-400 italic">
-                      🔒 Nguyên nhân chết (Sói cắn, Phù Thủy, Cupid...) và vai trò thật đang được che để tránh lộ thông tin cho người chơi. Bấm nút trên nếu Quản Trò cần đối chiếu riêng.
+                      {hideRolesForPrivacy
+                        ? '••• (Đã ẩn — Chế độ chống nhìn trộm đang bật)'
+                        : '🔒 Nguyên nhân chết (Sói cắn, Phù Thủy, Cupid...) và vai trò thật đang được che để tránh lộ thông tin cho người chơi. Bấm nút trên nếu Quản Trò cần đối chiếu riêng.'}
                     </p>
                   ) : (
                     <>
@@ -1912,10 +2208,10 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                               : 'bg-slate-900 border-slate-800 text-slate-300'
                           }`}
                         >
-                          <div className="flex items-center justify-between">
+                          <div className="flex items-center justify-between gap-2">
                             <span>{p.name}</span>
                             <span className="text-[10px] text-amber-400 font-mono">
-                              {ROLES[p.roleId].name.vi}
+                              {hideRolesForPrivacy ? '••• (Đã ẩn)' : ROLES[p.roleId].name.vi}
                             </span>
                           </div>
                         </button>
@@ -1946,6 +2242,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
       {showHunterModal && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Phát Súng Thợ Săn"
           data-testid="gm-hunter-modal"
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ backgroundColor: 'rgba(5, 8, 17, 0.9)' }}
@@ -1998,6 +2297,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
       {gameResult && gameResult.isOver && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Kết Quả Ván Đấu"
           data-testid="gm-victory-modal"
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ backgroundColor: 'rgba(5, 8, 17, 0.92)' }}
@@ -2017,14 +2319,117 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
             {/* BUG-24: Full role reveal roster at match end */}
             <RoleRevealRoster players={players} lang={lang} />
 
+            <div className="flex flex-wrap items-center gap-2">
+              {undoSnapshot && (
+                <button
+                  type="button"
+                  onClick={handleUndoLastStep}
+                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Undo2 className="w-3.5 h-3.5" />
+                  <span>↩️ Hoàn tác bước vừa rồi</span>
+                </button>
+              )}
+              <button
+                type="button"
+                data-testid="gm-play-new-match-btn"
+                onClick={handleResetForNewMatch}
+                className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer"
+              >
+                Chơi Ván Mới
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showQrModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Mã QR phòng ${roomId}`}
+          data-testid="gm-qr-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: '#050811' }}
+        >
+          <div className="w-full max-w-md bg-[#0f172a] border-2 border-amber-500/60 rounded-3xl p-6 text-center space-y-5 shadow-2xl relative">
             <button
               type="button"
-              data-testid="gm-play-new-match-btn"
-              onClick={handleResetForNewMatch}
-              className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer"
+              data-testid="gm-qr-modal-close-btn"
+              aria-label="Đóng mã QR"
+              onClick={() => setShowQrModal(false)}
+              className="absolute top-4 right-4 p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
             >
-              Chơi Ván Mới
+              <X className="w-4 h-4" />
             </button>
+
+            <div className="space-y-1">
+              <span className="text-[11px] font-mono uppercase tracking-widest text-amber-400 font-bold block">
+                Quét Mã QR Để Vào Phòng Quản Trò
+              </span>
+              <div
+                data-testid="gm-qr-modal-room-code"
+                className="text-4xl sm:text-5xl font-mono font-black text-amber-300 tracking-widest"
+              >
+                {roomId}
+              </div>
+            </div>
+
+            <div className="inline-block bg-white p-3.5 rounded-2xl border-4 border-amber-400/70 shadow-xl">
+              <svg
+                width={240}
+                height={240}
+                viewBox={`0 0 ${qrMatrix.length + 2} ${qrMatrix.length + 2}`}
+                shapeRendering="crispEdges"
+                role="img"
+                aria-label={`Mã QR phóng to phòng ${roomId}`}
+              >
+                <rect
+                  x={0}
+                  y={0}
+                  width={qrMatrix.length + 2}
+                  height={qrMatrix.length + 2}
+                  fill="#ffffff"
+                />
+                {qrMatrix.map((row, y) =>
+                  row.map((cell, x) =>
+                    cell ? (
+                      <rect
+                        key={`${x}-${y}`}
+                        x={x + 1}
+                        y={y + 1}
+                        width={1}
+                        height={1}
+                        fill="#0f172a"
+                      />
+                    ) : null
+                  )
+                )}
+              </svg>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Màn hình này che kín hoàn toàn danh sách vai trò. Người chơi có thể giơ camera quét trực tiếp hoặc nhập mã <strong className="text-amber-300 font-mono">{roomId}</strong>.
+            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleCopyRoomCode}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>Chép mã phòng</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCopyJoinLink}
+                className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Link2 className="w-3.5 h-3.5" />
+                <span>Chép link vào phòng</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

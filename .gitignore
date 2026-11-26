@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+.accounts_db.json
+.accounts_db.json.tmp.*
+.session_secret
+.idea/
+.netlify/
+package-lock.json

@@ -173,6 +173,7 @@ class WerewolfRealtimeClient {
     villageSize?: number;
     timerConfig?: Partial<RealtimeTimerConfig>;
     createIfMissing?: boolean;
+    authToken?: string;
   }) {
     const payload = { type: 'room:join', ...params };
     this.activeRoomJoin = payload;
@@ -220,14 +221,16 @@ class WerewolfRealtimeClient {
     this.send({ type: 'room:vote', code, voterId, targetId });
   }
 
-  subscribeGMHost(code: string) {
-    const payload = { type: 'gm:subscribe_host', code };
+  subscribeGMHost(code: string, hostSecret?: string) {
+    const payload: Record<string, unknown> = { type: 'gm:subscribe_host', code };
+    if (hostSecret) payload.hostSecret = hostSecret;
     this.activeGmSub = payload;
     this.send(payload);
   }
 
-  subscribeGMPlayer(code: string, userId: string) {
-    const payload = { type: 'gm:subscribe_player', code, userId };
+  subscribeGMPlayer(code: string, userId: string, playerToken?: string) {
+    const payload: Record<string, unknown> = { type: 'gm:subscribe_player', code, userId };
+    if (playerToken) payload.playerToken = playerToken;
     this.activeGmSub = payload;
     this.send(payload);
   }

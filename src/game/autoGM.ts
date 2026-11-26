@@ -9,7 +9,11 @@ import {
   VoteRecord,
 } from '../types/game';
 import { ROLES } from './roles';
-import { buildVoteTallyEntries, VoteTallyVoter } from './rules';
+import {
+  buildVoteTallyEntries,
+  getDyingWolfVictimsForWitch,
+  VoteTallyVoter,
+} from './rules';
 
 export type NightStepKey =
   | 'doppelganger'
@@ -231,13 +235,13 @@ export function isPlayerAwakeForNightStep(
     case 'cupid':
       return round === 1 && player.roleId === 'cupid';
     case 'bodyguard':
-      return player.roleId === 'bodyguard';
+      return player.roleId === 'bodyguard' && !player.hasUsedPower;
     case 'werewolf':
       return player.roleId === 'werewolf' || player.roleId === 'wolf_pup';
     case 'witch':
-      return player.roleId === 'witch';
+      return player.roleId === 'witch' && !player.hasUsedPower;
     case 'seer':
-      return player.roleId === 'seer';
+      return player.roleId === 'seer' && !player.hasUsedPower;
     default:
       return false;
   }
@@ -538,6 +542,7 @@ export function computeAutoGMBotNightStepAction(
     wolfPupFrenzy: boolean;
     humanPlayerId: string;
     knownWolfIdsByBotSeer?: string[];
+    suspectedIds?: string[];
   }
 ): Partial<NightActions> {
   const alivePlayers = players.filter((p) => p.isAlive);
@@ -622,36 +627,38 @@ export function computeAutoGMBotNightStepAction(
     );
     if (botWitch && !botWitch.hasUsedPower) {
       const updates: Partial<NightActions> = {};
-      const primaryWolfVictim = currentActions.wolfTargetId;
+      const dyingVictims = getDyingWolfVictimsForWitch(
+        players,
+        currentActions,
+        options.wolfPupFrenzy
+      );
 
-      // Bot Witch uses Heal if she herself was bitten, or 60% chance on Round 1-2 to save a victim
-      if (!botWitch.hasUsedHeal && primaryWolfVictim) {
-        if (
-          primaryWolfVictim === botWitch.id ||
-          primaryWolfVictim === botWitch.loverId ||
-          (options.round <= 2 && Math.random() < 0.6)
-        ) {
-          updates.witchHealTargetId = primaryWolfVictim;
+      // Inspect ALL dying wolf victims (including Wolf Pup frenzy Victim #2); prioritize self & Lover
+      if (!botWitch.hasUsedHeal && dyingVictims.length > 0) {
+        if (dyingVictims.includes(botWitch.id)) {
+          updates.witchHealTargetId = botWitch.id;
+        } else if (botWitch.loverId && dyingVictims.includes(botWitch.loverId)) {
+          updates.witchHealTargetId = botWitch.loverId;
+        } else if (options.round <= 2 && Math.random() < 0.6) {
+          updates.witchHealTargetId =
+            dyingVictims[Math.floor(Math.random() * dyingVictims.length)];
         }
       }
 
-      // Bot Witch uses Poison on Round >= 2 if she hasn't poisoned yet (45% chance)
+      // Fair Bot Witch Poison: use public suspectedIds if available, else uniform random — NEVER peek at roleId
       if (!botWitch.hasUsedPoison && options.round >= 2 && Math.random() < 0.45) {
+        const dyingSet = new Set(dyingVictims);
         const poisonCandidates = alivePlayers.filter(
           (p) =>
             p.id !== botWitch.id &&
             p.id !== botWitch.loverId &&
-            p.id !== primaryWolfVictim
+            !dyingSet.has(p.id)
         );
         if (poisonCandidates.length > 0) {
-          const wolvesInPool = poisonCandidates.filter(
-            (p) => p.roleId === 'werewolf' || p.roleId === 'wolf_pup'
-          );
-          // 50% chance Witch's intuition hits a wolf if available
-          const pick =
-            wolvesInPool.length > 0 && Math.random() < 0.5
-              ? wolvesInPool[Math.floor(Math.random() * wolvesInPool.length)]
-              : poisonCandidates[Math.floor(Math.random() * poisonCandidates.length)];
+          const suspectedSet = new Set(options.suspectedIds || []);
+          const suspectedPool = poisonCandidates.filter((p) => suspectedSet.has(p.id));
+          const pickPool = suspectedPool.length > 0 ? suspectedPool : poisonCandidates;
+          const pick = pickPool[Math.floor(Math.random() * pickPool.length)];
           updates.witchPoisonTargetId = pick.id;
         }
       }
@@ -708,7 +715,7 @@ export interface BotChatVoteSignals {
  * so bots vote consistently with whom they accused/defended and avoid voting for allies who defended them.
  */
 export function extractChatVoteSignals(
-  messages: Array<{ senderId: string; text: string; isSystem?: boolean; isGhost?: boolean }>,
+  messages: Array<{ id?: string; senderId: string; text: string; isSystem?: boolean; isGhost?: boolean }>,
   players: Player[]
 ): BotChatVoteSignals {
   const suspectsByVoter: Record<string, Set<string>> = {};
@@ -716,20 +723,36 @@ export function extractChatVoteSignals(
   const suspectsSilent = new Set<string>();
   const speakers = new Set<string>();
 
+  // Scope strictly to messages AFTER the latest Dawn system announcement
+  const dawnPattern = /bình minh|trời đã sáng|sáng ngày|dawn|morning/i;
+  let latestDawnIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.isSystem && (m.id?.startsWith('sys_dawn_') || dawnPattern.test(m.text || ''))) {
+      latestDawnIdx = i;
+      break;
+    }
+  }
+  const scopedMessages = latestDawnIdx >= 0 ? messages.slice(latestDawnIdx + 1) : messages;
+
   const alivePlayers = players.filter((p) => p.isAlive);
   const accusePattern =
     /(nghi|sói|treo cổ|chất vấn|đáng ngờ|suspect|wolf|vote|lynch|loup|sospech|怪し)/i;
+  const explicitAccusePattern =
+    /(treo cổ|vote|lynch|chắc chắn là sói|chắc chắn.*sói|là ma sói|is a werewolf|is a wolf|definitely.*wolf)/i;
   const defendPattern =
     /(tin tưởng|bênh|đáng tin|không phải sói|người tốt|phe dân|trust|innocent|defend|vouch|clean|味方)/i;
   const silentAccusePattern = /(im lặng|ít nói|không nói|silent|quiet|n'a rien dit|callado|黙って)/i;
 
-  for (const msg of messages) {
+  for (const msg of scopedMessages) {
     if (!msg || msg.isSystem || msg.isGhost || !msg.senderId || msg.senderId === 'sys') continue;
     speakers.add(msg.senderId);
-    const text = msg.text || '';
-    const isAccuse = accusePattern.test(text);
-    const isDefend = defendPattern.test(text);
-    if (silentAccusePattern.test(text)) {
+    const text = (msg.text || '').trim();
+    const isSilentAccuse = silentAccusePattern.test(text);
+    const questionOnly = /[?？]$/.test(text) && !explicitAccusePattern.test(text);
+    const isAccuse = accusePattern.test(text) && !questionOnly;
+    const isDefend = defendPattern.test(text) && !questionOnly;
+    if (isSilentAccuse) {
       suspectsSilent.add(msg.senderId);
     }
 
@@ -737,13 +760,13 @@ export function extractChatVoteSignals(
       if (target.id === msg.senderId) continue;
       if (!target.name || !text.toLowerCase().includes(target.name.toLowerCase())) continue;
 
-      if (isDefend && !isAccuse) {
+      if (isDefend && !isAccuse && !isSilentAccuse) {
         if (!alliesByVoter[msg.senderId]) alliesByVoter[msg.senderId] = new Set();
         alliesByVoter[msg.senderId].add(target.id);
         // Reciprocal alliance: the defended player also treats their defender as an ally!
         if (!alliesByVoter[target.id]) alliesByVoter[target.id] = new Set();
         alliesByVoter[target.id].add(msg.senderId);
-      } else if (isAccuse) {
+      } else if (isAccuse || isSilentAccuse) {
         if (!suspectsByVoter[msg.senderId]) suspectsByVoter[msg.senderId] = new Set();
         suspectsByVoter[msg.senderId].add(target.id);
       }
@@ -800,10 +823,10 @@ export function computeSmartBotDayVotes(
       return { voterId: bot.id, targetId: bot.id };
     }
 
+    // Fair AI: Traitor does not wake with Werewolves and votes deductively without knowing packmates
     const isBotWolfTeam =
       bot.roleId === 'werewolf' ||
-      bot.roleId === 'wolf_pup' ||
-      bot.roleId === 'traitor';
+      bot.roleId === 'wolf_pup';
 
     const mySuspects = new Set(chatSignals?.suspectsByVoter[bot.id] || []);
     const myAllies = new Set(chatSignals?.alliesByVoter[bot.id] || []);
@@ -867,6 +890,42 @@ export function computeSmartBotDayVotes(
 }
 
 /**
+ * Selects a fair, rule-aware revenge shot target for an AI Bot Hunter.
+ * Never shoots dead players, self, or Cupid Lover (unless no other choice);
+ * prioritizes confirmed wolves, then Hunter's own chat suspects, else random non-ally.
+ */
+export function pickSmartBotHunterTarget(
+  players: Player[],
+  hunter: Player,
+  knownWolfIds?: string[],
+  chatSignals?: BotChatVoteSignals | null
+): Player | null {
+  const aliveOthers = players.filter((p) => p.isAlive && p.id !== hunter.id);
+  if (aliveOthers.length === 0) return null;
+
+  const nonLovers = aliveOthers.filter((p) => p.id !== hunter.loverId);
+  const basePool = nonLovers.length > 0 ? nonLovers : aliveOthers;
+
+  const knownSet = new Set(knownWolfIds || []);
+  const knownTargets = basePool.filter((p) => knownSet.has(p.id));
+  if (knownTargets.length > 0) {
+    return knownTargets[Math.floor(Math.random() * knownTargets.length)];
+  }
+
+  const myAllies = new Set(chatSignals?.alliesByVoter[hunter.id] || []);
+  const nonAllyPool = basePool.filter((p) => !myAllies.has(p.id));
+  const preferredPool = nonAllyPool.length > 0 ? nonAllyPool : basePool;
+
+  const mySuspects = new Set(chatSignals?.suspectsByVoter[hunter.id] || []);
+  const suspectTargets = preferredPool.filter((p) => mySuspects.has(p.id));
+  if (suspectTargets.length > 0) {
+    return suspectTargets[Math.floor(Math.random() * suspectTargets.length)];
+  }
+
+  return preferredPool[Math.floor(Math.random() * preferredPool.length)];
+}
+
+/**
  * Generates contextual Day Discussion lines spoken by living AI bots moderated by Auto-GM.
  */
 export function buildBotDayDiscussionLines(
@@ -879,6 +938,9 @@ export function buildBotDayDiscussionLines(
   const aliveBots = players.filter((p) => p.isBot && p.isAlive);
   if (aliveBots.length === 0) return [];
 
+  const pickOne = <T,>(items: readonly T[]): T =>
+    items[Math.floor(Math.random() * items.length)];
+
   const lines: { senderId: string; senderName: string; text: string }[] = [];
   const shuffled = [...aliveBots];
   for (let i = shuffled.length - 1; i > 0; i--) {
@@ -888,7 +950,7 @@ export function buildBotDayDiscussionLines(
     shuffled[j] = tmp;
   }
 
-  // If a living bot Seer inspected someone last night, let them share a deduction clue
+  // Living bot Seer shares clue without dead-giveaway emoji: strong callout on Wolf or Round 2+, subtle vouching on Day 1 safe
   const botSeer = aliveBots.find((p) => p.roleId === 'seer' && !p.hasUsedPower);
   if (botSeer && seerInspection) {
     const target = players.find((p) => p.id === seerInspection.playerId);
@@ -896,11 +958,15 @@ export function buildBotDayDiscussionLines(
       const seerLine =
         lang === 'vi'
           ? seerInspection.isWerewolf
-            ? `🔮 Tôi đã quan sát kỹ đêm qua, mọi người hãy cẩn thận với ${target.name} — rất đáng ngờ là Ma Sói!`
-            : `🔮 Theo suy luận của tôi, ${target.name} có vẻ đáng tin cậy thuộc phe Dân Làng.`
+            ? `Tôi có manh mối rất rõ — mọi người hãy cân nhắc treo cổ ${target.name}, tôi nghi chắc chắn họ là Ma Sói!`
+            : round >= 2
+            ? `Tôi có cơ sở chắc chắn để bênh ${target.name} — người này đáng tin thuộc phe Dân Làng.`
+            : `Mình có cảm giác ${target.name} là người tốt, khá đáng tin ở vòng này.`
           : seerInspection.isWerewolf
-          ? `🔮 Watch out everyone, my night read points strongly to ${target.name} being a Werewolf!`
-          : `🔮 From my perspective, ${target.name} seems trustworthy on the Villager side.`;
+          ? `I have a strong lead — everyone should consider voting ${target.name}, I strongly suspect they are a Werewolf!`
+          : round >= 2
+          ? `I can confidently vouch for ${target.name} — they are clean and trustworthy on the Villager side.`
+          : `I get a good feeling about ${target.name} — seems trustworthy so far.`;
       lines.push({
         senderId: botSeer.id,
         senderName: botSeer.name,
@@ -911,32 +977,90 @@ export function buildBotDayDiscussionLines(
 
   const otherBots = shuffled.filter((b) => b.id !== botSeer?.id).slice(0, 2);
   otherBots.forEach((bot, idx) => {
-    const suspectPool = players.filter((p) => p.isAlive && p.id !== bot.id);
+    const isBitingWolf = bot.roleId === 'werewolf' || bot.roleId === 'wolf_pup';
+    const rawOthers = players.filter((p) => p.isAlive && p.id !== bot.id);
+    const safeSuspectPool = rawOthers.filter(
+      (p) =>
+        p.id !== bot.loverId &&
+        (!isBitingWolf || (p.roleId !== 'werewolf' && p.roleId !== 'wolf_pup'))
+    );
+    const suspectPool = safeSuspectPool.length > 0 ? safeSuspectPool : rawOthers;
     const randomSuspect =
-      suspectPool[Math.floor(Math.random() * suspectPool.length)]?.name || '...';
+      suspectPool.length > 0 ? pickOne(suspectPool).name : '...';
 
     let text = '';
-    if (lang === 'vi') {
+    if (bot.roleId === 'tanner') {
+      text =
+        lang === 'vi'
+          ? pickOne([
+              'Khoan đã, sao mọi người cứ nhìn chằm chằm vào tôi vậy? Đêm qua tôi ngủ kỹ lắm, đừng đổ oan vô cớ!',
+              'Bàn này đoán lung tung quá... tôi chỉ là dân thường thôi, ai nghi thì cứ thử bỏ phiếu đi!',
+              'Đừng phí thời gian hỏi tôi nữa, tôi không biết gì đâu — muốn treo cổ ai thì quyết nhanh lên!',
+            ])
+          : pickOne([
+              'Hey, why is everyone staring at me? I slept through the night, stop pointing fingers for nothing!',
+              'This village is guessing blindly... I have nothing to prove, suspect me if you want!',
+              'Stop wasting time questioning me — pick someone and get it over with already!',
+            ]);
+    } else if (lang === 'vi') {
       if (idx === 0) {
+        const killedList = killedNames.join(', ');
         text =
           killedNames.length > 0
-            ? `Đêm qua ${killedNames.join(', ')} đã ngã xuống rồi... Chúng ta hãy chia sẻ manh mối trước khi bỏ phiếu!`
-            : `Đêm qua bình yên, không ai tử trận! Chắc chắn Bảo Vệ đã che chở đúng người hoặc Phù Thủy đã dùng Bình Cứu.`;
+            ? pickOne([
+                `Đêm qua ${killedList} đã ngã xuống rồi... Chúng ta hãy chia sẻ manh mối trước khi bỏ phiếu!`,
+                `Mất ${killedList} sớm thế này thật căng thẳng. Có ai để ý dấu hiệu nào bất thường không?`,
+                `${killedList} vừa rời cuộc chơi trong đêm. Mọi người đừng vội dồn phiếu, hãy nghe từng người phân tích đã!`,
+              ])
+            : pickOne([
+                'Đêm qua bình yên, không ai tử trận! Chắc chắn Bảo Vệ đã che chở đúng người hoặc Phù Thủy đã dùng Bình Cứu.',
+                'Trời sáng mà đủ mặt cả làng — tin tốt đấy, nhưng đừng chủ quan vì bầy Sói vẫn đang ẩn nấp!',
+                'Không có ai chết đêm qua! Có thể có phép cứu người, hoặc bầy Sói vừa va phải Già Làng hay Bán Sói rồi.',
+              ]);
       } else if (round <= 1) {
-        text = `Mới sáng ngày đầu tiên, mọi người thấy ai có phản ứng lạ không? ${randomSuspect}, bạn nghi ngờ ai nhất?`;
+        text = pickOne([
+          `Mới sáng ngày đầu tiên, mọi người thấy ai có phản ứng lạ không? ${randomSuspect}, bạn nghi ngờ ai nhất?`,
+          `Ngày 1 chưa có nhiều dữ kiện, mình muốn nghe góc nhìn của ${randomSuspect} trước khi quyết định.`,
+          `Vòng đầu cứ bình tĩnh thăm dò đã — ${randomSuspect}, theo bạn hôm nay cả làng nên quan sát ai trước?`,
+          `Mọi người quanh lửa trại lên tiếng cho sôi nổi nào! ${randomSuspect}, trực giác của bạn hướng về ai?`,
+        ]);
       } else {
-        text = `Qua mấy lượt vừa rồi, tôi thấy ${randomSuspect} hơi im lặng và ít đưa lập luận — mọi người nghĩ sao?`;
+        text = pickOne([
+          `Qua mấy lượt vừa rồi, tôi thấy ${randomSuspect} hơi im lặng và ít đưa lập luận — mọi người nghĩ sao?`,
+          `Nhìn lại nhịp bỏ phiếu vòng trước, biểu hiện của ${randomSuspect} khá đáng ngờ, tôi đang nghi người này.`,
+          `Càng về sau càng ít người, không thể sai lầm nữa — tôi muốn chất vấn ${randomSuspect} giải thích rõ góc nhìn của mình.`,
+          `Tôi theo dõi sát ${randomSuspect} từ hôm qua, cách họ né tránh tranh luận khiến tôi nghi là Sói.`,
+        ]);
       }
     } else {
       if (idx === 0) {
+        const killedList = killedNames.join(', ');
         text =
           killedNames.length > 0
-            ? `We lost ${killedNames.join(', ')} last night... Let’s share clues carefully before voting!`
-            : `A peaceful night — nobody died! Either the Bodyguard blocked the bite or the Witch used her Heal potion.`;
+            ? pickOne([
+                `We lost ${killedList} last night... Let’s share clues carefully before voting!`,
+                `Losing ${killedList} puts real pressure on the village. Did anyone spot anything unusual?`,
+                `${killedList} fell overnight. Let’s not rush — hear everyone out before locking votes!`,
+              ])
+            : pickOne([
+                'A peaceful night — nobody died! Either the Bodyguard blocked the bite or the Witch used her Heal potion.',
+                'Everyone woke up alive — great news, though the Werewolves are still hiding among us!',
+                'Zero casualties overnight! Someone was saved, or the wolves ran into the Elder or Cursed.',
+              ]);
       } else if (round <= 1) {
-        text = `It’s Day 1 — does anyone have an early read? ${randomSuspect}, who are you watching first?`;
+        text = pickOne([
+          `It’s Day 1 — does anyone have an early read? ${randomSuspect}, who are you watching first?`,
+          `Day 1 information is still thin, so I want to hear ${randomSuspect}’s thoughts before deciding.`,
+          `Let’s stay sharp on Round 1 — ${randomSuspect}, who seems the most composed around the fire?`,
+          `Let’s get everyone talking around the campfire! ${randomSuspect}, who gives you the strangest vibe?`,
+        ]);
       } else {
-        text = `After the last round, ${randomSuspect} has stayed pretty quiet. What does the village think?`;
+        text = pickOne([
+          `After the last round, ${randomSuspect} has stayed pretty quiet. What does the village think?`,
+          `Looking back at yesterday’s pattern, I suspect ${randomSuspect} is hiding something.`,
+          `The circle is shrinking and we can’t afford a mistake — I suspect ${randomSuspect} may be a wolf.`,
+          `I’ve been watching ${randomSuspect} since yesterday; dodging debate makes me suspect a wolf.`,
+        ]);
       }
     }
 
@@ -989,6 +1113,7 @@ export function prepareNightStartForHuman(
   options: {
     wolfPupFrenzy?: boolean;
     knownWolfIdsByBotSeer?: string[];
+    suspectedIds?: string[];
   } = {}
 ): PreparedNightStart {
   const schedule = buildAutoGMNightSchedule(players, round, timerConfig, humanPlayerId);
@@ -1038,6 +1163,7 @@ export function prepareNightStartForHuman(
         wolfPupFrenzy: Boolean(options.wolfPupFrenzy),
         humanPlayerId: humanId,
         knownWolfIdsByBotSeer: options.knownWolfIdsByBotSeer || [],
+        suspectedIds: options.suspectedIds || [],
       }
     );
     Object.assign(preSimulatedActions, botAct);

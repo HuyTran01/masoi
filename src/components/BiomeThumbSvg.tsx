@@ -18,11 +18,11 @@ export const BIOME_DESCRIPTIONS: Record<AgrouMapBiome, Record<Language, string>>
     ja: 'オーロラ輝く雪山の頂',
   },
   autumn: {
-    vi: 'Thung lũng lá phong đỏ rực ánh hoàng hôn',
-    en: 'Golden-amber autumn valley at sunset',
-    fr: 'Vallée d’automne aux érables dorés',
-    es: 'Valle otoñal de arces dorados',
-    ja: '紅葉が舞う黄金の渓谷',
+    vi: 'Đồi cỏ xanh mướt, suối trong, đại thụ cổ & đom đóm bay lấp lánh',
+    en: 'Rolling emerald meadow, sparkling blue river, ancient oaks & fireflies',
+    fr: 'Prairie verdoyante, rivière bleue, chênes anciens et lucioles dorées',
+    es: 'Pradera esmeralda, río cristalino, robles antiguos y luciérnagas doradas',
+    ja: '緑の丘、澄んだ清流、古木の大樹と黄金の蛍',
   },
 };
 
@@ -55,21 +55,35 @@ export const BiomeThumbSvg: React.FC<{ biome: AgrouMapBiome; className?: string 
     return (
       <svg viewBox="0 0 64 40" className={className} aria-hidden="true">
         <defs>
-          <linearGradient id="bt-autumn-sky" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#7c2d12" />
-            <stop offset="60%" stopColor="#ea580c" />
-            <stop offset="100%" stopColor="#fcd34d" />
+          <linearGradient id="bt-meadow-sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#3b76b8" />
+            <stop offset="65%" stopColor="#7cc4f5" />
+            <stop offset="100%" stopColor="#cfeaff" />
           </linearGradient>
         </defs>
-        <rect width="64" height="40" fill="url(#bt-autumn-sky)" />
-        <circle cx="48" cy="13" r="6" fill="#fef08a" opacity="0.9" />
-        <ellipse cx="14" cy="24" rx="10" ry="8" fill="#b91c1c" />
-        <ellipse cx="52" cy="25" rx="9" ry="7" fill="#d97706" />
-        <rect x="13" y="29" width="2.5" height="6" fill="#451a03" />
-        <rect x="51" y="29" width="2.5" height="6" fill="#451a03" />
-        <rect y="31" width="64" height="9" fill="#78350f" />
-        <circle cx="32" cy="32" r="4.5" fill="#f97316" />
-        <circle cx="32" cy="31" r="2.2" fill="#fef08a" />
+        <rect width="64" height="40" fill="url(#bt-meadow-sky)" />
+        {/* Rolling emerald meadow hills */}
+        <ellipse cx="14" cy="31" rx="22" ry="10" fill="#4f8a32" />
+        <ellipse cx="52" cy="31" rx="22" ry="10" fill="#3f7328" />
+        <rect y="28" width="64" height="12" fill="#548a32" />
+        {/* Sparkling blue river */}
+        <path
+          d="M 42 26 Q 36 31 46 35 Q 52 38 58 40 L 46 40 Q 38 36 33 32 Q 30 29 36 26 Z"
+          fill="#38bdf8"
+        />
+        <path d="M 40 28 Q 37 31 44 34" stroke="#e0f2fe" strokeWidth="1" fill="none" opacity="0.85" />
+        {/* Ancient oaks */}
+        <rect x="11.5" y="24" width="2.8" height="7" fill="#5c3d24" />
+        <ellipse cx="13" cy="20" rx="8.5" ry="6.5" fill="#2f6627" />
+        <ellipse cx="15" cy="18.5" rx="5.5" ry="4.5" fill="#5a943c" />
+        <rect x="52.5" y="24" width="2.6" height="6.5" fill="#5c3d24" />
+        <ellipse cx="54" cy="20.5" rx="7.5" ry="5.5" fill="#2c5e24" />
+        {/* Golden fireflies & campfire */}
+        <circle cx="24" cy="14" r="1.2" fill="#fde047" opacity="0.95" />
+        <circle cx="43" cy="11" r="1.1" fill="#fef08a" opacity="0.9" />
+        <circle cx="34" cy="17" r="0.9" fill="#fde047" opacity="0.85" />
+        <circle cx="27" cy="32" r="4" fill="#ea580c" />
+        <circle cx="27" cy="31" r="2" fill="#fef08a" />
       </svg>
     );
   }

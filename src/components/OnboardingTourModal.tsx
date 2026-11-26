@@ -314,6 +314,9 @@ export const OnboardingTourModal: React.FC<OnboardingTourModalProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={step.title}
       className="fixed inset-0 z-50 pointer-events-auto select-none overflow-hidden"
       data-testid="onboarding-tour-modal"
       data-active-zone={zone}

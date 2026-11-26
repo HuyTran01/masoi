@@ -310,7 +310,7 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
             onClick={onContinue}
             className={`w-full sm:w-auto px-5 py-2.5 rounded-xl font-black text-xs sm:text-sm shadow-lg cursor-pointer transition-colors ${
               isDawn
-                ? 'bg-[#e86f24] hover:bg-[#f28139] border border-[#fbc266] text-[#fff8ed]'
+                ? 'bg-[#b84b10] hover:bg-[#9e3f0c] border border-[#fbc266] text-white'
                 : 'bg-[#5b3ea6] hover:bg-[#6d4dc2] border border-[#c4b5fd] text-white'
             }`}
           >

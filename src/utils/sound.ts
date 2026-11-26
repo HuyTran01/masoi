@@ -50,7 +50,7 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
       ja: 'アオォォーン…血の月が昇った！人狼よ、目覚めて獲物を狩れ！',
     },
     sfxLabel: '🐺 Tiếng Sói Hú Trăng Máu & Gió Rừng Đêm',
-    musicTitle: '🎵 Bản Giaoưởng Trăng Máu (Blood Moon Pack Howl)',
+    musicTitle: '🎵 Bản Giao Hưởng Trăng Máu (Blood Moon Pack Howl)',
   },
   wolf_pup: {
     quote: 'Gâu gâu! Sói Con nhe nanh thức dậy cùng bầy đàn nào!',
@@ -289,6 +289,7 @@ class SoundEngine {
   private bgmStepCounter: number = 0;
   private ttsQueueTimer: number | null = null;
   private lastTtsAt: number = 0;
+  private cachedVoices: SpeechSynthesisVoice[] = [];
 
   constructor() {
     if (typeof window !== 'undefined') {
@@ -297,10 +298,21 @@ class SoundEngine {
       } catch {
         this.isMuted = false;
       }
-      // Pre-warm speechSynthesis voice list if available
+      // Pre-warm speechSynthesis voice list and refresh when browser finishes loading voices asynchronously
       if ('speechSynthesis' in window) {
+        const refreshVoices = () => {
+          try {
+            const loaded = window.speechSynthesis.getVoices();
+            if (loaded.length > 0) {
+              this.cachedVoices = loaded;
+            }
+          } catch {
+            // ignore
+          }
+        };
+        refreshVoices();
         try {
-          window.speechSynthesis.getVoices();
+          window.speechSynthesis.onvoiceschanged = refreshVoices;
         } catch {
           // ignore
         }
@@ -394,7 +406,11 @@ class SoundEngine {
     }
 
     try {
-      const voices = window.speechSynthesis.getVoices();
+      const liveVoices = window.speechSynthesis.getVoices();
+      if (liveVoices.length > 0) {
+        this.cachedVoices = liveVoices;
+      }
+      const voices = liveVoices.length > 0 ? liveVoices : this.cachedVoices;
       const matchedVoice = selectBestVoiceForLanguage(voices, lang);
       if (!matchedVoice) {
         return false;

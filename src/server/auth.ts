@@ -47,12 +47,27 @@ function getSessionSecret(overrideSecret?: string): string {
   return EPHEMERAL_FALLBACK_SECRET;
 }
 
+function scryptAsync(password: string, salt: string, keylen: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(password, salt, keylen, (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey);
+    });
+  });
+}
+
 /**
  * Hashes a plaintext password using scrypt with a unique 16-byte random salt.
  */
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
   const derived = crypto.scryptSync(password, salt, SCRYPT_KEYLEN).toString('hex');
+  return `scrypt:${salt}:${derived}`;
+}
+
+export async function hashPasswordAsync(password: string): Promise<string> {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const derived = (await scryptAsync(password, salt, SCRYPT_KEYLEN)).toString('hex');
   return `scrypt:${salt}:${derived}`;
 }
 
@@ -82,6 +97,35 @@ export function verifyPassword(password: string, storedHash: string): boolean {
     try {
       const expectedBuf = Buffer.from(expectedHex, 'hex');
       const derivedBuf = crypto.scryptSync(password, salt, expectedBuf.length);
+      if (expectedBuf.length !== derivedBuf.length) return false;
+      return crypto.timingSafeEqual(expectedBuf, derivedBuf);
+    } catch {
+      return false;
+    }
+  }
+
+  // Legacy SHA-256 hash support (exact hash match only, constant-time)
+  try {
+    const expectedBuf = Buffer.from(storedHash, 'hex');
+    const actualBuf = Buffer.from(legacySha256Hash(password), 'hex');
+    if (expectedBuf.length === 0 || expectedBuf.length !== actualBuf.length) return false;
+    return crypto.timingSafeEqual(expectedBuf, actualBuf);
+  } catch {
+    return false;
+  }
+}
+
+export async function verifyPasswordAsync(password: string, storedHash: string): Promise<boolean> {
+  if (!password || !storedHash) return false;
+
+  if (storedHash.startsWith('scrypt:')) {
+    const parts = storedHash.split(':');
+    if (parts.length !== 3) return false;
+    const [, salt, expectedHex] = parts;
+    if (!salt || !expectedHex) return false;
+    try {
+      const expectedBuf = Buffer.from(expectedHex, 'hex');
+      const derivedBuf = await scryptAsync(password, salt, expectedBuf.length);
       if (expectedBuf.length !== derivedBuf.length) return false;
       return crypto.timingSafeEqual(expectedBuf, derivedBuf);
     } catch {
@@ -171,6 +215,9 @@ export function extractBearerToken(authHeader?: string): string | null {
 }
 
 export function getDefaultSeedAccounts(): DatabaseAccountRecord[] {
+  if (process.env.NODE_ENV === 'production' && process.env.SEED_DEMO_ACCOUNTS !== '1') {
+    return [];
+  }
   const now = Date.now();
   return [
     {

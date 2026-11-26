@@ -53,13 +53,7 @@ const TRUST_BUTTONS: {
 
 const QUICK_ROLE_GUESSES: (RoleId | 'unknown')[] = [
   'unknown',
-  'werewolf',
-  'seer',
-  'bodyguard',
-  'witch',
-  'hunter',
-  'villager',
-  'tanner',
+  ...(Object.values(ROLES).map((r) => r.id) as RoleId[]),
 ];
 
 export const AgrouNotebookDrawer: React.FC<AgrouNotebookDrawerProps> = ({
@@ -78,6 +72,9 @@ export const AgrouNotebookDrawer: React.FC<AgrouNotebookDrawerProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={lang === 'vi' ? 'Sổ Tay Suy Luận Lửa Trại' : 'Campfire Deduction Notebook'}
       data-testid="agrou-notebook-drawer"
       className="fixed inset-y-3 right-3 z-40 w-[min(410px,calc(100vw-24px))] pointer-events-auto flex flex-col agrou-parchment-panel rounded-2xl overflow-hidden"
     >

@@ -218,3 +218,105 @@ test('[QA Regression] BUG-05: GM resetMatch bumps matchId and preserves claimed 
   assert.equal(nextView?.mySeat?.roleId, 'witch');
   assert.equal(nextView?.mySeat?.isAlive, true);
 });
+
+test('GMRoomManager issues and verifies hostSecret/playerToken without leaking them, and preserves elderLives on sync', () => {
+  const mgr = new GMRoomManager();
+  const created = mgr.syncFromHost('GM-6666', 'host_secret_owner', {
+    deckMode: 'virtual_deck',
+    status: 'in_match',
+    phase: 'night',
+    round: 1,
+    seats: [
+      { id: 'p_1', name: 'Già Làng', roleId: 'elder', roleSource: 'auto_dealt', elderLives: 1 },
+      { id: 'p_2', name: 'Sói', roleId: 'werewolf', roleSource: 'auto_dealt' },
+      { id: 'p_3', name: 'Dân 1', roleId: 'villager', roleSource: 'auto_dealt' },
+      { id: 'p_4', name: 'Dân 2', roleId: 'villager', roleSource: 'auto_dealt' },
+    ],
+  });
+  assert.equal(created.ok, true);
+  if (!created.ok) return;
+
+  const secret = created.hostSecret;
+  assert.equal(typeof secret, 'string');
+  assert.equal(secret.length, 32);
+  assert.equal(mgr.verifyHostSecret('GM-6666', secret), true);
+  assert.equal(mgr.verifyHostSecret('GM-6666', 'wrong_secret'), false);
+  assert.equal(mgr.verifyHostSecret('GM-6666', undefined), false);
+
+  // Sync with wrong hostSecret rejected even with matching hostId
+  const badSync = mgr.syncFromHost(
+    'GM-6666',
+    'host_secret_owner',
+    { round: 2 },
+    '0'.repeat(32)
+  );
+  assert.equal(badSync.ok, false);
+
+  // Sync without elderLives preserves elderLives = 1 when !resetMatch
+  const nextSync = mgr.syncFromHost(
+    'GM-6666',
+    'host_secret_owner',
+    {
+      status: 'in_match',
+      round: 2,
+      seats: [
+        { id: 'p_1', name: 'Già Làng', roleId: 'elder', roleSource: 'auto_dealt' },
+        { id: 'p_2', name: 'Sói', roleId: 'werewolf', roleSource: 'auto_dealt' },
+        { id: 'p_3', name: 'Dân 1', roleId: 'villager', roleSource: 'auto_dealt' },
+        { id: 'p_4', name: 'Dân 2', roleId: 'villager', roleSource: 'auto_dealt' },
+      ],
+    },
+    secret
+  );
+  assert.equal(nextSync.ok, true);
+  if (!nextSync.ok) return;
+  assert.equal(nextSync.room.seats[0].elderLives, 1);
+
+  // Explicit resetMatch restores elderLives back to 2
+  const resetSync = mgr.syncFromHost(
+    'GM-6666',
+    'host_secret_owner',
+    {
+      resetMatch: true,
+      seats: [
+        { id: 'p_1', name: 'Già Làng', roleId: 'elder', roleSource: 'auto_dealt' },
+        { id: 'p_2', name: 'Sói', roleId: 'werewolf', roleSource: 'auto_dealt' },
+        { id: 'p_3', name: 'Dân 1', roleId: 'villager', roleSource: 'auto_dealt' },
+        { id: 'p_4', name: 'Dân 2', roleId: 'villager', roleSource: 'auto_dealt' },
+      ],
+    },
+    secret
+  );
+  assert.equal(resetSync.ok, true);
+  if (resetSync.ok) {
+    assert.equal(resetSync.room.seats[0].elderLives, 2);
+  }
+
+  // Player token issuance, verification, idempotent reconnect reuse, and zero leakage
+  const join1 = mgr.joinAsPlayer('GM-6666', { id: 'u_elder', name: 'Già Làng' });
+  assert.equal(join1.ok, true);
+  if (!join1.ok) return;
+  const token = join1.playerToken;
+  assert.equal(typeof token, 'string');
+  assert.equal(token.length, 24);
+  assert.equal(mgr.hasPlayerToken('GM-6666', 'u_elder'), true);
+  assert.equal(mgr.verifyPlayerToken('GM-6666', 'u_elder', token), true);
+  assert.equal(mgr.verifyPlayerToken('GM-6666', 'u_elder', 'bad_token'), false);
+
+  const reconn = mgr.joinAsPlayer('GM-6666', { id: 'u_elder', name: 'Già Làng' });
+  assert.equal(reconn.ok, true);
+  if (reconn.ok) {
+    assert.equal(reconn.playerToken, token);
+  }
+
+  // Secrets must NEVER leak into host state, player view, or room summaries
+  assert.equal(JSON.stringify(mgr.getHostState('GM-6666')).includes(secret), false);
+  assert.equal(JSON.stringify(mgr.getHostState('GM-6666')).includes(token), false);
+  assert.equal(JSON.stringify(mgr.getPlayerView('GM-6666', 'u_elder')).includes(secret), false);
+  assert.equal(JSON.stringify(mgr.getPlayerView('GM-6666', 'u_elder')).includes(token), false);
+  assert.equal(JSON.stringify(mgr.listRooms()).includes(secret), false);
+
+  // Leave clears issued player token
+  mgr.leaveAsPlayer('GM-6666', 'u_elder');
+  assert.equal(mgr.hasPlayerToken('GM-6666', 'u_elder'), false);
+});

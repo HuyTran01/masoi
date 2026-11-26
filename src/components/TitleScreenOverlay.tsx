@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Bot,
   ChevronDown,
@@ -11,6 +11,7 @@ import {
   Shield,
   SlidersHorizontal,
   Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { Language, RoleId } from '../types/game';
 import { ROLES } from '../game/roles';
@@ -80,7 +81,28 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
 }) => {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [guideMenuOpen, setGuideMenuOpen] = useState(false);
+  const guideMenuRef = useRef<HTMLDivElement>(null);
   const t = UI_TEXT[lang];
+
+  useEffect(() => {
+    if (!guideMenuOpen) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (guideMenuRef.current && !guideMenuRef.current.contains(e.target as Node)) {
+        setGuideMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setGuideMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [guideMenuOpen]);
 
   const isLoggedIn = Boolean(
     currentUser.provider && currentUser.provider !== 'guest' && currentUser.handle
@@ -117,6 +139,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
           <button
             type="button"
             data-testid="title-profile-btn"
+            aria-label={lang === 'vi' ? `Hồ sơ ${currentUser.name}` : `Profile ${currentUser.name}`}
             onClick={() => {
               sound.playCardFlip();
               onOpenAccountModal(isLoggedIn ? 'profile' : 'login');
@@ -145,6 +168,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
           <button
             type="button"
             data-testid="open-avatar-locker-btn"
+            aria-label={lang === 'vi' ? 'Tủ Đồ & Bản Đồ' : 'Locker & Maps'}
             onClick={() => {
               sound.playCardFlip();
               onOpenAvatarLocker();
@@ -163,13 +187,18 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
             type="button"
             onClick={onToggleMute}
             aria-label={t.toggleSound}
+            aria-pressed={isMuted}
             title={t.toggleSound}
             className="p-2 rounded-xl agrou-wood-panel hover:border-[#e89c3e] text-[#f6ebd8] cursor-pointer"
           >
-            <Volume2 className={`w-4 h-4 ${isMuted ? 'text-[#8c7258]' : 'text-[#5cb85c]'}`} />
+            {isMuted ? (
+              <VolumeX className="w-4 h-4 text-[#c7ae8e]" />
+            ) : (
+              <Volume2 className="w-4 h-4 text-[#5cb85c]" />
+            )}
           </button>
 
-          <div className="relative">
+          <div className="relative" ref={guideMenuRef}>
             <button
               type="button"
               data-testid="open-onboarding-tour-btn"
@@ -301,13 +330,14 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                 type="button"
                 data-testid="toggle-match-settings-btn"
                 aria-expanded={settingsOpen}
+                aria-label={lang === 'vi' ? 'Cài đặt ván đấu' : 'Match Settings'}
                 onClick={() => {
                   sound.playCardFlip();
                   setSettingsOpen((v) => !v);
                 }}
                 className={`px-2.5 py-1.5 rounded-xl border text-[11px] font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
                   settingsOpen
-                    ? 'bg-[#e86f24] text-[#fff8ed] border-[#fbc266]'
+                    ? 'bg-[#b84b10] hover:bg-[#9e3f0c] text-[#ffffff] border-[#fbc266]'
                     : 'bg-[#1b120b] hover:bg-[#312115] border-[#785334] text-[#f6ebd8]'
                 }`}
               >
@@ -321,6 +351,15 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
             <button
               type="button"
               data-testid="toggle-title-menu-btn"
+              aria-label={
+                isTitleMenuMinimized
+                  ? lang === 'vi'
+                    ? 'Mở Menu'
+                    : 'Expand'
+                  : lang === 'vi'
+                  ? 'Ngắm 3D'
+                  : '3D View'
+              }
               onClick={onToggleMinimize}
               className="px-2.5 py-1.5 rounded-xl bg-[#1b120b] hover:bg-[#312115] border border-[#9c7248]/70 text-[11px] font-bold text-[#f5b82e] flex items-center gap-1 cursor-pointer"
             >
@@ -429,7 +468,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                           }}
                           className={`flex-1 py-1.5 rounded-lg text-xs font-extrabold border cursor-pointer ${
                             villageSize === cnt
-                              ? 'bg-[#e86f24] text-[#fff8ed] border-[#fbc266]'
+                              ? 'bg-[#b84b10] hover:bg-[#9e3f0c] text-[#ffffff] border-[#fbc266]'
                               : 'bg-[#2a1c12] text-[#d6bfa2] border-[#6b4a2e] hover:border-[#e89c3e]'
                           }`}
                         >
@@ -443,10 +482,10 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                           data-testid="custom-player-count-dec"
                           disabled={villageSize <= 4}
                           onClick={() => onChangeVillageSize(Math.max(4, villageSize - 1))}
-                          className="p-1 rounded bg-[#3b281a] hover:bg-[#4e3624] disabled:opacity-35 text-[#f6ebd8] cursor-pointer"
+                          className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded bg-[#3b281a] hover:bg-[#4e3624] disabled:opacity-35 text-[#f6ebd8] cursor-pointer"
                           aria-label="Decrease player count"
                         >
-                          <Minus className="w-3 h-3" />
+                          <Minus className="w-3.5 h-3.5" />
                         </button>
                         <input
                           type="number"
@@ -461,17 +500,17 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                               onChangeVillageSize(Math.max(4, Math.min(20, val)));
                             }
                           }}
-                          className="w-9 text-center bg-[#1a110a] border border-[#6b4a2e] rounded py-0.5 text-xs font-mono font-extrabold text-[#f5b82e]"
+                          className="w-9 text-center bg-[#1a110a] border border-[#6b4a2e] rounded py-1 text-xs font-mono font-extrabold text-[#f5b82e]"
                         />
                         <button
                           type="button"
                           data-testid="custom-player-count-inc"
                           disabled={villageSize >= 20}
                           onClick={() => onChangeVillageSize(Math.min(20, villageSize + 1))}
-                          className="p-1 rounded bg-[#3b281a] hover:bg-[#4e3624] disabled:opacity-35 text-[#f6ebd8] cursor-pointer"
+                          className="p-1.5 min-w-[32px] min-h-[32px] flex items-center justify-center rounded bg-[#3b281a] hover:bg-[#4e3624] disabled:opacity-35 text-[#f6ebd8] cursor-pointer"
                           aria-label="Increase player count"
                         >
-                          <Plus className="w-3 h-3" />
+                          <Plus className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
@@ -498,7 +537,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                       }
                       className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer ${
                         timerConfig.nightActionSec === 12
-                          ? 'bg-[#e86f24] text-[#fff8ed] border-[#fbc266]'
+                          ? 'bg-[#b84b10] hover:bg-[#9e3f0c] text-[#ffffff] border-[#fbc266]'
                           : 'bg-[#2a1c12] text-[#d6bfa2] border-[#6b4a2e]'
                       }`}
                     >
@@ -510,7 +549,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                       onClick={() => onUpdateTimerConfig(DEFAULT_TIMER_CONFIG)}
                       className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer ${
                         timerConfig.nightActionSec === 20
-                          ? 'bg-[#e86f24] text-[#fff8ed] border-[#fbc266]'
+                          ? 'bg-[#b84b10] hover:bg-[#9e3f0c] text-[#ffffff] border-[#fbc266]'
                           : 'bg-[#2a1c12] text-[#d6bfa2] border-[#6b4a2e]'
                       }`}
                     >
@@ -530,7 +569,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                       }
                       className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer ${
                         timerConfig.nightActionSec === 35
-                          ? 'bg-[#e86f24] text-[#fff8ed] border-[#fbc266]'
+                          ? 'bg-[#b84b10] hover:bg-[#9e3f0c] text-[#ffffff] border-[#fbc266]'
                           : 'bg-[#2a1c12] text-[#d6bfa2] border-[#6b4a2e]'
                       }`}
                     >
@@ -545,6 +584,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                       min={5}
                       max={180}
                       data-testid="title-custom-night-sec-input"
+                      aria-label={lang === 'vi' ? 'Thời gian ban đêm (giây)' : 'Night phase duration (seconds)'}
                       value={timerConfig.nightActionSec}
                       onChange={(e) => {
                         const v = parseInt(e.target.value, 10);
@@ -563,6 +603,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                       min={10}
                       max={600}
                       data-testid="title-custom-discuss-sec-input"
+                      aria-label={lang === 'vi' ? 'Thời gian thảo luận (giây)' : 'Discussion phase duration (seconds)'}
                       value={timerConfig.dayDiscussSec}
                       onChange={(e) => {
                         const v = parseInt(e.target.value, 10);
@@ -602,7 +643,7 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                 data-start="true"
                 data-testid="title-quick-play-ai-btn"
                 onClick={onStartAIPractice}
-                className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-[#e86f24] hover:bg-[#f28139] border border-[#fbc266] text-[#fffaf0] font-extrabold text-xs sm:text-sm shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                className="w-full py-2.5 sm:py-3 px-4 rounded-xl bg-[#b84b10] hover:bg-[#9e3f0c] border border-[#fbc266] text-[#ffffff] font-extrabold text-xs sm:text-sm shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-colors"
               >
                 <Bot className="w-4 h-4 shrink-0" />
                 <span>

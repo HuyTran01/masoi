@@ -27,6 +27,7 @@ import {
   Bot,
   Ghost,
   Volume2,
+  VolumeX,
   ArrowUp,
   ArrowDown,
   ArrowLeft,
@@ -95,6 +96,7 @@ import { ROLES } from './game/roles';
 import {
   generateBalancedRoster,
   assignPreferredRoleToDeck,
+  getDyingWolfVictimsForWitch,
   resolveNightActions,
   applyDayLynch,
   castSingleDayVote,
@@ -113,6 +115,7 @@ import {
   PlayerNotebookNote,
   appendNotebookTimelineEvent,
   createInitialNotebook,
+  electMayorForVillage,
   formatNotebookShareSummary,
   getBotCosmetics,
   loadAgrouAvatarConfig,
@@ -128,6 +131,7 @@ import {
   getHumanRoleWakeGuidance,
   computeAutoGMBotNightStepAction,
   computeSmartBotDayVotes,
+  pickSmartBotHunterTarget,
   extractChatVoteSignals,
   stripMarkdownAsterisks,
   buildBotDayDiscussionLines,
@@ -147,6 +151,7 @@ import { addMatchHistory } from './utils/storage';
 import confetti from 'canvas-confetti';
 
 const ACTIVE_MATCH_SNAPSHOT_KEY = 'werewolf_active_match_v1';
+const AUTH_TOKEN_STORAGE_KEY = 'werewolf_auth_token';
 
 interface SavedAIMatchSnapshot {
   savedAt: number;
@@ -157,6 +162,7 @@ interface SavedAIMatchSnapshot {
   timerSeconds: number;
   mayorId: string | null;
   wolfPupFrenzy: boolean;
+  elderSealActive?: boolean;
   votes: VoteRecord[];
   hasVoted: boolean;
   messages: ChatMessage[];
@@ -165,9 +171,14 @@ interface SavedAIMatchSnapshot {
   doppelgangerTargetId: string | null;
   cupidLovers: [string, string] | null;
   tonightWolfVictimId: string | null;
+  secondWolfTargetId?: string | null;
   guardTargetTonightId: string | null;
-  witchSaveUsedTonight: boolean;
+  witchHealTargetTonightId?: string | null;
+  witchSaveUsedTonight?: boolean;
   witchPoisonTargetId: string | null;
+  hasInspectedTonight?: boolean;
+  seerInspectResult?: string | null;
+  knownWolfIds?: string[];
   villageSize: number;
   preferredRole: RoleId | 'random';
   eventBanner: string;
@@ -184,7 +195,8 @@ function loadSavedAIMatchSnapshot(): SavedAIMatchSnapshot | null {
       parsed.players.length < 4 ||
       !parsed.phase ||
       parsed.phase === 'game_over' ||
-      parsed.phase === 'lobby'
+      parsed.phase === 'lobby' ||
+      parsed.phase === 'hunter_revenge'
     ) {
       return null;
     }
@@ -328,7 +340,13 @@ export default function App() {
   const [isMuted, setIsMuted] = useState<boolean>(() => sound.getMuted());
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [initialAccountTab, setInitialAccountTab] = useState<AccountModalTab | null>(null);
-  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(AUTH_TOKEN_STORAGE_KEY) || null;
+    } catch {
+      return null;
+    }
+  });
   const [showFactionHints, setShowFactionHints] = useState<boolean>(false);
   const [activeToolPopover, setActiveToolPopover] = useState<'none' | 'props' | 'voice'>('none');
   const [virtualCardRoomId, setVirtualCardRoomId] = useState<string>(() => {
@@ -400,6 +418,7 @@ export default function App() {
     nightKilledIds: string[];
     seerInspection: { playerId: string; roleId: RoleId; isWerewolf: boolean } | null;
   } | null>(null);
+  const [pendingDuskBeforePlayers, setPendingDuskBeforePlayers] = useState<Player[] | null>(null);
 
   // User Profile (Database Account & Unique Per-Tab Guest Identity)
   const [currentUser, setCurrentUser] = useState<UserProfileData>(() => {
@@ -426,7 +445,11 @@ export default function App() {
             typeof parsed.handle === 'string' &&
             parsed.handle.trim().length > 0;
           const resolvedId = isSignedInAccount
-            ? `acc_${parsed.handle.trim().toLowerCase()}`
+            ? typeof parsed.id === 'string' &&
+              parsed.id.trim().length > 0 &&
+              !parsed.id.startsWith('usr_')
+              ? parsed.id.trim()
+              : `acc_${parsed.handle.trim().toLowerCase()}`
             : tabGuest.id;
           const resolvedName =
             typeof parsed.name === 'string' &&
@@ -463,7 +486,7 @@ export default function App() {
   const [villageSize, setVillageSize] = useState<number>(() => {
     try {
       const saved = Number(localStorage.getItem('werewolf_pref_village_size'));
-      if ([6, 8, 10, 12].includes(saved)) return saved;
+      if (Number.isInteger(saved) && saved >= 4 && saved <= 20) return saved;
     } catch {
       // ignore
     }
@@ -511,8 +534,19 @@ export default function App() {
   const [round, setRound] = useState<number>(1);
   const [timerSeconds, setTimerSeconds] = useState<number>(20);
   const [wolfPupFrenzy, setWolfPupFrenzy] = useState<boolean>(false);
+  const [elderSealActive, setElderSealActive] = useState<boolean>(false);
   const [matchInstanceId, setMatchInstanceId] = useState<number>(1);
   const lastAutoAdvancedKeyRef = useRef<string>('');
+  const botVoteTimeoutRef = useRef<number | null>(null);
+  const botPropTimeoutRef = useRef<number | null>(null);
+  const phaseRef = useRef<Phase>(phase);
+  const matchInstanceIdRef = useRef<number>(matchInstanceId);
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
+  useEffect(() => {
+    matchInstanceIdRef.current = matchInstanceId;
+  }, [matchInstanceId]);
 
   // Players in the 3D Village Circle (Initialized with an active night role for the human player)
   const [initialBootState] = useState(() => {
@@ -566,11 +600,19 @@ export default function App() {
         return p;
       });
     }
-    return { readyPlayers, prepared };
+    const initialMayorId = electMayorForVillage(
+      readyPlayers,
+      readyPlayers[Math.floor(Math.random() * readyPlayers.length)]?.id
+    );
+    readyPlayers = readyPlayers.map((p) => ({
+      ...p,
+      isMayor: Boolean(initialMayorId && p.id === initialMayorId),
+    }));
+    return { readyPlayers, prepared, initialMayorId };
   });
 
   const [players, setPlayers] = useState<Player[]>(() => initialBootState.readyPlayers);
-  const [mayorId, setMayorId] = useState<string | null>(null);
+  const [mayorId, setMayorId] = useState<string | null>(() => initialBootState.initialMayorId);
   const playersRef = useRef<Player[]>(players);
   useEffect(() => {
     playersRef.current = players;
@@ -584,8 +626,11 @@ export default function App() {
   const [cupidLovers, setCupidLovers] = useState<[string, string] | null>(
     () => initialBootState.prepared.preSimulatedActions.cupidLovers || null
   );
-  const [witchSaveUsedTonight, setWitchSaveUsedTonight] = useState<boolean>(() =>
-    Boolean(initialBootState.prepared.preSimulatedActions.witchHealTargetId)
+  const [witchHealTargetTonightId, setWitchHealTargetTonightId] = useState<string | null>(
+    () => initialBootState.prepared.preSimulatedActions.witchHealTargetId || null
+  );
+  const botWitchActedTonightRef = useRef<boolean>(
+    initialBootState.prepared.completedBotRoleIds.includes('witch')
   );
   const [witchPoisonTargetId, setWitchPoisonTargetId] = useState<string | null>(
     () => initialBootState.prepared.preSimulatedActions.witchPoisonTargetId || null
@@ -735,10 +780,130 @@ export default function App() {
   const isPlayerAwakeAtNight =
     phase === 'night' && me.isAlive && isMyTurnInNightStep && !hasClosedEyesTonight;
 
-  // Mirror shellState to document.body.dataset.state
+  // Mirror shellState to document.body.dataset.state & keep <html lang> synced
   useEffect(() => {
     document.body.dataset.state = shellState;
   }, [shellState]);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
+
+  // Persist authToken in localStorage & validate on mount via GET /api/accounts/me
+  useEffect(() => {
+    try {
+      if (authToken) {
+        localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, authToken);
+      } else {
+        localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }, [authToken]);
+
+  useEffect(() => {
+    const token = authToken;
+    if (!token) return;
+    let cancelled = false;
+    fetch('/api/accounts/me', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.status === 401 || res.status === 404) {
+          setAuthToken(null);
+          try {
+            localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+          } catch {
+            // ignore
+          }
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled || !data?.ok || !data?.account) return;
+        const acc = data.account as {
+          id: string;
+          username: string;
+          displayName: string;
+          avatar: string;
+          region?: string;
+          elo?: number;
+          matchesPlayed?: number;
+          wins?: number;
+        };
+        setCurrentUser((prev) => {
+          const prevId = prev.id;
+          const nextUser: UserProfileData = {
+            ...prev,
+            id: acc.id || prev.id,
+            name: acc.displayName || prev.name,
+            avatar: acc.avatar || prev.avatar,
+            handle: acc.username || prev.handle,
+            provider: prev.provider && prev.provider !== 'guest' ? prev.provider : 'account',
+            region: acc.region || prev.region || 'VN',
+            elo: typeof acc.elo === 'number' ? acc.elo : prev.elo,
+            matchesPlayed:
+              typeof acc.matchesPlayed === 'number'
+                ? acc.matchesPlayed
+                : prev.matchesPlayed ?? 0,
+            wins: typeof acc.wins === 'number' ? acc.wins : prev.wins ?? 0,
+          };
+          try {
+            localStorage.setItem('werewolf_user', JSON.stringify(nextUser));
+          } catch {
+            // ignore
+          }
+          setPlayers((prevPlayers) =>
+            prevPlayers.map((p) =>
+              p.id === prevId
+                ? { ...p, id: nextUser.id, name: nextUser.name, avatar: nextUser.avatar }
+                : p
+            )
+          );
+          return nextUser;
+        });
+      })
+      .catch(() => {
+        // offline or server unavailable — keep cached local profile
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Ensure living players can never view the dead-only Ghost chat tab
+  useEffect(() => {
+    if (me.isAlive && chatTab === 'ghost') {
+      setChatTab('main');
+    }
+  }, [me.isAlive, chatTab]);
+
+  // Cancel pending delayed bot vote / bot prop timers whenever phase, match, or shell changes
+  useEffect(() => {
+    if (phase !== 'day_voting' && botVoteTimeoutRef.current !== null) {
+      window.clearTimeout(botVoteTimeoutRef.current);
+      botVoteTimeoutRef.current = null;
+    }
+    if (phase !== 'day_discussion' && botPropTimeoutRef.current !== null) {
+      window.clearTimeout(botPropTimeoutRef.current);
+      botPropTimeoutRef.current = null;
+    }
+  }, [phase, matchInstanceId, shellState]);
+
+  useEffect(() => {
+    return () => {
+      if (botVoteTimeoutRef.current !== null) {
+        window.clearTimeout(botVoteTimeoutRef.current);
+        botVoteTimeoutRef.current = null;
+      }
+      if (botPropTimeoutRef.current !== null) {
+        window.clearTimeout(botPropTimeoutRef.current);
+        botPropTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   // Sync Ambient BGM with current phase (strictly ONLY during 3D 'playing' mode)
   useEffect(() => {
@@ -749,10 +914,10 @@ export default function App() {
     }
   }, [shellState, phase]);
 
-  // Check URL query parameters on mount (?gmroom=GM-XXXX or ?room=GM-XXXX opens standalone GM Player Card view)
+  // Check URL query parameters on mount (?gm=GM-XXXX, ?gmroom=GM-XXXX, or ?room=GM-XXXX opens standalone GM Player Card view)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get('gmroom') || params.get('room');
+    const roomParam = params.get('gm') || params.get('gmroom') || params.get('room');
     if (roomParam) {
       setGameMode('gm');
       setVirtualCardRoomId(roomParam.trim().toUpperCase());
@@ -784,6 +949,16 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [roleCalloutToast]);
 
+  // Extract publicly accused suspect IDs from daytime chat for fair Bot Witch targeting
+  const getPublicSuspectedIds = useCallback((targetPlayers: Player[]) => {
+    const signals = extractChatVoteSignals(messagesRef.current, targetPlayers);
+    const unique = new Set<string>();
+    for (const list of Object.values(signals.suspectsByVoter)) {
+      for (const id of list) unique.add(id);
+    }
+    return Array.from(unique);
+  }, []);
+
   // Unified helper to start any Night (Round 1 or Round 2+) directly at the human player's turn
   const beginNewNight = useCallback(
     (
@@ -792,6 +967,15 @@ export default function App() {
       targetFrenzy: boolean,
       knownWolves: string[] = knownWolfIds
     ) => {
+      if (botVoteTimeoutRef.current !== null) {
+        window.clearTimeout(botVoteTimeoutRef.current);
+        botVoteTimeoutRef.current = null;
+      }
+      if (botPropTimeoutRef.current !== null) {
+        window.clearTimeout(botPropTimeoutRef.current);
+        botPropTimeoutRef.current = null;
+      }
+
       const human = targetPlayers.find((p) => p.id === currentUser.id) || targetPlayers[0];
       const prepared = prepareNightStartForHuman(
         targetPlayers,
@@ -801,6 +985,7 @@ export default function App() {
         {
           wolfPupFrenzy: targetFrenzy,
           knownWolfIdsByBotSeer: knownWolves,
+          suspectedIds: getPublicSuspectedIds(targetPlayers),
         }
       );
 
@@ -815,13 +1000,17 @@ export default function App() {
       }
 
       lastAutoAdvancedKeyRef.current = '';
+      botWitchActedTonightRef.current = prepared.completedBotRoleIds.includes('witch');
       setMatchInstanceId((m) => m + 1);
       setPlayers(nextPlayers);
       setRound(targetRound);
       setPhase('night');
+      setVotes([]);
+      setHasVoted(false);
       setGmAnnouncement(null);
       setPendingNightTransition(null);
       setPendingDawnContext(null);
+      setPendingDuskBeforePlayers(null);
       setNightStepIndex(prepared.initialStepIndex);
       setTimerSeconds(prepared.initialTimerSec);
       setHasInspectedTonight(false);
@@ -838,28 +1027,14 @@ export default function App() {
       }
       setTonightWolfVictimId(prepared.preSimulatedActions.wolfTargetId || null);
       setSecondWolfTargetId(prepared.preSimulatedActions.secondWolfTargetId || null);
-      setWitchSaveUsedTonight(Boolean(prepared.preSimulatedActions.witchHealTargetId));
+      setWitchHealTargetTonightId(prepared.preSimulatedActions.witchHealTargetId || null);
       setWitchPoisonTargetId(prepared.preSimulatedActions.witchPoisonTargetId || null);
       setSeerTargetTonightId(prepared.preSimulatedActions.seerTargetId || null);
       setGuardTargetTonightId(prepared.preSimulatedActions.guardTargetId || null);
 
-      if (prepared.preSimulatedActions.seerTargetId) {
-        const inspected = nextPlayers.find(
-          (p) => p.id === prepared.preSimulatedActions.seerTargetId
-        );
-        if (
-          inspected &&
-          (inspected.roleId === 'werewolf' || inspected.roleId === 'wolf_pup')
-        ) {
-          setKnownWolfIds((prev) =>
-            prev.includes(inspected.id) ? prev : [...prev, inspected.id]
-          );
-        }
-      }
-
       return prepared;
     },
-    [currentUser.id, timerConfig, knownWolfIds]
+    [currentUser.id, timerConfig, knownWolfIds, getPublicSuspectedIds]
   );
 
   // Automated Game Master ("Quản Trò Máy") sequential night step orchestrator
@@ -883,6 +1058,9 @@ export default function App() {
 
     // Only execute AI Bot actions when the current step is a Bot step (never overwrite human turn)
     if (!awakeNow) {
+      if (currentNightStep.key === 'witch') {
+        botWitchActedTonightRef.current = true;
+      }
       const botUpdates = computeAutoGMBotNightStepAction(
         currentNightStep.key,
         players,
@@ -890,7 +1068,7 @@ export default function App() {
           wolfTargetId: tonightWolfVictimId,
           secondWolfTargetId,
           guardTargetId: guardTargetTonightId,
-          witchHealTargetId: witchSaveUsedTonight ? tonightWolfVictimId : null,
+          witchHealTargetId: witchHealTargetTonightId,
           witchPoisonTargetId,
           seerTargetId: seerTargetTonightId,
           cupidLovers,
@@ -901,6 +1079,7 @@ export default function App() {
           wolfPupFrenzy,
           humanPlayerId: me.id,
           knownWolfIdsByBotSeer: knownWolfIds,
+          suspectedIds: getPublicSuspectedIds(players),
         }
       );
 
@@ -925,22 +1104,14 @@ export default function App() {
         setSecondWolfTargetId(botUpdates.secondWolfTargetId);
       }
       if (botUpdates.witchHealTargetId) {
-        setWitchSaveUsedTonight(true);
+        setWitchHealTargetTonightId(botUpdates.witchHealTargetId);
       }
       if (botUpdates.witchPoisonTargetId) {
         setWitchPoisonTargetId(botUpdates.witchPoisonTargetId);
       }
       if (botUpdates.seerTargetId) {
+        // Defer adding Bot Seer's inspection to knownWolfIds until POST-death check in handleResolveNight!
         setSeerTargetTonightId(botUpdates.seerTargetId);
-        const inspected = players.find((p) => p.id === botUpdates.seerTargetId);
-        if (
-          inspected &&
-          (inspected.roleId === 'werewolf' || inspected.roleId === 'wolf_pup')
-        ) {
-          setKnownWolfIds((prev) =>
-            prev.includes(inspected.id) ? prev : [...prev, inspected.id]
-          );
-        }
       }
       if (botUpdates.guardTargetId) {
         setGuardTargetTonightId(botUpdates.guardTargetId);
@@ -1020,7 +1191,7 @@ export default function App() {
       if (
         !skipBroadcast &&
         gameMode === 'online' &&
-        (propType === 'tomato' || propType === 'rose' || propType === 'egg')
+        (propType === 'tomato' || propType === 'rose' || propType === 'egg' || propType === 'water')
       ) {
         realtimeClient.sendProp(roomId, {
           id: newEv.id,
@@ -1106,7 +1277,6 @@ export default function App() {
       id: `nb_share_${Date.now()}`,
       senderId: me.id,
       senderName: me.name,
-      senderRole: me.roleId,
       text: summaryText,
       timestamp: Date.now(),
       isGhost: false,
@@ -1133,7 +1303,8 @@ export default function App() {
       customRoomId?: string,
       customParticipants?: LobbyParticipant[],
       serverMatchRoles?: Record<string, RoleId>,
-      serverTimerConfig?: RealtimeTimerConfig
+      serverTimerConfig?: RealtimeTimerConfig,
+      autoOpenRoleCard = false
     ) => {
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
@@ -1206,14 +1377,19 @@ export default function App() {
               }),
             ];
 
+      const initialMayorId = electMayorForVillage(
+        rawPlayers,
+        rawPlayers[Math.floor(Math.random() * rawPlayers.length)]?.id
+      );
       const freshPlayers: Player[] = rawPlayers.map((p) => ({
         ...p,
-        isMayor: false,
+        isMayor: Boolean(initialMayorId && p.id === initialMayorId),
       }));
 
-      setMayorId(null);
+      setMayorId(initialMayorId);
       setKnownWolfIds([]);
       setWolfPupFrenzy(false);
+      setElderSealActive(false);
       setVotes([]);
       setHasVoted(false);
       setActiveHunter(null);
@@ -1224,10 +1400,12 @@ export default function App() {
       setPendingDawnAfterDeath(null);
       setPendingNightTransition(null);
       setPendingDawnContext(null);
+      setPendingDuskBeforePlayers(null);
       setSuspectTags({});
       setActiveDrawer('none');
       setIsNotebookOpen(false);
       setShowAvatarLocker(false);
+      setShowMyRoleModal(autoOpenRoleCard);
       setEmoteEvents([]);
       setIsUserRoaming(false);
       setAimedOwnSeat(false);
@@ -1266,14 +1444,15 @@ export default function App() {
     (winner: string, reason: string, finalPlayers: Player[], currentRound: number) => {
       sound.playVictory();
       confetti({ particleCount: 100, spread: 75 });
-      const userSide = ROLES[me.roleId].faction;
+      const finalMe = finalPlayers.find((p) => p.id === currentUser.id) || me;
+      const userSide = ROLES[finalMe.roleId].faction;
       const didUserWin =
         (winner === 'villagers' && userSide === 'villager') ||
         (winner === 'werewolves' && userSide === 'werewolf') ||
-        (winner === 'tanner' && me.roleId === 'tanner') ||
-        (winner === 'lovers' && Boolean(me.loverId));
+        (winner === 'tanner' && finalMe.roleId === 'tanner') ||
+        (winner === 'lovers' && Boolean(finalMe.loverId));
 
-      const eloDelta = didUserWin ? 28 : -14;
+      const eloDelta = winner === 'draw' ? 0 : didUserWin ? 28 : -14;
       const nextElo = Math.max(1000, currentUser.elo + eloDelta);
       const nextMatches = (currentUser.matchesPlayed || 0) + 1;
       const nextWins = (currentUser.wins || 0) + (didUserWin ? 1 : 0);
@@ -1342,7 +1521,7 @@ export default function App() {
         })),
       });
     },
-    [currentUser, me, roomId]
+    [currentUser, me, roomId, authToken]
   );
 
   // Resolve Night Actions -> Transition to Day with Authentic Real-Life GM Morning Briefing
@@ -1374,8 +1553,8 @@ export default function App() {
       seerTargetTonightId || (me.roleId === 'seer' && !me.hasUsedPower ? selectedTargetId : null);
 
     let witchHeal =
-      livingWitches.length > 0 && !livingWitches[0].hasUsedHeal && witchSaveUsedTonight
-        ? wolfTarget
+      livingWitches.length > 0 && !livingWitches[0].hasUsedHeal && witchHealTargetTonightId
+        ? witchHealTargetTonightId
         : null;
     let witchPoison =
       livingWitches.length > 0 && !livingWitches[0].hasUsedPoison
@@ -1387,6 +1566,7 @@ export default function App() {
       wolfPupFrenzy,
       humanPlayerId: me.id,
       knownWolfIdsByBotSeer: knownWolfIds,
+      suspectedIds: getPublicSuspectedIds(players),
     };
 
     if (round === 1 && !resolvedDoppelTarget && me.roleId !== 'doppelganger') {
@@ -1397,7 +1577,14 @@ export default function App() {
       const act = computeAutoGMBotNightStepAction('cupid', players, {}, botStepOpts);
       if (act.cupidLovers) resolvedCupidLovers = act.cupidLovers;
     }
-    if (!wolfTarget || (wolfPupFrenzy && !secondTarget)) {
+    // Canonical #15 Bodyguard runs before #20 Werewolves & #30 Witch so Witch sees accurate dying victims
+    if (!guardTarget && me.roleId !== 'bodyguard') {
+      const act = computeAutoGMBotNightStepAction('bodyguard', players, {}, botStepOpts);
+      if (act.guardTargetId) guardTarget = act.guardTargetId;
+    }
+    const isHumanLivingWolf =
+      me.isAlive && (me.roleId === 'werewolf' || me.roleId === 'wolf_pup');
+    if (!isHumanLivingWolf && (!wolfTarget || (wolfPupFrenzy && !secondTarget))) {
       const act = computeAutoGMBotNightStepAction(
         'werewolf',
         players,
@@ -1419,15 +1606,21 @@ export default function App() {
     }
     if (
       me.roleId !== 'witch' &&
+      !botWitchActedTonightRef.current &&
       livingWitches.length > 0 &&
       !livingWitches[0].hasUsedPower &&
       !witchHeal &&
       !witchPoison
     ) {
+      botWitchActedTonightRef.current = true;
       const act = computeAutoGMBotNightStepAction(
         'witch',
         players,
-        { wolfTargetId: wolfTarget },
+        {
+          wolfTargetId: wolfTarget,
+          secondWolfTargetId: secondTarget,
+          guardTargetId: guardTarget,
+        },
         botStepOpts
       );
       if (act.witchHealTargetId) witchHeal = act.witchHealTargetId;
@@ -1436,10 +1629,6 @@ export default function App() {
     if (!resolvedSeerTarget && me.roleId !== 'seer') {
       const act = computeAutoGMBotNightStepAction('seer', players, {}, botStepOpts);
       if (act.seerTargetId) resolvedSeerTarget = act.seerTargetId;
-    }
-    if (!guardTarget && me.roleId !== 'bodyguard') {
-      const act = computeAutoGMBotNightStepAction('bodyguard', players, {}, botStepOpts);
-      if (act.guardTargetId) guardTarget = act.guardTargetId;
     }
 
     const actions: NightActions = {
@@ -1456,10 +1645,11 @@ export default function App() {
     const { updatedPlayers, result } = resolveNightActions(players, actions, {
       wolfPupTriggered: wolfPupFrenzy,
       roundNumber: round,
+      elderSealActive,
     });
 
-    // Only track bot Seer's inspections for AI voting — NEVER leak human Seer's secret inspection to AI bots!
-    const isBotSeerAlive = players.some(
+    // Only track bot Seer's inspections AFTER night deaths — dead Bot Seer NEVER leaks telepathy!
+    const isBotSeerAlive = updatedPlayers.some(
       (p) => p.roleId === 'seer' && Boolean(p.isBot) && p.isAlive
     );
     if (
@@ -1493,18 +1683,26 @@ export default function App() {
     setSecondWolfTargetId(null);
     setGuardTargetTonightId(null);
     setSeerTargetTonightId(null);
-    setWitchSaveUsedTonight(false);
+    setWitchHealTargetTonightId(null);
     setWitchPoisonTargetId(null);
     setRoleCalloutToast(null);
 
-    if (result.triggeredHunterId) {
-      let pendingHunterId: string | null = result.triggeredHunterId;
+    if (result.triggeredHunterIds.length > 0) {
+      // Process bot hunters before pausing for any human hunter in the same simultaneous wave
+      const hunterQueue: string[] = [...result.triggeredHunterIds].sort((a, b) => {
+        const pa = effectivePlayers.find((p) => p.id === a);
+        const pb = effectivePlayers.find((p) => p.id === b);
+        return Number(!pa?.isBot) - Number(!pb?.isBot);
+      });
+      const processedHunters = new Set<string>();
       let chainGuard = 0;
-      while (pendingHunterId && chainGuard < 4) {
+      while (hunterQueue.length > 0 && chainGuard < 6) {
         chainGuard++;
-        const hunterPlayer = effectivePlayers.find((p) => p.id === pendingHunterId);
-        pendingHunterId = null;
-        if (!hunterPlayer) break;
+        const nextHunterId = hunterQueue.shift()!;
+        if (processedHunters.has(nextHunterId)) continue;
+        processedHunters.add(nextHunterId);
+        const hunterPlayer = effectivePlayers.find((p) => p.id === nextHunterId);
+        if (!hunterPlayer || hunterPlayer.hasUsedPower) continue;
         // Strictly DO NOT play Hunter callout toast/SFX when a Bot Hunter dies at night (anti-leak!)
         if (!hunterPlayer.isBot) {
           triggerNightRoleCallout('hunter');
@@ -1533,14 +1731,19 @@ export default function App() {
           sound.playGhostWail();
           return;
         }
-        const aliveTargets = effectivePlayers.filter((p) => p.isAlive);
-        if (aliveTargets.length > 0) {
-          const shotTarget =
-            aliveTargets[Math.floor(Math.random() * aliveTargets.length)];
+        const chatSignals = extractChatVoteSignals(messagesRef.current, effectivePlayers);
+        const shotTarget = pickSmartBotHunterTarget(
+          effectivePlayers,
+          hunterPlayer,
+          knownWolfIds,
+          chatSignals
+        );
+        if (shotTarget) {
           const afterShot = resolveHunterShot(
             effectivePlayers,
             hunterPlayer.id,
-            shotTarget.id
+            shotTarget.id,
+            { elderSealActive }
           );
           effectivePlayers = afterShot.updatedPlayers;
           if (afterShot.wolfPupTriggeredNextNight) nextFrenzy = true;
@@ -1565,8 +1768,8 @@ export default function App() {
             extraLoverName: extraLover?.name,
             extraLoverSeat,
           };
-          if (afterShot.triggeredHunterId) {
-            pendingHunterId = afterShot.triggeredHunterId;
+          for (const chainedId of afterShot.triggeredHunterIds) {
+            if (!processedHunters.has(chainedId)) hunterQueue.push(chainedId);
           }
         }
       }
@@ -1728,7 +1931,18 @@ export default function App() {
     if (aliveBots.length >= 2) {
       const botPick = aliveBots[Math.floor(Math.random() * aliveBots.length)];
       const otherBot = aliveBots.find((b) => b.id !== botPick.id) || aliveBots[0];
-      setTimeout(() => {
+      const scheduledMatchId = matchInstanceIdRef.current;
+      if (botPropTimeoutRef.current !== null) {
+        window.clearTimeout(botPropTimeoutRef.current);
+      }
+      botPropTimeoutRef.current = window.setTimeout(() => {
+        botPropTimeoutRef.current = null;
+        if (
+          phaseRef.current !== 'day_discussion' ||
+          matchInstanceIdRef.current !== scheduledMatchId
+        ) {
+          return;
+        }
         handleThrowProp(botPick.id, otherBot.id, round % 2 === 0 ? 'egg' : 'tomato');
         handleTriggerEmote(dawnAnnouncement.victims.length > 0 ? 'panic' : 'wave', otherBot.id);
       }, 900);
@@ -1736,6 +1950,7 @@ export default function App() {
   }, [
     players,
     me,
+    mayorId,
     selectedTargetId,
     secondWolfTargetId,
     tonightWolfVictimId,
@@ -1744,7 +1959,8 @@ export default function App() {
     doppelgangerTargetId,
     knownWolfIds,
     wolfPupFrenzy,
-    witchSaveUsedTonight,
+    elderSealActive,
+    witchHealTargetTonightId,
     witchPoisonTargetId,
     cupidLovers,
     round,
@@ -1753,6 +1969,8 @@ export default function App() {
     finishGame,
     triggerNightRoleCallout,
     handleThrowProp,
+    handleTriggerEmote,
+    getPublicSuspectedIds,
     timerConfig,
     t,
     lang,
@@ -1783,13 +2001,19 @@ export default function App() {
       let simWolfTarget = tonightWolfVictimId;
       let simSecondTarget = secondWolfTargetId;
       let simGuardTarget = guardTargetTonightId;
+      let simWitchHeal = witchHealTargetTonightId;
+      let simWitchPoison = witchPoisonTargetId;
       let simLovers = cupidLovers;
       let simDoppel = doppelgangerTargetId;
+      const suspectedIds = getPublicSuspectedIds(players);
 
       const startIdx = Math.min(nightStepIndex, myNightStepIdx);
       for (let i = startIdx; i < myNightStepIdx; i++) {
         const step = nightSchedule[i];
         if (!step) continue;
+        if (step.key === 'witch') {
+          botWitchActedTonightRef.current = true;
+        }
         const botAct = computeAutoGMBotNightStepAction(
           step.key,
           players,
@@ -1797,6 +2021,8 @@ export default function App() {
             wolfTargetId: simWolfTarget,
             secondWolfTargetId: simSecondTarget,
             guardTargetId: simGuardTarget,
+            witchHealTargetId: simWitchHeal,
+            witchPoisonTargetId: simWitchPoison,
             cupidLovers: simLovers,
             doppelgangerTargetId: simDoppel,
           },
@@ -1805,11 +2031,14 @@ export default function App() {
             wolfPupFrenzy,
             humanPlayerId: me.id,
             knownWolfIdsByBotSeer: knownWolfIds,
+            suspectedIds,
           }
         );
         if (botAct.wolfTargetId) simWolfTarget = botAct.wolfTargetId;
         if (botAct.secondWolfTargetId) simSecondTarget = botAct.secondWolfTargetId;
         if (botAct.guardTargetId) simGuardTarget = botAct.guardTargetId;
+        if (botAct.witchHealTargetId) simWitchHeal = botAct.witchHealTargetId;
+        if (botAct.witchPoisonTargetId) simWitchPoison = botAct.witchPoisonTargetId;
         if (botAct.cupidLovers) simLovers = botAct.cupidLovers;
         if (botAct.doppelgangerTargetId) simDoppel = botAct.doppelgangerTargetId;
       }
@@ -1817,6 +2046,8 @@ export default function App() {
       if (simWolfTarget) setTonightWolfVictimId(simWolfTarget);
       if (simSecondTarget) setSecondWolfTargetId(simSecondTarget);
       if (simGuardTarget) setGuardTargetTonightId(simGuardTarget);
+      if (simWitchHeal) setWitchHealTargetTonightId(simWitchHeal);
+      if (simWitchPoison) setWitchPoisonTargetId(simWitchPoison);
       if (simLovers) setCupidLovers(simLovers);
       if (simDoppel) setDoppelgangerTargetId(simDoppel);
 
@@ -1837,12 +2068,15 @@ export default function App() {
     tonightWolfVictimId,
     secondWolfTargetId,
     guardTargetTonightId,
+    witchHealTargetTonightId,
+    witchPoisonTargetId,
     cupidLovers,
     doppelgangerTargetId,
     round,
     wolfPupFrenzy,
     me.id,
     knownWolfIds,
+    getPublicSuspectedIds,
     timerConfig.nightActionSec,
     handleResolveNight,
   ]);
@@ -1863,7 +2097,18 @@ export default function App() {
         : `🤖 Auto-GM: ⚖️ ${t.dayVoteTitle(round)}`
     );
 
-    setTimeout(() => {
+    const scheduledMatchId = matchInstanceIdRef.current;
+    if (botVoteTimeoutRef.current !== null) {
+      window.clearTimeout(botVoteTimeoutRef.current);
+    }
+    botVoteTimeoutRef.current = window.setTimeout(() => {
+      botVoteTimeoutRef.current = null;
+      if (
+        phaseRef.current !== 'day_voting' ||
+        matchInstanceIdRef.current !== scheduledMatchId
+      ) {
+        return;
+      }
       const currentPlayers = playersRef.current;
       const chatSignals = extractChatVoteSignals(messagesRef.current, currentPlayers);
       const botVotes = computeSmartBotDayVotes(currentPlayers, knownWolfIds, null, chatSignals);
@@ -1981,9 +2226,14 @@ export default function App() {
       const {
         updatedPlayers,
         wolfPupTriggeredNextNight,
-        triggeredHunterId,
+        triggeredHunterIds,
         elderLynchedPenalty,
-      } = applyDayLynch(beforeVotePlayers, victim.id);
+      } = applyDayLynch(beforeVotePlayers, victim.id, { elderSealActive });
+
+      const nextElderSealActive = elderSealActive || elderLynchedPenalty;
+      if (elderLynchedPenalty) {
+        setElderSealActive(true);
+      }
 
       let effectivePlayers = updatedPlayers;
       let nextFrenzy = Boolean(wolfPupTriggeredNextNight || wolfPupFrenzy);
@@ -2006,18 +2256,26 @@ export default function App() {
         return;
       }
 
-      if (triggeredHunterId) {
+      if (triggeredHunterIds.length > 0) {
         triggerNightRoleCallout('hunter');
-        let pendingHunterId: string | null = triggeredHunterId;
+        const hunterQueue: string[] = [...triggeredHunterIds].sort((a, b) => {
+          const pa = effectivePlayers.find((p) => p.id === a);
+          const pb = effectivePlayers.find((p) => p.id === b);
+          return Number(!pa?.isBot) - Number(!pb?.isBot);
+        });
+        const processedHunters = new Set<string>();
         let chainGuard = 0;
-        while (pendingHunterId && chainGuard < 4) {
+        while (hunterQueue.length > 0 && chainGuard < 6) {
           chainGuard++;
-          const hunter = effectivePlayers.find((p) => p.id === pendingHunterId);
-          pendingHunterId = null;
-          if (!hunter) break;
+          const nextHunterId = hunterQueue.shift()!;
+          if (processedHunters.has(nextHunterId)) continue;
+          processedHunters.add(nextHunterId);
+          const hunter = effectivePlayers.find((p) => p.id === nextHunterId);
+          if (!hunter || hunter.hasUsedPower) continue;
           if (!hunter.isBot) {
             setPlayers(effectivePlayers);
             if (nextFrenzy) setWolfPupFrenzy(true);
+            setPendingDuskBeforePlayers(beforeVotePlayers);
             setActiveHunter(hunter);
             setHunterOriginPhase('day_voting');
             setPhase('hunter_revenge');
@@ -2027,11 +2285,17 @@ export default function App() {
             sound.playGhostWail();
             return;
           }
-          const aliveTargets = effectivePlayers.filter((p) => p.isAlive);
-          if (aliveTargets.length > 0) {
-            const target =
-              aliveTargets[Math.floor(Math.random() * aliveTargets.length)];
-            const shotRes = resolveHunterShot(effectivePlayers, hunter.id, target.id);
+          const chatSignals = extractChatVoteSignals(messagesRef.current, effectivePlayers);
+          const target = pickSmartBotHunterTarget(
+            effectivePlayers,
+            hunter,
+            knownWolfIds,
+            chatSignals
+          );
+          if (target) {
+            const shotRes = resolveHunterShot(effectivePlayers, hunter.id, target.id, {
+              elderSealActive: nextElderSealActive,
+            });
             effectivePlayers = shotRes.updatedPlayers;
             if (shotRes.wolfPupTriggeredNextNight) nextFrenzy = true;
             hunterShotEvent = {
@@ -2041,8 +2305,8 @@ export default function App() {
               targetName: target.name,
               targetSeat: effectivePlayers.findIndex((p) => p.id === target.id) + 1,
             };
-            if (shotRes.triggeredHunterId) {
-              pendingHunterId = shotRes.triggeredHunterId;
+            for (const chainedId of shotRes.triggeredHunterIds) {
+              if (!processedHunters.has(chainedId)) hunterQueue.push(chainedId);
             }
           }
         }
@@ -2148,6 +2412,8 @@ export default function App() {
       me,
       round,
       wolfPupFrenzy,
+      elderSealActive,
+      knownWolfIds,
       gameMode,
       roomId,
       finishGame,
@@ -2195,20 +2461,27 @@ export default function App() {
           victimName,
           extraVictimId,
           wolfPupTriggeredNextNight,
-          triggeredHunterId: chainedHunterId,
-        } = resolveHunterShot(players, activeHunter.id, targetId);
+          triggeredHunterIds: chainedHunterIds,
+        } = resolveHunterShot(players, activeHunter.id, targetId, { elderSealActive });
         let updatedPlayers = shotPlayers;
         let nextFrenzyAfterShot = Boolean(wolfPupTriggeredNextNight || wolfPupFrenzy);
 
-        // Chained Hunter death cascade: resolve secondary Hunter before evaluating Win Condition!
-        if (chainedHunterId) {
-          let pendingChainId: string | null = chainedHunterId;
+        // Chained Hunter death cascade: resolve secondary Hunter(s) before evaluating Win Condition!
+        if (chainedHunterIds.length > 0) {
+          const chainQueue: string[] = [...chainedHunterIds].sort((a, b) => {
+            const pa = updatedPlayers.find((p) => p.id === a);
+            const pb = updatedPlayers.find((p) => p.id === b);
+            return Number(!pa?.isBot) - Number(!pb?.isBot);
+          });
+          const processedChains = new Set<string>([activeHunter.id]);
           let chainGuard = 0;
-          while (pendingChainId && chainGuard < 4) {
+          while (chainQueue.length > 0 && chainGuard < 6) {
             chainGuard++;
-            const chainedHunter = updatedPlayers.find((p) => p.id === pendingChainId);
-            pendingChainId = null;
-            if (!chainedHunter) break;
+            const nextChainId = chainQueue.shift()!;
+            if (processedChains.has(nextChainId)) continue;
+            processedChains.add(nextChainId);
+            const chainedHunter = updatedPlayers.find((p) => p.id === nextChainId);
+            if (!chainedHunter || chainedHunter.hasUsedPower) continue;
             if (!chainedHunter.isBot) {
               setPlayers(updatedPlayers);
               if (nextFrenzyAfterShot) setWolfPupFrenzy(true);
@@ -2222,14 +2495,22 @@ export default function App() {
               );
               return;
             }
-            const remainingTargets = updatedPlayers.filter((p) => p.isAlive);
-            if (remainingTargets.length > 0) {
-              const chainTarget =
-                remainingTargets[Math.floor(Math.random() * remainingTargets.length)];
-              const chainRes = resolveHunterShot(updatedPlayers, chainedHunter.id, chainTarget.id);
+            const chainSignals = extractChatVoteSignals(messagesRef.current, updatedPlayers);
+            const chainTarget = pickSmartBotHunterTarget(
+              updatedPlayers,
+              chainedHunter,
+              knownWolfIds,
+              chainSignals
+            );
+            if (chainTarget) {
+              const chainRes = resolveHunterShot(updatedPlayers, chainedHunter.id, chainTarget.id, {
+                elderSealActive,
+              });
               updatedPlayers = chainRes.updatedPlayers;
               if (chainRes.wolfPupTriggeredNextNight) nextFrenzyAfterShot = true;
-              if (chainRes.triggeredHunterId) pendingChainId = chainRes.triggeredHunterId;
+              for (const nextId of chainRes.triggeredHunterIds) {
+                if (!processedChains.has(nextId)) chainQueue.push(nextId);
+              }
             }
           }
         }
@@ -2300,7 +2581,7 @@ export default function App() {
             }
             return nextNb;
           });
-          const isBotSeerInDawn = (dawnCtx?.beforePlayers || players).some(
+          const isBotSeerInDawn = updatedPlayers.some(
             (p) => p.roleId === 'seer' && Boolean(p.isBot) && p.isAlive
           );
           const botLines = buildBotDayDiscussionLines(
@@ -2340,7 +2621,7 @@ export default function App() {
           const targetSeat = updatedPlayers.findIndex((p) => p.id === targetId) + 1;
           const duskAfterShot = buildDuskGMAnnouncement({
             round,
-            beforePlayers: players,
+            beforePlayers: pendingDuskBeforePlayers || players,
             afterPlayers: updatedPlayers,
             lynchedVictim: activeHunter,
             voteCounts: tallyVotesWithMayor(votes, mayorId).counts,
@@ -2356,6 +2637,7 @@ export default function App() {
             humanPlayerId: me.id,
             lang,
           });
+          setPendingDuskBeforePlayers(null);
           setMessages((prev) => [
             ...prev,
             {
@@ -2370,7 +2652,7 @@ export default function App() {
           setPendingNightTransition({
             nextPlayers: updatedPlayers,
             nextRound: round + 1,
-            nextFrenzy: Boolean(wolfPupTriggeredNextNight || wolfPupFrenzy),
+            nextFrenzy: nextFrenzyAfterShot,
           });
           setGmAnnouncement(duskAfterShot);
           sound.playGMAnnouncement('dusk', true, duskAfterShot.spokenNarration, lang);
@@ -2380,7 +2662,7 @@ export default function App() {
 
       if (phase === 'day_voting') {
         if (!me.isAlive || targetId === me.id) return;
-        // Toggle off if clicking the currently voted player
+        // Toggle off if clicking the currently voted player; otherwise switch immediately in 1 click!
         if (selectedTargetId === targetId) {
           setSelectedTargetId(null);
           setHasVoted(false);
@@ -2392,22 +2674,6 @@ export default function App() {
             lang === 'vi'
               ? '⚖️ Đã hủy phiếu bầu — bạn có thể chọn người khác!'
               : '⚖️ Vote cleared — you can pick another player!'
-          );
-          return;
-        }
-        // Strict single-vote lock: prevent clicking multiple people at once!
-        if (selectedTargetId !== null) {
-          const currentChosenLabel =
-            selectedTargetId === CAMPFIRE_ABSTAIN_ID
-              ? lang === 'vi'
-                ? 'Lửa Trại (Phiếu trắng)'
-                : 'Campfire (Abstain)'
-              : players.find((p) => p.id === selectedTargetId)?.name ||
-                (lang === 'vi' ? 'người đang chọn' : 'your selection');
-          setEventBanner(
-            lang === 'vi'
-              ? `⚖️ Chỉ được bầu 1 phiếu! Bấm lại ${currentChosenLabel} hoặc nút "Đổi phiếu" để đổi.`
-              : `⚖️ Only 1 vote allowed! Unselect ${currentChosenLabel} or click "Change" first.`
           );
           return;
         }
@@ -2490,11 +2756,10 @@ export default function App() {
           if (targetId === me.id) return;
           if (!me.hasUsedPoison) {
             sound.playWitchCauldron();
-            setWitchPoisonTargetId(
-              witchPoisonTargetId === targetId ? null : targetId
-            );
-            setSelectedTargetId(targetId);
-            setEventBanner(`🧪 ${target.name}!`);
+            const nextPoison = witchPoisonTargetId === targetId ? null : targetId;
+            setWitchPoisonTargetId(nextPoison);
+            setSelectedTargetId(nextPoison);
+            if (nextPoison) setEventBanner(`🧪 ${target.name}!`);
           }
         } else if (me.roleId === 'cupid' && round === 1 && currentNightStep?.key === 'cupid') {
           sound.playCupidHarp();
@@ -2505,14 +2770,6 @@ export default function App() {
           } else if (cupidLovers[0] && !cupidLovers[1] && cupidLovers[0] !== targetId) {
             const pair: [string, string] = [cupidLovers[0], targetId];
             setCupidLovers(pair);
-            setSecondWolfTargetId(targetId);
-            setPlayers((prev) =>
-              prev.map((p) => {
-                if (p.id === pair[0]) return { ...p, loverId: pair[1] };
-                if (p.id === pair[1]) return { ...p, loverId: pair[0] };
-                return p;
-              })
-            );
             setEventBanner(`💘 2/2: ${target.name}!`);
           }
         } else if (
@@ -2564,6 +2821,9 @@ export default function App() {
       round,
       hunterOriginPhase,
       pendingDawnContext,
+      pendingDuskBeforePlayers,
+      elderSealActive,
+      knownWolfIds,
       finishGame,
       handleThrowProp,
       timerConfig.dayDiscussSec,
@@ -2580,6 +2840,7 @@ export default function App() {
       phase !== 'night' ||
       !me.isAlive ||
       me.roleId !== 'seer' ||
+      me.hasUsedPower ||
       currentNightStep?.key !== 'seer' ||
       hasInspectedTonight
     ) {
@@ -2623,12 +2884,18 @@ export default function App() {
     if (phase !== 'hunter_revenge' || !activeHunter) return;
     sound.playCardFlip();
     const skippedHunter = activeHunter;
+    const updatedAfterSkip = players.map((p) =>
+      p.id === skippedHunter.id ? { ...p, hasUsedPower: true } : p
+    );
+    setPlayers(updatedAfterSkip);
     setActiveHunter(null);
     setSelectedTargetId(null);
 
-    const winCheck = checkWinCondition(players);
+    const winCheck = checkWinCondition(updatedAfterSkip);
     if (winCheck.isOver) {
-      finishGame(winCheck.winner || 'villagers', winCheck.reason, players, round);
+      setPendingDuskBeforePlayers(null);
+      setPendingDawnContext(null);
+      finishGame(winCheck.winner || 'villagers', winCheck.reason, updatedAfterSkip, round);
       return;
     }
 
@@ -2636,27 +2903,50 @@ export default function App() {
       const dawnCtx = pendingDawnContext;
       const dawnAfterSkip = buildDawnGMAnnouncement({
         round,
-        beforePlayers: dawnCtx?.beforePlayers || players,
-        afterPlayers: players,
+        beforePlayers: dawnCtx?.beforePlayers || updatedAfterSkip,
+        afterPlayers: updatedAfterSkip,
         nightKilledIds: dawnCtx?.nightKilledIds || [skippedHunter.id],
         hunterShotEvent: null,
         humanPlayerId: me.id,
         lang,
       });
       setPendingDawnContext(null);
+      setNotebook((prevNb) =>
+        appendNotebookTimelineEvent(prevNb, {
+          round,
+          phaseLabel: lang === 'vi' ? `Bình Minh #${round}` : `Dawn #${round}`,
+          text: dawnAfterSkip.dayBarSummary,
+          tone: dawnAfterSkip.victims.length > 0 ? 'death' : 'info',
+        })
+      );
+      const isBotSeerInDawn = updatedAfterSkip.some(
+        (p) => p.roleId === 'seer' && Boolean(p.isBot) && p.isAlive
+      );
+      const botLines = buildBotDayDiscussionLines(
+        updatedAfterSkip,
+        dawnAfterSkip.victims.map((v) => v.name),
+        lang,
+        isBotSeerInDawn ? dawnCtx?.seerInspection ?? null : null,
+        round
+      );
+      const nowTs = Date.now();
       setMessages((prev) => [
         ...prev,
         {
-          id: `sys_hunter_skip_${Date.now()}`,
+          id: `sys_dawn_skip_${nowTs}`,
           senderId: 'sys',
           senderName: lang === 'vi' ? '🎙️ Quản Trò AI' : '🎙️ AI Game Master',
-          text:
-            lang === 'vi'
-              ? `🎯 Thợ Săn ${skippedHunter.name} quyết định giữ súng, không bắn ai.`
-              : `🎯 Hunter ${skippedHunter.name} chose to hold fire.`,
-          timestamp: Date.now(),
+          text: dawnAfterSkip.chatMessageText,
+          timestamp: nowTs,
           isSystem: true,
         },
+        ...botLines.map((line, idx) => ({
+          id: `bot_chat_hs_${nowTs}_${idx}`,
+          senderId: line.senderId,
+          senderName: line.senderName,
+          text: line.text,
+          timestamp: nowTs + idx + 1,
+        })),
       ]);
       setPhase('day_discussion');
       setTimerSeconds(timerConfig.dayDiscussSec);
@@ -2667,8 +2957,8 @@ export default function App() {
     } else {
       const duskAfterSkip = buildDuskGMAnnouncement({
         round,
-        beforePlayers: players,
-        afterPlayers: players,
+        beforePlayers: pendingDuskBeforePlayers || updatedAfterSkip,
+        afterPlayers: updatedAfterSkip,
         lynchedVictim: skippedHunter,
         voteCounts: tallyVotesWithMayor(votes, mayorId).counts,
         votes: votes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID),
@@ -2677,22 +2967,20 @@ export default function App() {
         humanPlayerId: me.id,
         lang,
       });
+      setPendingDuskBeforePlayers(null);
       setMessages((prev) => [
         ...prev,
         {
           id: `sys_hunter_skip_${Date.now()}`,
           senderId: 'sys',
           senderName: lang === 'vi' ? '🎙️ Quản Trò AI' : '🎙️ AI Game Master',
-          text:
-            lang === 'vi'
-              ? `🎯 Thợ Săn ${skippedHunter.name} quyết định giữ súng, không bắn ai.`
-              : `🎯 Hunter ${skippedHunter.name} chose to hold fire.`,
+          text: duskAfterSkip.chatMessageText,
           timestamp: Date.now(),
           isSystem: true,
         },
       ]);
       setPendingNightTransition({
-        nextPlayers: players,
+        nextPlayers: updatedAfterSkip,
         nextRound: round + 1,
         nextFrenzy: wolfPupFrenzy,
       });
@@ -2707,6 +2995,7 @@ export default function App() {
     finishGame,
     hunterOriginPhase,
     pendingDawnContext,
+    pendingDuskBeforePlayers,
     me.id,
     lang,
     timerConfig.dayDiscussSec,
@@ -2805,13 +3094,17 @@ export default function App() {
     []
   );
 
-  // Countdown Timer Effect (Paused while Onboarding Tour, GM Announcement, or Night Death Cinematic is open)
+  // Countdown Timer Effect (Paused while Tour, Role Card, GM Briefing, Death Cinematic, or AI Practice Notebook/Chat is open)
   useEffect(() => {
+    const isBeginnerUiPaused =
+      gameMode === 'ai_practice' && (isNotebookOpen || activeDrawer === 'chat');
     if (
       shellState !== 'playing' ||
       phase === 'game_over' ||
       phase === 'lobby' ||
       showOnboardingTour ||
+      showMyRoleModal ||
+      isBeginnerUiPaused ||
       Boolean(gmAnnouncement) ||
       Boolean(nightDeathCinematic)
     )
@@ -2825,7 +3118,17 @@ export default function App() {
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [shellState, phase, showOnboardingTour, gmAnnouncement, nightDeathCinematic]);
+  }, [
+    shellState,
+    gameMode,
+    phase,
+    showOnboardingTour,
+    showMyRoleModal,
+    isNotebookOpen,
+    activeDrawer,
+    gmAnnouncement,
+    nightDeathCinematic,
+  ]);
 
   const isLastNightStep =
     phase === 'night' && nightSchedule.length > 0 && nightStepIndex >= nightSchedule.length - 1;
@@ -2895,7 +3198,10 @@ export default function App() {
       shellState !== 'playing' ||
       gameMode !== 'ai_practice' ||
       phase === 'game_over' ||
-      phase === 'lobby'
+      phase === 'lobby' ||
+      phase === 'hunter_revenge' ||
+      showOnboardingTour ||
+      Boolean(pendingNightTransition)
     ) {
       return;
     }
@@ -2909,6 +3215,7 @@ export default function App() {
         timerSeconds,
         mayorId,
         wolfPupFrenzy,
+        elderSealActive,
         votes,
         hasVoted,
         messages: messages.slice(-60),
@@ -2917,9 +3224,13 @@ export default function App() {
         doppelgangerTargetId,
         cupidLovers,
         tonightWolfVictimId,
+        secondWolfTargetId,
         guardTargetTonightId,
-        witchSaveUsedTonight,
+        witchHealTargetTonightId,
         witchPoisonTargetId,
+        hasInspectedTonight,
+        seerInspectResult,
+        knownWolfIds,
         villageSize,
         preferredRole,
         eventBanner,
@@ -2931,6 +3242,8 @@ export default function App() {
   }, [
     shellState,
     gameMode,
+    showOnboardingTour,
+    pendingNightTransition,
     players,
     phase,
     round,
@@ -2938,6 +3251,7 @@ export default function App() {
     timerSeconds,
     mayorId,
     wolfPupFrenzy,
+    elderSealActive,
     votes,
     hasVoted,
     messages,
@@ -2946,9 +3260,13 @@ export default function App() {
     doppelgangerTargetId,
     cupidLovers,
     tonightWolfVictimId,
+    secondWolfTargetId,
     guardTargetTonightId,
-    witchSaveUsedTonight,
+    witchHealTargetTonightId,
     witchPoisonTargetId,
+    hasInspectedTonight,
+    seerInspectResult,
+    knownWolfIds,
     villageSize,
     preferredRole,
     eventBanner,
@@ -2957,6 +3275,15 @@ export default function App() {
   const handleResumeSavedMatch = useCallback(() => {
     if (!savedMatchSnapshot) return;
     sound.playCardFlip();
+    const restoredWitchHeal =
+      savedMatchSnapshot.witchHealTargetTonightId !== undefined
+        ? savedMatchSnapshot.witchHealTargetTonightId
+        : savedMatchSnapshot.witchSaveUsedTonight
+        ? savedMatchSnapshot.tonightWolfVictimId
+        : null;
+    botWitchActedTonightRef.current = Boolean(
+      restoredWitchHeal || savedMatchSnapshot.witchPoisonTargetId
+    );
     setGameMode('ai_practice');
     setPlayers(savedMatchSnapshot.players);
     setPhase(savedMatchSnapshot.phase);
@@ -2965,6 +3292,7 @@ export default function App() {
     setTimerSeconds(Math.max(5, savedMatchSnapshot.timerSeconds));
     setMayorId(savedMatchSnapshot.mayorId);
     setWolfPupFrenzy(savedMatchSnapshot.wolfPupFrenzy);
+    setElderSealActive(Boolean(savedMatchSnapshot.elderSealActive));
     setVotes(savedMatchSnapshot.votes);
     setHasVoted(savedMatchSnapshot.hasVoted);
     setMessages(savedMatchSnapshot.messages);
@@ -2973,9 +3301,15 @@ export default function App() {
     setDoppelgangerTargetId(savedMatchSnapshot.doppelgangerTargetId);
     setCupidLovers(savedMatchSnapshot.cupidLovers);
     setTonightWolfVictimId(savedMatchSnapshot.tonightWolfVictimId);
+    setSecondWolfTargetId(savedMatchSnapshot.secondWolfTargetId || null);
     setGuardTargetTonightId(savedMatchSnapshot.guardTargetTonightId);
-    setWitchSaveUsedTonight(savedMatchSnapshot.witchSaveUsedTonight);
+    setWitchHealTargetTonightId(restoredWitchHeal);
     setWitchPoisonTargetId(savedMatchSnapshot.witchPoisonTargetId);
+    setHasInspectedTonight(Boolean(savedMatchSnapshot.hasInspectedTonight));
+    setSeerInspectResult(savedMatchSnapshot.seerInspectResult || null);
+    setKnownWolfIds(
+      Array.isArray(savedMatchSnapshot.knownWolfIds) ? savedMatchSnapshot.knownWolfIds : []
+    );
     setVillageSize(savedMatchSnapshot.villageSize || savedMatchSnapshot.players.length);
     setPreferredRole(savedMatchSnapshot.preferredRole || 'random');
     setEventBanner(savedMatchSnapshot.eventBanner || '');
@@ -3043,7 +3377,16 @@ export default function App() {
       if (shellState === 'title' && (e.code === 'Enter' || e.code === 'Space')) {
         if (!lobbyModalState.isOpen) {
           e.preventDefault();
-          handleStartMatch(villageSize, preferredRole, 'ai_practice');
+          handleStartMatch(
+            villageSize,
+            preferredRole,
+            'ai_practice',
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            true
+          );
         }
         return;
       }
@@ -3184,28 +3527,30 @@ export default function App() {
     });
   }, [shellState, gameMode, roomId, me.id, handleThrowProp]);
 
-  // Send Chat Message (Strict Dead Ghost Chat Lockout + Live WebSocket Broadcast)
+  // Send Chat Message (Strict Dead Ghost Isolation: Main Chat locked when dead; Ghost tab isolated to dead players only!)
   const handleSendMessage = () => {
-    if (!me.isAlive) {
+    const canSendInCurrentTab = me.isAlive ? chatTab === 'main' : chatTab === 'ghost';
+    if (!canSendInCurrentTab) {
       setChatNotice(
         lang === 'vi'
-          ? '🔒 Bạn đã thành Hồn Ma — Cấm chat & khóa Mic cho đến hết ván!'
-          : '🔒 You are a Ghost — Chat & Mic are locked until the match ends!'
+          ? '🔒 Bạn đã thành Hồn Ma — Phòng Chính đã khóa! Hãy chuyển sang Khu Vực Ma để trò chuyện riêng.'
+          : '🔒 You are a Ghost — Main Room is locked! Switch to Ghost Realm to chat with other ghosts.'
       );
       setChatInput('');
       return;
     }
     const text = chatInput.trim();
     if (!text) return;
+    const isGhostMsg = !me.isAlive && chatTab === 'ghost';
     const msgId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     setChatNotice('');
     const nextMsg: ChatMessage = {
       id: msgId,
       senderId: me.id,
-      senderName: me.name,
+      senderName: isGhostMsg ? `👻 ${me.name}` : me.name,
       text,
       timestamp: Date.now(),
-      isGhost: false,
+      isGhost: isGhostMsg,
     };
     setMessages((prev) => [...prev, nextMsg]);
     if (gameMode === 'online') realtimeClient.sendChat(roomId, nextMsg);
@@ -3233,6 +3578,19 @@ export default function App() {
   const factionCounts = computeFactionAliveCounts(players);
   const aliveWolvesCount = factionCounts.wolves;
   const aliveVillagersCount = factionCounts.villagers;
+
+  const dyingWolfVictimIds =
+    phase === 'night' && me.roleId === 'witch' && me.isAlive && !me.hasUsedHeal && !me.hasUsedPower
+      ? getDyingWolfVictimsForWitch(
+          players,
+          {
+            wolfTargetId: tonightWolfVictimId,
+            secondWolfTargetId,
+            guardTargetId: guardTargetTonightId,
+          },
+          wolfPupFrenzy
+        )
+      : [];
 
   const isNightBlindfolded =
     shellState === 'playing' &&
@@ -3355,6 +3713,7 @@ export default function App() {
 
             <button
               type="button"
+              aria-pressed={isMuted}
               onClick={() => {
                 const m = sound.toggleMute();
                 setIsMuted(m);
@@ -3362,7 +3721,11 @@ export default function App() {
               aria-label={t.toggleSound}
               className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 cursor-pointer"
             >
-              <Volume2 className={`w-4 h-4 ${isMuted ? 'text-slate-500' : 'text-emerald-400'}`} />
+              {isMuted ? (
+                <VolumeX className="w-4 h-4 text-slate-400" />
+              ) : (
+                <Volume2 className="w-4 h-4 text-emerald-400" />
+              )}
             </button>
 
             <select
@@ -3433,6 +3796,9 @@ export default function App() {
         {/* Optional Role Encyclopedia Quick Reference Modal */}
         {activeDrawer === 'encyclopedia' && (
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t.drawerRulesTitle}
             className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5"
             style={{ backgroundColor: 'rgba(5, 8, 17, 0.88)' }}
           >
@@ -3473,7 +3839,13 @@ export default function App() {
         moveVector={moveVector}
         thrownProps={thrownProps}
         selectedTargetId={selectedTargetId}
-        secondaryTargetId={phase === 'day_voting' ? null : secondWolfTargetId}
+        secondaryTargetId={
+          phase === 'day_voting'
+            ? null
+            : phase === 'night' && me.roleId === 'cupid' && round === 1
+            ? cupidLovers?.[1] || null
+            : secondWolfTargetId
+        }
         cupidLovers={
           me.roleId === 'cupid' ||
           Boolean(me.loverId) ||
@@ -3752,7 +4124,18 @@ export default function App() {
             setShowProfileModal(true);
           }}
           onOpenLobbyModal={(mode) => setLobbyModalState({ isOpen: true, mode })}
-          onStartAIPractice={() => handleStartMatch(villageSize, preferredRole, 'ai_practice')}
+          onStartAIPractice={() =>
+            handleStartMatch(
+              villageSize,
+              preferredRole,
+              'ai_practice',
+              undefined,
+              undefined,
+              undefined,
+              undefined,
+              true
+            )
+          }
           onStartOnboardingTour={() => {
             handleStartMatch(villageSize, preferredRole, 'ai_practice');
             setShowOnboardingTour(true);
@@ -3862,14 +4245,14 @@ export default function App() {
                 timerSeconds={timerSeconds}
                 selectedTargetId={selectedTargetId}
                 secondWolfTargetId={secondWolfTargetId}
-                tonightWolfVictimId={tonightWolfVictimId}
-                witchSaveUsedTonight={witchSaveUsedTonight}
+                dyingWolfVictimIds={dyingWolfVictimIds}
+                witchHealTargetId={witchHealTargetTonightId}
                 witchPoisonTargetId={witchPoisonTargetId}
                 seerInspectResult={seerInspectResult}
                 cupidLovers={cupidLovers}
-                onToggleWitchHeal={() => {
+                onSelectWitchHealTarget={(victimId) => {
                   sound.playWitchCauldron();
-                  setWitchSaveUsedTonight((prev) => !prev);
+                  setWitchHealTargetTonightId(victimId);
                 }}
                 onConfirmSeerInspect={handleConfirmSeerInspect}
                 onConfirmNightAction={handleResolveNight}
@@ -3905,6 +4288,20 @@ export default function App() {
                     : undefined
                 }
               />
+            )}
+
+            {/* Non-blocking Role Callout Audio/Quote Toast Pill */}
+            {roleCalloutToast && !nightDeathCinematic && !gmAnnouncement && (
+              <div
+                data-testid="role-callout-toast"
+                aria-live="polite"
+                className="pointer-events-none px-3 py-1 rounded-full bg-[#1a110a]/92 border border-[#e89c3e]/75 text-[10px] sm:text-[11px] font-bold text-[#fde7c3] shadow-lg max-w-[92vw] flex items-center gap-1.5"
+              >
+                <span className="text-[#f5b82e] font-extrabold shrink-0">
+                  {ROLES[roleCalloutToast.roleId].name[lang]}:
+                </span>
+                <span className="truncate">{roleCalloutToast.quote}</span>
+              </div>
             )}
 
             {/* Ghost Soul Free-Flight Banner when User is Dead (merged into direct-look banner when in FPV/TPV) */}
@@ -3965,7 +4362,7 @@ export default function App() {
                   type="button"
                   data-testid="return-to-seat-btn"
                   onClick={handleReturnToSeat}
-                  className="px-4 py-2 rounded-2xl bg-[#382313]/95 hover:bg-[#e86f24] border-2 border-[#f5b82e] text-[#fff6e5] font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow-2xl transition-all active:scale-95 cursor-pointer"
+                  className="px-4 py-2 rounded-2xl bg-[#382313]/95 hover:bg-[#b84b10] border-2 border-[#f5b82e] text-white font-extrabold text-xs sm:text-sm flex items-center gap-2 shadow-2xl transition-all active:scale-95 cursor-pointer"
                 >
                   <span>🪑</span>
                   <span>
@@ -3975,13 +4372,13 @@ export default function App() {
               </div>
             )}
 
-          {/* MOBILE & OPEN-WORLD VIRTUAL D-PAD (Touch/Small Viewports Only so Desktop FPV/TPV stays uncluttered) */}
-          {canUseVirtualDpad && (
+          {/* MOBILE & OPEN-WORLD VIRTUAL D-PAD (Hidden on < lg when bottom dock is expanded so seats are never occluded) */}
+          {canUseVirtualDpad && isDockCollapsed && (
             <div
               data-testid="virtual-dpad"
-              className="lg:hidden fixed bottom-24 right-2 sm:right-auto sm:bottom-28 sm:left-3 z-30 pointer-events-auto flex flex-col items-center gap-0.5 agrou-wood-panel p-1 sm:p-1.5 rounded-xl shadow-lg"
+              className="lg:hidden fixed bottom-16 right-2 sm:right-auto sm:bottom-20 sm:left-3 z-30 pointer-events-auto flex flex-col items-center gap-1 agrou-wood-panel p-1.5 rounded-xl shadow-lg"
             >
-              <span className="text-[7px] sm:text-[8px] font-mono uppercase text-[#f2be6b] font-bold">
+              <span className="text-[10px] font-mono uppercase text-[#f2be6b] font-bold leading-tight">
                 {isDirectLookCam && me.isAlive
                   ? cameraPreset === 'third_person'
                     ? lang === 'vi'
@@ -3992,7 +4389,7 @@ export default function App() {
                   ? t.dpadWalkNight
                   : t.dpadFlyGhost}
               </span>
-              <div className="flex items-center gap-0.5">
+              <div className="flex items-center gap-1">
                 {isDirectLookCam && (
                   <button
                     type="button"
@@ -4000,10 +4397,10 @@ export default function App() {
                     onPointerDown={() => setFpvLookTurnRate(-1)}
                     onPointerUp={() => setFpvLookTurnRate(0)}
                     onPointerLeave={() => setFpvLookTurnRate(0)}
-                    className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#1d3a27] border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
+                    className="w-10 h-10 rounded-lg bg-[#1d3a27] border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
                     aria-label="Turn Look Left"
                   >
-                    <RotateCcw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                    <RotateCcw className="w-4 h-4" />
                   </button>
                 )}
                 <button
@@ -4012,10 +4409,10 @@ export default function App() {
                   onPointerDown={() => setMoveVector({ x: 0, z: -1 })}
                   onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
                   onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#e86f24] active:text-[#1b1008] flex items-center justify-center cursor-pointer"
+                  className="w-10 h-10 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
                   aria-label="Move Up"
                 >
-                  <ArrowUp className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <ArrowUp className="w-4 h-4" />
                 </button>
                 {isDirectLookCam && (
                   <button
@@ -4024,24 +4421,24 @@ export default function App() {
                     onPointerDown={() => setFpvLookTurnRate(1)}
                     onPointerUp={() => setFpvLookTurnRate(0)}
                     onPointerLeave={() => setFpvLookTurnRate(0)}
-                    className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#1d3a27] border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
+                    className="w-10 h-10 rounded-lg bg-[#1d3a27] border border-emerald-500/40 text-emerald-300 active:bg-emerald-500 active:text-slate-950 flex items-center justify-center cursor-pointer"
                     aria-label="Turn Look Right"
                   >
-                    <RotateCw className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                    <RotateCw className="w-4 h-4" />
                   </button>
                 )}
               </div>
-              <div className="flex items-center gap-0.5">
+              <div className="flex items-center gap-1">
                 <button
                   type="button"
                   data-testid="dpad-left-btn"
                   onPointerDown={() => setMoveVector({ x: -1, z: 0 })}
                   onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
                   onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#e86f24] active:text-[#1b1008] flex items-center justify-center cursor-pointer"
+                  className="w-10 h-10 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
                   aria-label="Move Left"
                 >
-                  <ArrowLeft className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <ArrowLeft className="w-4 h-4" />
                 </button>
                 <button
                   type="button"
@@ -4049,10 +4446,10 @@ export default function App() {
                   onPointerDown={() => setMoveVector({ x: 0, z: 1 })}
                   onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
                   onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#e86f24] active:text-[#1b1008] flex items-center justify-center cursor-pointer"
+                  className="w-10 h-10 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
                   aria-label="Move Down"
                 >
-                  <ArrowDown className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <ArrowDown className="w-4 h-4" />
                 </button>
                 <button
                   type="button"
@@ -4060,10 +4457,10 @@ export default function App() {
                   onPointerDown={() => setMoveVector({ x: 1, z: 0 })}
                   onPointerUp={() => setMoveVector({ x: 0, z: 0 })}
                   onPointerLeave={() => setMoveVector({ x: 0, z: 0 })}
-                  className="w-7 h-6 sm:w-8 sm:h-7 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#e86f24] active:text-[#1b1008] flex items-center justify-center cursor-pointer"
+                  className="w-10 h-10 rounded-lg bg-[#352316] border border-[#6a4a2f] text-[#f5e6cc] active:bg-[#b84b10] active:text-white flex items-center justify-center cursor-pointer"
                   aria-label="Move Right"
                 >
-                  <ArrowRight className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                  <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
               {isUserRoaming && me.isAlive && (
@@ -4071,7 +4468,7 @@ export default function App() {
                   type="button"
                   data-testid="dpad-return-seat-btn"
                   onClick={handleReturnToSeat}
-                  className="mt-0.5 w-full px-1.5 py-0.5 rounded-md bg-[#4a2d17] hover:bg-[#e86f24] border border-[#f5b82e]/70 text-[9px] font-extrabold text-[#fff4e0] cursor-pointer"
+                  className="mt-0.5 w-full px-2 py-1 rounded-md bg-[#4a2d17] hover:bg-[#b84b10] border border-[#f5b82e]/70 text-[10px] font-extrabold text-white cursor-pointer"
                 >
                   🪑 {lang === 'vi' ? 'Về ghế' : 'Sit'}
                 </button>
@@ -4193,18 +4590,18 @@ export default function App() {
                         setActiveSpeakers((prev) =>
                           prev.includes(me.name) ? prev : [me.name, ...prev]
                         );
-                        setMessages((prev) => [
-                          ...prev,
-                          {
-                            id: `voice_${Date.now()}`,
-                            senderId: me.id,
-                            senderName: `🎙️ ${me.name}`,
-                            senderRole: me.roleId,
-                            text: transcript,
-                            timestamp: Date.now(),
-                            isGhost: false,
-                          },
-                        ]);
+                        const speechMsg: ChatMessage = {
+                          id: `voice_${Date.now()}`,
+                          senderId: me.id,
+                          senderName: `🎙️ ${me.name}`,
+                          text: transcript,
+                          timestamp: Date.now(),
+                          isGhost: false,
+                        };
+                        setMessages((prev) => [...prev, speechMsg]);
+                        if (gameMode === 'online') {
+                          realtimeClient.sendChat(roomId, speechMsg);
+                        }
                       }}
                       lang={lang}
                       compact={true}
@@ -4278,7 +4675,7 @@ export default function App() {
                         }
                         className={`px-2 py-0.5 sm:py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 cursor-pointer shrink-0 ${
                           activeToolPopover === 'props' || activePropTool
-                            ? 'bg-[#e86f24] border-[#ffc389] text-white'
+                            ? 'bg-[#b84b10] hover:bg-[#9e3f0c] border-[#ffc389] text-white'
                             : 'bg-[#362417] border-[#69482e] text-[#f3ca82] hover:bg-[#493120]'
                         }`}
                       >
@@ -4401,11 +4798,11 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Player Seat Strip (2-row responsive grid for 10-12 players so seats #10-#12 never clip off-screen) */}
+                {/* Player Seat Strip (2-row responsive grid for 10+ players, capped & scrollable on mobile) */}
                 <div
                   className={
                     players.length >= 10
-                      ? 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-1 sm:gap-1.5 pb-0.5'
+                      ? 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-1 sm:gap-1.5 pb-0.5 max-h-[116px] sm:max-h-none overflow-y-auto'
                       : 'flex items-center gap-1 sm:gap-1.5 overflow-x-auto pb-0.5'
                   }
                 >
@@ -4413,6 +4810,8 @@ export default function App() {
                     const isDayVoting = phase === 'day_voting';
                     const isSelected = isDayVoting
                       ? selectedTargetId === p.id
+                      : phase === 'night' && me.roleId === 'cupid' && round === 1
+                      ? Boolean(cupidLovers?.includes(p.id))
                       : selectedTargetId === p.id || secondWolfTargetId === p.id;
                     const vCount = votesMap[p.id] || 0;
                     const voterLabels = votersByTargetLabels[p.id] || [];
@@ -4429,18 +4828,11 @@ export default function App() {
                     const isVoteLockedOut =
                       isDayVoting &&
                       !activePropTool &&
-                      (!me.isAlive ||
-                        !p.isAlive ||
-                        p.id === me.id ||
-                        (selectedTargetId !== null && selectedTargetId !== p.id));
+                      (!me.isAlive || !p.isAlive || p.id === me.id);
 
                     const seatTooltip =
                       vCount > 0
                         ? `${p.name} — ${vCount} ${t.votesUnit}: ${voterLabels.join(', ')}`
-                        : isVoteLockedOut && selectedTargetId !== null && p.isAlive && p.id !== me.id
-                        ? lang === 'vi'
-                          ? 'Chỉ được bầu 1 phiếu! Bấm lại lựa chọn hiện tại hoặc nút Đổi phiếu để đổi.'
-                          : 'Only 1 vote allowed! Unselect your current choice or click Change first.'
                         : p.name;
 
                     return (
@@ -4456,7 +4848,7 @@ export default function App() {
                           e.preventDefault();
                           handleTogglePlayerSuspectTag(p.id);
                         }}
-                        className={`shrink-0 px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-lg sm:rounded-xl border text-left transition-all flex items-center gap-1 sm:gap-1.5 min-w-0 ${
+                        className={`shrink-0 px-2 py-1.5 sm:px-2 sm:py-1 rounded-lg sm:rounded-xl border text-left transition-all flex items-center gap-1 sm:gap-1.5 min-w-0 ${
                           isVoteLockedOut
                             ? 'opacity-45 cursor-not-allowed'
                             : 'cursor-pointer'
@@ -4576,6 +4968,21 @@ export default function App() {
       {/* 4. MODAL DRAWERS FOR CHAT, GM ASSISTANT, VIRTUAL CARDS, LEADERBOARD, HISTORY, ENCYCLOPEDIA */}
       {activeDrawer !== 'none' && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={
+            activeDrawer === 'chat'
+              ? t.drawerChatTitle
+              : activeDrawer === 'gm'
+              ? t.drawerGMTitle
+              : activeDrawer === 'cards'
+              ? t.drawerCardsTitle
+              : activeDrawer === 'leaderboard'
+              ? t.drawerLeaderboardTitle
+              : activeDrawer === 'history'
+              ? t.drawerHistoryTitle
+              : t.drawerRulesTitle
+          }
           className="fixed inset-0 z-40 flex items-center justify-center p-2.5 sm:p-4 pointer-events-auto"
           style={{ backgroundColor: 'rgba(12, 8, 5, 0.84)' }}
         >
@@ -4630,18 +5037,18 @@ export default function App() {
                     setActiveSpeakers((prev) =>
                       prev.includes(me.name) ? prev : [me.name, ...prev]
                     );
-                    setMessages((prev) => [
-                      ...prev,
-                      {
-                        id: `voice_${Date.now()}`,
-                        senderId: me.id,
-                        senderName: `🎙️ ${me.name}`,
-                        senderRole: me.roleId,
-                        text: transcript,
-                        timestamp: Date.now(),
-                        isGhost: false,
-                      },
-                    ]);
+                    const speechMsg: ChatMessage = {
+                      id: `voice_${Date.now()}`,
+                      senderId: me.id,
+                      senderName: `🎙️ ${me.name}`,
+                      text: transcript,
+                      timestamp: Date.now(),
+                      isGhost: false,
+                    };
+                    setMessages((prev) => [...prev, speechMsg]);
+                    if (gameMode === 'online') {
+                      realtimeClient.sendChat(roomId, speechMsg);
+                    }
                   }}
                   lang={lang}
                   compact={false}
@@ -4650,6 +5057,7 @@ export default function App() {
                   <div className="flex gap-2">
                     <button
                       type="button"
+                      data-testid="chat-main-tab-btn"
                       onClick={() => setChatTab('main')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer ${
                         chatTab === 'main'
@@ -4659,18 +5067,21 @@ export default function App() {
                     >
                       {t.chatMainTab}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setChatTab('ghost')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer ${
-                        chatTab === 'ghost'
-                          ? 'bg-purple-800 text-white'
-                          : 'bg-slate-900 text-slate-400'
-                      }`}
-                    >
-                      <Skull className="w-3.5 h-3.5" />
-                      <span>{t.chatGhostTab}</span>
-                    </button>
+                    {!me.isAlive && (
+                      <button
+                        type="button"
+                        data-testid="chat-ghost-tab-btn"
+                        onClick={() => setChatTab('ghost')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer ${
+                          chatTab === 'ghost'
+                            ? 'bg-purple-800 text-white'
+                            : 'bg-slate-900 text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        <Skull className="w-3.5 h-3.5" />
+                        <span>{t.chatGhostTab}</span>
+                      </button>
+                    )}
                   </div>
                   {chatNotice && (
                     <span className="text-[11px] text-amber-400 font-semibold">
@@ -4681,13 +5092,17 @@ export default function App() {
 
                 <div className="flex-1 overflow-y-auto space-y-2 pr-1 text-xs">
                   {messages
-                    .filter((m) => (chatTab === 'ghost' ? m.isGhost : !m.isGhost))
+                    .filter((m) =>
+                      !me.isAlive && chatTab === 'ghost' ? Boolean(m.isGhost) : !m.isGhost
+                    )
                     .map((msg) => (
                       <div
                         key={msg.id}
                         className={`p-2.5 rounded-xl border ${
                           msg.isSystem
                             ? 'bg-rose-950/40 border-rose-800/50 text-rose-200'
+                            : msg.isGhost
+                            ? 'bg-purple-950/45 border-purple-700/60 text-purple-100'
                             : 'bg-[#0f172a] border-slate-800 text-slate-200'
                         }`}
                       >
@@ -4708,63 +5123,105 @@ export default function App() {
                   <div ref={chatBottomRef} />
                 </div>
 
-                {!me.isAlive ? (
+                {!me.isAlive && chatTab === 'main' ? (
                   <div
                     data-testid="dead-chat-locked-banner"
-                    className="mt-3 rounded-xl bg-rose-950/75 border border-rose-500/60 px-3 py-2.5 flex items-center justify-between gap-2 text-xs text-rose-200 font-bold"
+                    className="mt-3 rounded-xl bg-rose-950/75 border border-rose-500/60 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-rose-200 font-bold"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       <Lock className="w-4 h-4 text-rose-400 shrink-0" />
                       <span>
                         {lang === 'vi'
-                          ? '👻 Bạn đã chết thành Hồn Ma — Khung chat và Micro đã bị khóa cho đến hết ván!'
-                          : '👻 You are dead (Ghost) — Chat and Microphone are locked until the match ends!'}
+                          ? '👻 Bạn đã thành Hồn Ma — Phòng Chính bị khóa để chống gian lận!'
+                          : '👻 You are a Ghost — Main Chat is locked to prevent cheating!'}
                       </span>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setChatTab('ghost')}
+                      className="px-2.5 py-1 rounded-lg bg-purple-700 hover:bg-purple-600 text-white text-[11px] font-extrabold cursor-pointer shrink-0"
+                    >
+                      👻 {lang === 'vi' ? 'Sang Khu Vực Ma' : 'Open Ghost Realm'}
+                    </button>
+                  </div>
+                ) : !me.isAlive && chatTab === 'ghost' ? (
+                  <div
+                    data-testid="ghost-chat-isolated-banner"
+                    className="mt-3 rounded-xl bg-purple-950/75 border border-purple-500/60 px-3 py-2 flex items-center gap-2 text-xs text-purple-200 font-bold"
+                  >
+                    <Ghost className="w-4 h-4 text-purple-300 shrink-0" />
+                    <span>
+                      {lang === 'vi'
+                        ? '👻 Kênh Hồn Ma cách ly — Chỉ người đã chết mới đọc được tin nhắn tại đây.'
+                        : '👻 Isolated Ghost Realm — Only eliminated players can read messages here.'}
+                    </span>
                   </div>
                 ) : null}
 
-                <div className="pt-3 flex gap-2">
-                  <input
-                    type="text"
-                    data-testid="chat-message-input"
-                    disabled={!me.isAlive}
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                        e.preventDefault();
-                        handleSendMessage();
-                      }
-                    }}
-                    placeholder={
-                      !me.isAlive
-                        ? lang === 'vi'
-                          ? '🔒 Hồn Ma không thể chat...'
-                          : '🔒 Ghosts cannot chat...'
-                        : t.chatPlaceholder
-                    }
-                    className={`flex-1 bg-[#070a14] border rounded-xl px-3 py-2 text-xs focus:outline-none ${
-                      !me.isAlive
-                        ? 'border-rose-900/60 text-slate-500 cursor-not-allowed opacity-65'
-                        : 'border-slate-700 text-slate-100 focus:border-amber-500'
-                    }`}
-                  />
-                  <button
-                    type="button"
-                    data-testid="chat-send-btn"
-                    disabled={!me.isAlive}
-                    onClick={handleSendMessage}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1 ${
-                      !me.isAlive
-                        ? 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
-                        : 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
-                    }`}
-                  >
-                    {!me.isAlive ? <Lock className="w-3.5 h-3.5" /> : <Send className="w-3.5 h-3.5" />}
-                    <span>{!me.isAlive ? (lang === 'vi' ? 'Đã khóa' : 'Locked') : t.sendBtn}</span>
-                  </button>
-                </div>
+                {(() => {
+                  const isChatInputLocked = !me.isAlive && chatTab === 'main';
+                  return (
+                    <div className="pt-3 flex gap-2">
+                      <input
+                        type="text"
+                        data-testid="chat-message-input"
+                        disabled={isChatInputLocked}
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                            e.preventDefault();
+                            handleSendMessage();
+                          }
+                        }}
+                        placeholder={
+                          isChatInputLocked
+                            ? lang === 'vi'
+                              ? '🔒 Hồn Ma không thể chat ở Phòng Chính...'
+                              : '🔒 Ghosts cannot chat in Main Room...'
+                            : !me.isAlive
+                            ? lang === 'vi'
+                              ? '👻 Nhắn tin trong Khu Vực Ma (ẩn với người sống)...'
+                              : '👻 Chat in Ghost Realm (hidden from living)...'
+                            : t.chatPlaceholder
+                        }
+                        className={`flex-1 bg-[#070a14] border rounded-xl px-3 py-2 text-xs focus:outline-none ${
+                          isChatInputLocked
+                            ? 'border-rose-900/60 text-slate-500 cursor-not-allowed opacity-65'
+                            : !me.isAlive
+                            ? 'border-purple-600/80 text-purple-100 focus:border-purple-400'
+                            : 'border-slate-700 text-slate-100 focus:border-amber-500'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        data-testid="chat-send-btn"
+                        disabled={isChatInputLocked}
+                        onClick={handleSendMessage}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1 ${
+                          isChatInputLocked
+                            ? 'bg-slate-800 border border-slate-700 text-slate-500 cursor-not-allowed'
+                            : !me.isAlive
+                            ? 'bg-purple-700 hover:bg-purple-600 text-white cursor-pointer'
+                            : 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
+                        }`}
+                      >
+                        {isChatInputLocked ? (
+                          <Lock className="w-3.5 h-3.5" />
+                        ) : (
+                          <Send className="w-3.5 h-3.5" />
+                        )}
+                        <span>
+                          {isChatInputLocked
+                            ? lang === 'vi'
+                              ? 'Đã khóa'
+                              : 'Locked'
+                            : t.sendBtn}
+                        </span>
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -4806,6 +5263,9 @@ export default function App() {
       {/* 5. PAUSE & SETTINGS MODAL (Includes Language, Sound & Camera Controls for Mobile & Desktop) */}
       {shellState === 'paused' && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t.pauseTitle}
           className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-auto"
           style={{ backgroundColor: 'rgba(5, 8, 17, 0.88)' }}
         >
@@ -4903,15 +5363,19 @@ export default function App() {
                 </button>
                 <button
                   type="button"
+                  aria-label={t.toggleSound}
+                  aria-pressed={isMuted}
                   onClick={() => {
                     const m = sound.toggleMute();
                     setIsMuted(m);
                   }}
                   className="p-1.5 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 cursor-pointer"
                 >
-                  <Volume2
-                    className={`w-4 h-4 ${isMuted ? 'text-slate-500' : 'text-emerald-400'}`}
-                  />
+                  {isMuted ? (
+                    <VolumeX className="w-4 h-4 text-slate-400" />
+                  ) : (
+                    <Volume2 className="w-4 h-4 text-emerald-400" />
+                  )}
                 </button>
               </div>
             </div>
@@ -5018,6 +5482,9 @@ export default function App() {
       {/* 6. OUTCOME-MATCHED VICTORY / GAME OVER MODAL */}
       {shellState === 'gameover' && gameResult && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t.finalResultBadge}
           className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-auto"
           style={{ backgroundColor: 'rgba(5, 8, 17, 0.9)' }}
         >
@@ -5029,6 +5496,8 @@ export default function App() {
                 ? '💘'
                 : gameResult.winner === 'tanner'
                 ? '🎭'
+                : gameResult.winner === 'draw'
+                ? '🤝'
                 : '🏆'}
             </div>
 
@@ -5043,6 +5512,10 @@ export default function App() {
                   ? t.winLovers
                   : gameResult.winner === 'tanner'
                   ? t.winTanner
+                  : gameResult.winner === 'draw'
+                  ? lang === 'vi'
+                    ? 'HÒA — KHÔNG CÒN AI SỐNG SÓT!'
+                    : 'DRAW — NO SURVIVORS!'
                   : t.winVillagers}
               </h3>
               <p className="text-xs text-slate-300 mt-2 leading-relaxed">
@@ -5089,7 +5562,7 @@ export default function App() {
             </div>
 
             {/* Full End-of-Match Role Reveal Roster (BUG-24) */}
-            <RoleRevealRoster players={players} lang={lang} />
+            <RoleRevealRoster players={players} meId={me.id} lang={lang} />
 
             <div className="flex flex-col sm:flex-row gap-2.5">
               <button
@@ -5178,6 +5651,10 @@ export default function App() {
           isAlive={me.isAlive}
           lang={lang}
           onClose={() => setShowMyRoleModal(false)}
+          onStartTour={() => {
+            setShowMyRoleModal(false);
+            setShowOnboardingTour(true);
+          }}
         />
       )}
 
@@ -5221,14 +5698,27 @@ export default function App() {
           onSaveProfile={(profile, token) => {
             if (token !== undefined) {
               setAuthToken(token);
+              try {
+                if (token) {
+                  localStorage.setItem(AUTH_TOKEN_STORAGE_KEY, token);
+                } else {
+                  localStorage.removeItem(AUTH_TOKEN_STORAGE_KEY);
+                }
+              } catch {
+                // ignore
+              }
             }
             const isSignedIn =
               profile.provider &&
               profile.provider !== 'guest' &&
               Boolean(profile.handle && profile.handle.trim());
-            const nextId = isSignedIn
-              ? `acc_${profile.handle!.trim().toLowerCase()}`
-              : getOrCreateTabGuestIdentity().id;
+            const rawProfileId = (profile as { id?: string }).id;
+            const nextId =
+              typeof rawProfileId === 'string' && rawProfileId.trim().length > 0
+                ? rawProfileId.trim()
+                : isSignedIn
+                ? `acc_${profile.handle!.trim().toLowerCase()}`
+                : getOrCreateTabGuestIdentity().id;
             const prevId = currentUser.id;
             const nextUser: UserProfileData = {
               ...currentUser,

@@ -56,6 +56,7 @@ interface SocialLoginModalProps {
   initialTab?: AccountModalTab | null;
   onSaveProfile: (
     profile: {
+      id?: string;
       name: string;
       avatar: string;
       provider: AuthProviderId;
@@ -333,6 +334,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
       sound.playDayGong();
       onSaveProfile(
         {
+          id: profile.uid,
           name: profile.displayName,
           avatar: profile.avatar,
           provider: 'google',
@@ -353,8 +355,8 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
             ? 'Bạn đã đóng cửa sổ đăng nhập Google.'
             : 'Google sign-in popup was closed.'
           : lang === 'vi'
-          ? 'Không thể đăng nhập Google trong khung xem trước này. Bạn có thể dùng Tài khoản & Mật khẩu bên dưới.'
-          : 'Google sign-in unavailable in this preview frame. Please use Username & Password below.';
+          ? 'Đăng nhập Google hiện tạm thời không khả dụng trên trình duyệt này. Bạn có thể dùng Tài khoản & Mật khẩu bên dưới.'
+          : 'Google sign-in is currently unavailable in this browser. Please use Username & Password below.';
       setValidationError(msg);
       setIsSubmitting(false);
     }
@@ -393,6 +395,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
       sound.playDayGong();
       onSaveProfile(
         {
+          id: acc.id,
           name: acc.displayName,
           avatar: acc.avatar,
           provider: 'account',
@@ -465,6 +468,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
       sound.playDayGong();
       onSaveProfile(
         {
+          id: acc.id,
           name: acc.displayName,
           avatar: acc.avatar,
           provider: 'account',
@@ -496,6 +500,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
     setIsSubmitting(true);
     setValidationError('');
 
+    let savedAccountId = currentUser.id;
     if (currentUser.provider === 'account' && currentUser.handle) {
       if (!authToken) {
         setValidationError(st.errSessionExpired);
@@ -522,6 +527,9 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
           setIsSubmitting(false);
           return;
         }
+        if (data.account?.id) {
+          savedAccountId = String(data.account.id);
+        }
       } catch {
         setValidationError(st.errNetwork);
         setIsSubmitting(false);
@@ -542,6 +550,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
     sound.playDayGong();
     onSaveProfile(
       {
+        id: savedAccountId,
         name: cleanName,
         avatar: selectedAvatar,
         provider: currentUser.provider || 'guest',
@@ -580,6 +589,9 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={st.modalTitle}
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 pointer-events-auto"
       style={{ backgroundColor: 'rgba(4, 7, 15, 0.9)' }}
       data-testid="account-auth-modal"
@@ -658,6 +670,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
 
         {validationError && (
           <div
+            role="alert"
             data-testid="account-error-banner"
             className="px-3 py-2.5 rounded-xl bg-rose-950/90 border border-rose-500/60 text-xs text-rose-200 font-semibold flex items-start gap-2"
           >

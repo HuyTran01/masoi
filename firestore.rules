@@ -74,6 +74,7 @@ service cloud.firestore {
         && data.wins is int
         && data.wins >= 0
         && data.wins <= 100000
+        && data.wins <= data.matchesPlayed
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }

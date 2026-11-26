@@ -129,6 +129,9 @@ export const NightDeathCinematicOverlay: React.FC<NightDeathCinematicOverlayProp
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={theme.title}
       data-testid="night-death-cinematic-overlay"
       data-cinematic-mode={isWolfKillFilm ? 'wolf_kill' : 'victim_death'}
       data-death-cause={cinematic.causeType}

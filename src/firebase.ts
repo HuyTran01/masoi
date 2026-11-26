@@ -11,7 +11,6 @@ import {
   Firestore,
   doc,
   getDoc,
-  getDocFromServer,
   setDoc,
   serverTimestamp,
 } from 'firebase/firestore';
@@ -54,14 +53,9 @@ export interface FirestoreErrorInfo {
   path: string | null;
   authInfo: {
     userId?: string | null;
-    email?: string | null;
     emailVerified?: boolean | null;
     isAnonymous?: boolean | null;
     tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
   };
 }
 
@@ -74,38 +68,15 @@ export function handleFirestoreError(
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
       userId: authInstance?.currentUser?.uid,
-      email: authInstance?.currentUser?.email,
       emailVerified: authInstance?.currentUser?.emailVerified,
       isAnonymous: authInstance?.currentUser?.isAnonymous,
       tenantId: authInstance?.currentUser?.tenantId,
-      providerInfo:
-        authInstance?.currentUser?.providerData?.map((provider) => ({
-          providerId: provider.providerId,
-          email: provider.email,
-        })) || [],
     },
     operationType,
     path,
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
-}
-
-async function testConnection() {
-  if (!dbInstance) return;
-  try {
-    await getDocFromServer(doc(dbInstance, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-    }
-  }
-}
-
-if (typeof window !== 'undefined') {
-  setTimeout(() => {
-    testConnection().catch(() => {});
-  }, 500);
 }
 
 export async function syncAuthenticatedPlayerAccountToFirestore(account: {
@@ -132,6 +103,9 @@ export async function syncAuthenticatedPlayerAccountToFirestore(account: {
     const defaultUsername =
       sanitizedUsername.length >= 3 ? sanitizedUsername : `usr_${uid.slice(0, 8)}`;
 
+    const safeMatchesPlayed = Math.max(0, Math.min(100000, Math.round(account.matchesPlayed)));
+    const safeWins = Math.max(0, Math.min(safeMatchesPlayed, Math.round(account.wins)));
+
     await setDoc(
       accountRef,
       {
@@ -144,8 +118,8 @@ export async function syncAuthenticatedPlayerAccountToFirestore(account: {
         avatar: account.avatar.slice(0, 16),
         region: account.region,
         elo: Math.max(0, Math.min(10000, Math.round(account.elo))),
-        matchesPlayed: Math.max(0, Math.min(100000, Math.round(account.matchesPlayed))),
-        wins: Math.max(0, Math.min(100000, Math.round(account.wins))),
+        matchesPlayed: safeMatchesPlayed,
+        wins: safeWins,
         createdAt:
           existingData && existingData.createdAt ? existingData.createdAt : serverTimestamp(),
         updatedAt: serverTimestamp(),

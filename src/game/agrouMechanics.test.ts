@@ -52,8 +52,8 @@ test('Agrou Mayor weighted voting gives Mayor x2 weight and breaks 1-vote ties',
   assert.equal(winResult.counts.p3, 1);
 });
 
-test('Agrou Campfire Abstention tracks abstainers without lynching the campfire', () => {
-  const res = tallyVotesWithMayor(
+test('Agrou Campfire Abstention plurality/tie prevents lynching while minority abstain still allows execution', () => {
+  const abstainPlurality = tallyVotesWithMayor(
     [
       { voterId: 'p1', targetId: CAMPFIRE_ABSTAIN_ID },
       { voterId: 'p2', targetId: CAMPFIRE_ABSTAIN_ID },
@@ -61,10 +61,35 @@ test('Agrou Campfire Abstention tracks abstainers without lynching the campfire'
     ],
     'p1'
   );
-  // Mayor abstained (weight 2) + p2 abstained (weight 1) = 3 abstain weight; p2 has 1 real vote
-  assert.equal(res.abstainCount, 3);
-  assert.deepEqual(res.abstainerIds, ['p1', 'p2']);
-  assert.equal(res.targetId, 'p2');
+  // Mayor abstained (weight 2) + p2 abstained (weight 1) = 3 abstain >= maxVotes (1) -> no lynch!
+  assert.equal(abstainPlurality.abstainCount, 3);
+  assert.deepEqual(abstainPlurality.abstainerIds, ['p1', 'p2']);
+  assert.equal(abstainPlurality.targetId, null);
+  assert.equal(abstainPlurality.isTie, false);
+
+  // Abstain tying top candidate (1 abstain == 1 vote) also prevents lynch
+  const abstainTie = tallyVotesWithMayor(
+    [
+      { voterId: 'p1', targetId: CAMPFIRE_ABSTAIN_ID },
+      { voterId: 'p2', targetId: 'p3' },
+    ],
+    null
+  );
+  assert.equal(abstainTie.abstainCount, 1);
+  assert.equal(abstainTie.targetId, null);
+  assert.equal(abstainTie.isTie, false);
+
+  // Candidate beating abstainCount (Mayor weight 2 on p2 > 1 abstain) executes p2
+  const candidateBeatsAbstain = tallyVotesWithMayor(
+    [
+      { voterId: 'p1', targetId: 'p2' },
+      { voterId: 'p3', targetId: CAMPFIRE_ABSTAIN_ID },
+    ],
+    'p1'
+  );
+  assert.equal(candidateBeatsAbstain.abstainCount, 1);
+  assert.equal(candidateBeatsAbstain.targetId, 'p2');
+  assert.equal(candidateBeatsAbstain.isTie, false);
 
   const allAbstain = tallyVotesWithMayor(
     [
@@ -76,6 +101,10 @@ test('Agrou Campfire Abstention tracks abstainers without lynching the campfire'
   assert.equal(allAbstain.targetId, null);
   assert.equal(allAbstain.isTie, false);
   assert.equal(allAbstain.abstainCount, 3);
+
+  // Forest biome copy contains no competitor reference
+  assert.equal(AGROU_BIOMES.forest.subtitle.vi.includes('Agrou'), false);
+  assert.ok(AGROU_BIOMES.forest.subtitle.vi.includes('ấm áp quanh lửa trại'));
 });
 
 test('Agrou Mayor election and crown succession when Mayor dies', () => {

@@ -13,7 +13,11 @@ import { ROLES } from './roles.ts';
 /**
  * Helper to initialize role-specific state when Doppelganger inherits a dead target's role
  */
-function applyDoppelgangerInheritance(doppel: Player, inheritedRole: RoleId): void {
+function applyDoppelgangerInheritance(
+  doppel: Player,
+  inheritedRole: RoleId,
+  elderSealActive = false
+): void {
   doppel.roleId = inheritedRole;
   if (inheritedRole === 'elder') {
     doppel.elderLives = 2;
@@ -22,6 +26,11 @@ function applyDoppelgangerInheritance(doppel: Player, inheritedRole: RoleId): vo
     doppel.hasUsedPoison = false;
   } else if (inheritedRole === 'hunter') {
     doppel.hasUsedPower = false;
+  }
+  if (elderSealActive && ROLES[inheritedRole].faction === 'villager') {
+    doppel.hasUsedPower = true;
+    doppel.hasUsedHeal = true;
+    doppel.hasUsedPoison = true;
   }
 }
 
@@ -121,25 +130,7 @@ export function assignPreferredRoleToDeck(
   if (result.length === 0) return result;
 
   if (roleChoice === 'random') {
-    const everyNightActiveRoles = new Set<RoleId>([
-      'werewolf',
-      'wolf_pup',
-      'seer',
-      'witch',
-      'bodyguard',
-    ]);
-    if (!everyNightActiveRoles.has(result[0])) {
-      const activeIndices = result
-        .map((r, idx) => (everyNightActiveRoles.has(r) ? idx : -1))
-        .filter((idx) => idx !== -1);
-      if (activeIndices.length > 0) {
-        const pickIdx = activeIndices[Math.floor(Math.random() * activeIndices.length)];
-        const temp = result[0];
-        result[0] = result[pickIdx];
-        result[pickIdx] = temp;
-      }
-    }
-    return result;
+    return fisherYatesShuffle(result);
   }
 
   const existingIdx = result.indexOf(roleChoice);
@@ -178,13 +169,54 @@ export function getNightCallOrder(): RoleDefinition[] {
 }
 
 /**
+ * Returns ONLY the living wolf-bite targets that would genuinely die without Witch Heal
+ * (excludes Bodyguard-shielded target when Guard isn't sealed & didn't repeat last night,
+ * excludes Cursed who converts, and excludes Elder with >1 lives remaining).
+ */
+export function getDyingWolfVictimsForWitch(
+  players: Player[],
+  actions: Pick<NightActions, 'wolfTargetId' | 'secondWolfTargetId' | 'guardTargetId'>,
+  wolfPupTriggered = false
+): string[] {
+  const livingGuard = players.find((p) => p.roleId === 'bodyguard' && p.isAlive);
+  let guardedId: string | null = null;
+  if (actions.guardTargetId && (!livingGuard || !livingGuard.hasUsedPower)) {
+    const guardedPlayer = players.find((p) => p.id === actions.guardTargetId && p.isAlive);
+    if (guardedPlayer && !guardedPlayer.protectedLastNight) {
+      guardedId = guardedPlayer.id;
+    }
+  }
+
+  const wolfTargets: string[] = [];
+  if (actions.wolfTargetId) wolfTargets.push(actions.wolfTargetId);
+  if (
+    wolfPupTriggered &&
+    actions.secondWolfTargetId &&
+    actions.secondWolfTargetId !== actions.wolfTargetId
+  ) {
+    wolfTargets.push(actions.secondWolfTargetId);
+  }
+
+  const dying: string[] = [];
+  for (const wTargetId of wolfTargets) {
+    const target = players.find((p) => p.id === wTargetId && p.isAlive);
+    if (!target) continue;
+    if (guardedId === wTargetId) continue;
+    if (target.roleId === 'cursed') continue;
+    if (target.roleId === 'elder' && (target.elderLives ?? 2) > 1) continue;
+    dying.push(wTargetId);
+  }
+  return dying;
+}
+
+/**
  * Resolves all night actions with traditional werewolf logic + detailed causal explanation for GM
  */
 export function resolveNightActions(
   players: Player[],
   actions: NightActions,
-  options: { wolfPupTriggered?: boolean; roundNumber?: number } = {}
-): { updatedPlayers: Player[]; result: NightResult } {
+  options: { wolfPupTriggered?: boolean; roundNumber?: number; elderSealActive?: boolean } = {}
+): { updatedPlayers: Player[]; result: NightResult & { triggeredHunterIds: string[] } } {
   const previousProtectedIds = new Set(
     players.filter((p) => p.protectedLastNight).map((p) => p.id)
   );
@@ -237,7 +269,7 @@ export function resolveNightActions(
 
   let elderAttacked = false;
   let wolfPupTriggeredNextNight = false;
-  let triggeredHunterId: string | null = null;
+  const triggeredHunterIds: string[] = [];
 
   // 1. Doppelganger link (night 1 only)
   if (actions.doppelgangerTargetId && (options.roundNumber ?? 1) === 1) {
@@ -493,7 +525,9 @@ export function resolveNightActions(
       }
 
       if (victim.roleId === 'hunter' && !victim.hasUsedPower) {
-        triggeredHunterId = victim.id;
+        if (!triggeredHunterIds.includes(victim.id)) {
+          triggeredHunterIds.push(victim.id);
+        }
         summary.push(`Thợ Săn ${victim.name} bị sát hại trong đêm nhưng kịp rút súng trả thù!`);
         logicExplanations.push({
           badge: '🎯 Phản Đòn Thợ Săn',
@@ -511,7 +545,7 @@ export function resolveNightActions(
           (p.targetPlayerId === victim.id || (!p.targetPlayerId && p.targetRoleId === victim.roleId))
       );
       if (doppel && victim.roleId !== 'doppelganger') {
-        applyDoppelgangerInheritance(doppel, victim.roleId);
+        applyDoppelgangerInheritance(doppel, victim.roleId, Boolean(options.elderSealActive));
         summary.push(`Nhân Bản ${doppel.name} đã kế thừa hoàn toàn thân phận ${ROLES[victim.roleId].name.vi}!`);
         logicExplanations.push({
           badge: '🪞 Kế Thừa Nhân Bản',
@@ -590,7 +624,8 @@ export function resolveNightActions(
       loversLinked,
       wolfPupTriggeredNextNight,
       elderAttacked,
-      triggeredHunterId,
+      triggeredHunterId: triggeredHunterIds[0] ?? null,
+      triggeredHunterIds,
       summary,
       killedDetails,
       logicExplanations,
@@ -603,19 +638,20 @@ export function resolveNightActions(
  */
 export function applyDayLynch(
   players: Player[],
-  lynchedId: string
+  lynchedId: string,
+  options: { elderSealActive?: boolean } = {}
 ): {
   updatedPlayers: Player[];
   wolfPupTriggeredNextNight: boolean;
   triggeredHunterId: string | null;
+  triggeredHunterIds: string[];
   elderLynchedPenalty: boolean;
   cascadeMessages: string[];
 } {
   const updated = players.map((p) => ({ ...p }));
   const cascadeMessages: string[] = [];
   let wolfPupTriggeredNextNight = false;
-  let triggeredHunterId: string | null;
-  triggeredHunterId = null;
+  const triggeredHunterIds: string[] = [];
   let elderLynchedPenalty = false;
 
   const toKill = [lynchedId];
@@ -652,7 +688,9 @@ export function applyDayLynch(
     }
 
     if (victim.roleId === 'hunter' && !victim.hasUsedPower) {
-      triggeredHunterId = victim.id;
+      if (!triggeredHunterIds.includes(victim.id)) {
+        triggeredHunterIds.push(victim.id);
+      }
     }
 
     const doppel = updated.find(
@@ -662,7 +700,11 @@ export function applyDayLynch(
         (p.targetPlayerId === victim.id || (!p.targetPlayerId && p.targetRoleId === victim.roleId))
     );
     if (doppel && victim.roleId !== 'doppelganger') {
-      applyDoppelgangerInheritance(doppel, victim.roleId);
+      applyDoppelgangerInheritance(
+        doppel,
+        victim.roleId,
+        Boolean(options.elderSealActive || elderLynchedPenalty)
+      );
       cascadeMessages.push(`Nhân Bản ${doppel.name} đã thức tỉnh thành ${ROLES[victim.roleId].name.vi}!`);
     }
 
@@ -678,7 +720,8 @@ export function applyDayLynch(
   return {
     updatedPlayers: updated,
     wolfPupTriggeredNextNight,
-    triggeredHunterId,
+    triggeredHunterId: triggeredHunterIds[0] ?? null,
+    triggeredHunterIds,
     elderLynchedPenalty,
     cascadeMessages,
   };
@@ -812,13 +855,15 @@ export function tallyVotes(votes: VoteRecord[]): {
 export function resolveHunterShot(
   players: Player[],
   hunterId: string,
-  targetId: string
+  targetId: string,
+  options: { elderSealActive?: boolean } = {}
 ): {
   updatedPlayers: Player[];
   victimName: string;
   extraVictimId: string | null;
   wolfPupTriggeredNextNight: boolean;
   triggeredHunterId: string | null;
+  triggeredHunterIds: string[];
   cascadeMessages: string[];
 } {
   const updated = players.map((p) => ({ ...p }));
@@ -830,7 +875,7 @@ export function resolveHunterShot(
   let extraVictimId: string | null = null;
   let victimName = '';
   let wolfPupTriggeredNextNight = false;
-  let triggeredHunterId: string | null = null;
+  const triggeredHunterIds: string[] = [];
   const cascadeMessages: string[] = [];
 
   const toKill = [targetId];
@@ -857,7 +902,9 @@ export function resolveHunterShot(
     }
 
     if (victim.roleId === 'hunter' && !victim.hasUsedPower && victim.id !== hunterId) {
-      triggeredHunterId = victim.id;
+      if (!triggeredHunterIds.includes(victim.id)) {
+        triggeredHunterIds.push(victim.id);
+      }
       cascadeMessages.push(`🎯 Thợ Săn ${victim.name} trúng đạn nhưng vẫn kịp rút súng phản công!`);
     }
 
@@ -868,7 +915,7 @@ export function resolveHunterShot(
         (p.targetPlayerId === victim.id || (!p.targetPlayerId && p.targetRoleId === victim.roleId))
     );
     if (doppel && victim.roleId !== 'doppelganger') {
-      applyDoppelgangerInheritance(doppel, victim.roleId);
+      applyDoppelgangerInheritance(doppel, victim.roleId, Boolean(options.elderSealActive));
       cascadeMessages.push(`Nhân Bản ${doppel.name} đã kế thừa thân phận ${ROLES[victim.roleId].name.vi}!`);
     }
 
@@ -886,7 +933,8 @@ export function resolveHunterShot(
     victimName,
     extraVictimId,
     wolfPupTriggeredNextNight,
-    triggeredHunterId,
+    triggeredHunterId: triggeredHunterIds[0] ?? null,
+    triggeredHunterIds,
     cascadeMessages,
   };
 }
@@ -1001,13 +1049,24 @@ export function checkWinCondition(
     };
   }
 
-  // If biting Werewolves reach numerical parity with non-biting players, Werewolves win
+  // If biting Werewolves reach numerical parity with non-biting players, Werewolves win —
+  // unless a living cross-faction Lover pair still has an outsider to eliminate (e.g., Wolf A + Villager B Lovers vs Wolf C)
   if (bitingWolves.length >= nonBitingPlayers.length) {
-    return {
-      isOver: true,
-      winner: 'werewolves',
-      reason: `Bầy Ma Sói đã làm chủ hoàn toàn ngôi làng (${bitingWolves.length} Sói vs ${nonBitingPlayers.length} Dân). Phe Ma Sói thắng!`,
-    };
+    const hasCrossFactionLoversWithOutsider =
+      alivePlayers.length > 2 &&
+      alivePlayers.some((p) => {
+        if (!p.loverId) return false;
+        const partner = alivePlayers.find((o) => o.id === p.loverId);
+        return Boolean(partner && ROLES[p.roleId].faction !== ROLES[partner.roleId].faction);
+      });
+
+    if (!hasCrossFactionLoversWithOutsider) {
+      return {
+        isOver: true,
+        winner: 'werewolves',
+        reason: `Bầy Ma Sói đã làm chủ hoàn toàn ngôi làng (${bitingWolves.length} Sói vs ${nonBitingPlayers.length} Dân). Phe Ma Sói thắng!`,
+      };
+    }
   }
 
   return {

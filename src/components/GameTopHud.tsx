@@ -15,6 +15,7 @@ import {
   Users,
   View,
   Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { GameMode, Language, Phase, RoleDefinition } from '../types/game';
 import { CameraViewPreset } from '../game/fpvCamera';
@@ -134,7 +135,20 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
                 ? t.dayDiscussTitle(round)
                 : phase === 'day_voting'
                 ? t.dayVoteTitle(round)
+                : phase === 'game_over'
+                ? lang === 'vi'
+                  ? 'KẾT THÚC'
+                  : 'GAME OVER'
                 : t.hunterPhaseTitle}
+            </span>
+            <span
+              data-testid="hud-mobile-alive-pill"
+              className="inline-flex md:hidden items-center gap-0.5 px-1 py-0.2 rounded bg-[#1b120b] border border-[#6b4a2e] text-[9px] font-mono font-bold text-[#d1fae5] shrink-0"
+              style={{ fontVariantNumeric: 'tabular-nums' }}
+              title={lang === 'vi' ? 'Còn sống' : 'Alive'}
+            >
+              <Users className="w-2.5 h-2.5 text-[#6ee7b7]" />
+              <span>{aliveTotal}/{totalPlayers}</span>
             </span>
             {gameMode === 'online' && (
               <span className="hidden sm:inline text-[9px] font-mono px-1.5 py-0.2 rounded bg-[#3b281a] text-[#fde7c3]">
@@ -184,9 +198,9 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
                   e.currentTarget.blur();
                   onAdvancePhaseFast();
                 }}
-                className="px-2 py-0.5 rounded-lg bg-[#e86f24] hover:bg-[#f28139] border border-[#fbc266] text-[#fff8ed] font-extrabold text-[10px] sm:text-[11px] flex items-center gap-1 shadow cursor-pointer whitespace-nowrap"
+                className="px-2 py-0.5 rounded-lg bg-[#b84b10] hover:bg-[#9e3f0c] border border-[#fbc266] text-white font-extrabold text-[10px] sm:text-[11px] flex items-center gap-1 shadow cursor-pointer whitespace-nowrap"
               >
-                <FastForward className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-[#fff8ed] shrink-0" />
+                <FastForward className="w-2.5 h-2.5 sm:w-3 sm:h-3 fill-white shrink-0" />
                 <span>
                   {phase === 'night'
                     ? t.skipNightBtn
@@ -290,28 +304,26 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
       >
         <button
           type="button"
-          tabIndex={-1}
           onClick={(e) => {
             e.currentTarget.blur();
             onOpenRoleCard();
           }}
-          className="px-2 py-1.5 rounded-xl bg-[#4f2c12] hover:bg-[#663a19] border border-[#e89c3e] text-[#fef3c7] text-xs font-extrabold flex items-center gap-1 cursor-pointer"
+          className="px-1.5 sm:px-2 py-1.5 rounded-xl bg-[#4f2c12] hover:bg-[#663a19] border border-[#e89c3e] text-[#fef3c7] text-[10px] sm:text-xs font-extrabold flex items-center gap-1 cursor-pointer max-w-[92px] sm:max-w-none"
           title={myRole.name[lang]}
         >
-          <Eye className="w-3.5 h-3.5 text-[#f5b82e]" />
-          <span className="hidden sm:inline">{myRole.name[lang]}</span>
+          <Eye className="w-3.5 h-3.5 text-[#f5b82e] shrink-0" />
+          <span className="truncate">{myRole.name[lang]}</span>
         </button>
 
         <button
           type="button"
           data-testid="toggle-fpv-btn"
           aria-pressed={!freeLook360 && cameraPreset === 'first_person'}
-          tabIndex={-1}
           onClick={(e) => {
             e.currentTarget.blur();
             onToggleFirstPerson();
           }}
-          className={`px-2 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center gap-1 cursor-pointer ${
+          className={`px-1.5 sm:px-2 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center gap-1 cursor-pointer ${
             !freeLook360 && cameraPreset === 'first_person'
               ? 'bg-[#2f7d4d] border-[#86efac] text-white'
               : 'bg-[#1c130c] border-[#6b4a2e] text-[#86efac] hover:bg-[#312115]'
@@ -328,12 +340,11 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
           type="button"
           data-testid="toggle-tpv-btn"
           aria-pressed={!freeLook360 && cameraPreset === 'third_person'}
-          tabIndex={-1}
           onClick={(e) => {
             e.currentTarget.blur();
             onToggleThirdPerson();
           }}
-          className={`px-2 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center gap-1 cursor-pointer ${
+          className={`px-1.5 sm:px-2 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center gap-1 cursor-pointer ${
             !freeLook360 && cameraPreset === 'third_person'
               ? 'bg-[#b45309] border-[#fde68a] text-white'
               : 'bg-[#1c130c] border-[#6b4a2e] text-[#fcd34d] hover:bg-[#312115]'
@@ -350,7 +361,6 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
           type="button"
           data-testid="toggle-freelook-btn"
           aria-pressed={freeLook360}
-          tabIndex={-1}
           onClick={(e) => {
             e.currentTarget.blur();
             onToggleFreeLook();
@@ -374,7 +384,6 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
         <button
           type="button"
           data-testid="switch-camera-preset-btn"
-          tabIndex={-1}
           onClick={(e) => {
             e.currentTarget.blur();
             onCycleCameraPreset();
@@ -389,7 +398,6 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
         <button
           type="button"
           data-testid="open-onboarding-tour-btn"
-          tabIndex={-1}
           onClick={(e) => {
             e.currentTarget.blur();
             onOpenOnboardingTour();
@@ -404,7 +412,6 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
         <button
           type="button"
           data-testid="hud-mic-toggle-btn"
-          tabIndex={-1}
           disabled={isDead}
           onClick={(e) => {
             e.currentTarget.blur();
@@ -441,21 +448,24 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
 
         <button
           type="button"
-          tabIndex={-1}
+          aria-pressed={isMuted}
           onClick={(e) => {
             e.currentTarget.blur();
             onToggleMute();
           }}
-          className="hidden sm:flex p-2 rounded-xl bg-[#1c130c] hover:bg-[#312115] text-[#f6ebd8] border border-[#6b4a2e] cursor-pointer"
+          className="flex p-1.5 sm:p-2 rounded-xl bg-[#1c130c] hover:bg-[#312115] text-[#f6ebd8] border border-[#6b4a2e] cursor-pointer"
           title={t.toggleSound}
           aria-label={t.toggleSound}
         >
-          <Volume2 className={`w-4 h-4 ${isMuted ? 'text-[#8c7258]' : 'text-[#5cb85c]'}`} />
+          {isMuted ? (
+            <VolumeX className="w-4 h-4 text-[#d6bfa2]" />
+          ) : (
+            <Volume2 className="w-4 h-4 text-[#5cb85c]" />
+          )}
         </button>
 
         <button
           type="button"
-          tabIndex={-1}
           onClick={(e) => {
             e.currentTarget.blur();
             onPause();

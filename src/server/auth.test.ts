@@ -6,8 +6,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   hashPassword,
+  hashPasswordAsync,
   verifyPassword,
+  verifyPasswordAsync,
   needsPasswordRehash,
+  getDefaultSeedAccounts,
   signSessionToken,
   verifySessionToken,
   extractBearerToken,
@@ -113,5 +116,41 @@ test('readAccountsDb and writeAccountsDb persist >60 accounts without truncation
     assert.equal('passwordHash' in pub, false, 'Public account must never expose passwordHash');
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('hashPasswordAsync and verifyPasswordAsync support scrypt, legacy SHA-256, and reject invalid inputs', async () => {
+  const h1 = await hashPasswordAsync('asyncSecret99!');
+  const h2 = await hashPasswordAsync('asyncSecret99!');
+  assert.ok(h1.startsWith('scrypt:'));
+  assert.notEqual(h1, h2);
+  assert.equal(await verifyPasswordAsync('asyncSecret99!', h1), true);
+  assert.equal(await verifyPasswordAsync('wrongSecret', h1), false);
+  assert.equal(await verifyPasswordAsync('', h1), false);
+  assert.equal(await verifyPasswordAsync('asyncSecret99!', 'scrypt:malformed'), false);
+
+  const legacyHash = crypto
+    .createHash('sha256')
+    .update('werewolf3d_salt_v1:legacyAsync1')
+    .digest('hex');
+  assert.equal(await verifyPasswordAsync('legacyAsync1', legacyHash), true);
+  assert.equal(await verifyPasswordAsync('wrongLegacy', legacyHash), false);
+});
+
+test('getDefaultSeedAccounts returns empty list in production unless SEED_DEMO_ACCOUNTS=1', () => {
+  const prevNodeEnv = process.env.NODE_ENV;
+  const prevSeed = process.env.SEED_DEMO_ACCOUNTS;
+  try {
+    process.env.NODE_ENV = 'production';
+    delete process.env.SEED_DEMO_ACCOUNTS;
+    assert.deepEqual(getDefaultSeedAccounts(), []);
+
+    process.env.SEED_DEMO_ACCOUNTS = '1';
+    assert.ok(getDefaultSeedAccounts().length > 0);
+  } finally {
+    if (prevNodeEnv === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = prevNodeEnv;
+    if (prevSeed === undefined) delete process.env.SEED_DEMO_ACCOUNTS;
+    else process.env.SEED_DEMO_ACCOUNTS = prevSeed;
   }
 });

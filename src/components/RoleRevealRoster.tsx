@@ -14,6 +14,7 @@ interface RoleRevealRosterEntry {
 interface RoleRevealRosterProps {
   roster?: RoleRevealRosterEntry[];
   players?: Player[];
+  meId?: string;
   lang: Language;
   compact?: boolean;
 }
@@ -21,6 +22,7 @@ interface RoleRevealRosterProps {
 export const RoleRevealRoster: React.FC<RoleRevealRosterProps> = ({
   roster,
   players,
+  meId,
   lang,
   compact = false,
 }) => {
@@ -32,7 +34,7 @@ export const RoleRevealRoster: React.FC<RoleRevealRosterProps> = ({
       avatar: p.avatar,
       roleId: p.roleId,
       isAlive: p.isAlive,
-      isHuman: !p.isBot,
+      isHuman: meId ? p.id === meId : !p.isBot,
     }));
   return (
     <div
@@ -79,7 +81,11 @@ export const RoleRevealRoster: React.FC<RoleRevealRosterProps> = ({
                   }`}
                 >
                   {player.name}
-                  {player.isHuman ? (lang === 'vi' ? ' (Bạn)' : ' (You)') : ''}
+                  {(meId ? player.id === meId : Boolean(player.isHuman))
+                    ? lang === 'vi'
+                      ? ' (Bạn)'
+                      : ' (You)'
+                    : ''}
                 </span>
               </div>
               <span

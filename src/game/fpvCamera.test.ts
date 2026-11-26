@@ -287,6 +287,47 @@ test('getContextualInteractionPrompt returns exact phase/role/tool labels instea
   });
   assert.equal(ownSeatPrompt?.canInteract, true);
   assert.ok(ownSeatPrompt?.actionLabel.includes('Ngồi lại vào ghế'));
+
+  // P3-1: Dying Hunter (isAlive: false) MUST receive interactive shooting prompt in hunter_revenge phase
+  const dyingHunterPrompt = getContextualInteractionPrompt({
+    phase: 'hunter_revenge',
+    me: { id: 'me', roleId: 'hunter', isAlive: false, hasUsedPower: false },
+    target,
+    activePropTool: null,
+    currentNightStep: null,
+    isPlayerAwakeAtNight: false,
+    lang: 'vi',
+  });
+  assert.equal(dyingHunterPrompt?.canInteract, true);
+  assert.equal(dyingHunterPrompt?.icon, '🏹');
+  assert.equal(dyingHunterPrompt?.tone, 'night');
+  assert.ok(dyingHunterPrompt?.actionLabel.includes('Bắn kéo theo'));
+
+  // Dying Hunter aiming at already-dead player gets blocked dead-target prompt
+  const dyingHunterDeadTarget = getContextualInteractionPrompt({
+    phase: 'hunter_revenge',
+    me: { id: 'me', roleId: 'hunter', isAlive: false, hasUsedPower: false },
+    target: { id: 'p3', name: 'Minh Hoàng', isAlive: false },
+    activePropTool: null,
+    currentNightStep: null,
+    isPlayerAwakeAtNight: false,
+    lang: 'en',
+  });
+  assert.equal(dyingHunterDeadTarget?.canInteract, false);
+  assert.equal(dyingHunterDeadTarget?.icon, '🪦');
+
+  // Already-spent Hunter falls through to Ghost spectating prompt
+  const spentHunterPrompt = getContextualInteractionPrompt({
+    phase: 'hunter_revenge',
+    me: { id: 'me', roleId: 'hunter', isAlive: false, hasUsedPower: true },
+    target,
+    activePropTool: null,
+    currentNightStep: null,
+    isPlayerAwakeAtNight: false,
+    lang: 'vi',
+  });
+  assert.equal(spentHunterPrompt?.canInteract, false);
+  assert.equal(spentHunterPrompt?.icon, '👻');
 });
 
 test('getNextCameraPreset cycles through first_person, third_person, and other presets', () => {

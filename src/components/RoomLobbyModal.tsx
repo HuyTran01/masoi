@@ -67,6 +67,14 @@ function generateRoomCode(prefix: 'ONL-' | 'GM-'): string {
   return prefix + Math.floor(1000 + Math.random() * 9000);
 }
 
+function getStoredAuthToken(): string | undefined {
+  try {
+    return localStorage.getItem('werewolf_auth_token') || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   isOpen,
   lang,
@@ -101,6 +109,9 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   const launchedRef = useRef(false);
   const pendingJoinCodeRef = useRef<string | null>(null);
   const isJoinedGuestRoomRef = useRef(false);
+  const autoCreatedCodeRef = useRef<string | null>(null);
+  const actionTabRef = useRef<'create' | 'join'>(actionTab);
+  actionTabRef.current = actionTab;
   const liveRoomRef = useRef<RealtimeRoomState | null>(null);
   liveRoomRef.current = liveRoom;
   const preservedCodesRef = useRef<{ online: string; gm: string }>({
@@ -177,6 +188,15 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         setOpenGMRooms(evt.rooms);
       } else if (evt.type === 'room:state') {
         clearJoinTimeout();
+        // Drop late room:state from a solo auto-created room if user already switched to Join tab
+        if (
+          actionTabRef.current === 'join' &&
+          !pendingJoinCodeRef.current &&
+          evt.room.hostId === currentUser.id
+        ) {
+          realtimeClient.leaveRoom(evt.room.code, currentUser.id);
+          return;
+        }
         setConnectTimedOut(false);
         setLiveRoom(evt.room);
         setJoinError('');
@@ -249,6 +269,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     if (!createdRoomId.startsWith('ONL-')) return;
 
     preservedCodesRef.current.online = createdRoomId;
+    autoCreatedCodeRef.current = createdRoomId;
     setConnectTimedOut(false);
     realtimeClient.createOrJoinRoom({
       code: createdRoomId,
@@ -261,6 +282,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
       villageSize,
       timerConfig,
       createIfMissing: true,
+      authToken: getStoredAuthToken(),
     });
 
     if (connectTimeoutRef.current !== null) {
@@ -334,9 +356,11 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
 
   const leaveActiveOnlineRoomIfAny = () => {
     clearJoinTimeout();
-    if (liveRoomRef.current && !launchedRef.current) {
-      realtimeClient.leaveRoom(liveRoomRef.current.code, currentUser.id);
+    const activeCode = liveRoomRef.current?.code || autoCreatedCodeRef.current;
+    if (activeCode && !launchedRef.current) {
+      realtimeClient.leaveRoom(activeCode, currentUser.id);
     }
+    autoCreatedCodeRef.current = null;
     isJoinedGuestRoomRef.current = false;
     pendingJoinCodeRef.current = null;
     setIsJoining(false);
@@ -356,6 +380,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     setLobbyNotice('');
     setJoinError('');
     realtimeClient.forceReconnect();
+    autoCreatedCodeRef.current = createdRoomId;
     realtimeClient.createOrJoinRoom({
       code: createdRoomId,
       user: {
@@ -367,6 +392,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
       villageSize,
       timerConfig,
       createIfMissing: true,
+      authToken: getStoredAuthToken(),
     });
   };
 
@@ -516,11 +542,15 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         elo: currentUser.elo,
       },
       createIfMissing: false,
+      authToken: getStoredAuthToken(),
     });
   };
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={modeTab === 'online' ? t.lobbyOnlineTitle : t.lobbyGMTitle}
       className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-5 pointer-events-auto"
       style={{ backgroundColor: 'rgba(4, 7, 15, 0.9)' }}
       data-testid="room-lobby-modal"
@@ -626,6 +656,17 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
             <span className="truncate">{t.tabGMOffline}</span>
           </button>
         </div>
+
+        {modeTab === 'online' && (
+          <div
+            data-testid="online-beta-badge"
+            className="px-3 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] font-semibold text-slate-300"
+          >
+            {lang === 'vi'
+              ? 'Beta · Đồng bộ phòng chờ, chat, đạo cụ & phiếu bầu'
+              : 'Beta · Syncs lobby, chat, props & votes'}
+          </div>
+        )}
 
         {/* Action Sub-Tabs (Hidden when Guest is inside a joined room; replaced by Guest Status + Leave button) */}
         {isGuestInOnlineRoom ? (
@@ -794,6 +835,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                         min={4}
                         max={20}
                         data-testid="lobby-custom-size-input"
+                        aria-label={lang === 'vi' ? 'Số ghế tối đa' : 'Maximum seats'}
                         value={effectiveSize}
                         onChange={(e) => {
                           const val = parseInt(e.target.value, 10);
@@ -1035,7 +1077,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-2 text-[11px]">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
                           <label className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg px-2 py-1">
                             <span className="text-slate-300 font-semibold">
                               🌙 {lang === 'vi' ? 'Đêm:' : 'Night:'}

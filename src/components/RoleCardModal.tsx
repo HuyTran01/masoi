@@ -10,7 +10,115 @@ interface RoleCardModalProps {
   isAlive: boolean;
   lang: Language;
   onClose: () => void;
+  onStartTour?: () => void;
 }
+
+const ROLE_CARD_TEXT: Record<
+  Language,
+  {
+    headerBadge: string;
+    alive: string;
+    dead: string;
+    closeAria: string;
+    factionWolf: string;
+    factionNeutral: string;
+    factionVillager: string;
+    sealTitle: string;
+    sealDesc: string;
+    revealBtn: string;
+    wakeOrder: (n: number) => string;
+    tipsTitle: string;
+    hideBtn: string;
+    enterBtn: string;
+    tourBtn: string;
+  }
+> = {
+  vi: {
+    headerBadge: 'Thẻ Bài Định Mệnh 3D',
+    alive: 'Đang Sống',
+    dead: 'Đã Ngã Xuống',
+    closeAria: 'Đóng Thẻ Vai Trò',
+    factionWolf: 'Phe Ma Sói',
+    factionNeutral: 'Phe Thứ Ba (Độc Lập)',
+    factionVillager: 'Phe Dân Làng',
+    sealTitle: 'Ấn Ký Ma Sói',
+    sealDesc: 'Thẻ bài đang được úp bảo mật. Bấm nút bên dưới để lật mở!',
+    revealBtn: 'Lật Thẻ Để Xem Vai Trò',
+    wakeOrder: (n) => `Thứ tự thức đêm: #${n}`,
+    tipsTitle: 'Chiến Thuật & Mẹo Chơi:',
+    hideBtn: 'Úp Thẻ Bảo Mật',
+    enterBtn: 'Vào Trận Ngay',
+    tourBtn: '🧭 Hướng dẫn 5 bước',
+  },
+  en: {
+    headerBadge: '3D Secret Role Card',
+    alive: 'Alive',
+    dead: 'Eliminated',
+    closeAria: 'Close Role Card',
+    factionWolf: 'Werewolf Pack',
+    factionNeutral: 'Third Party (Solo)',
+    factionVillager: 'Villager Team',
+    sealTitle: 'Werewolf Seal',
+    sealDesc: 'Your card is face-down for privacy. Press below to reveal!',
+    revealBtn: 'Reveal Secret Role',
+    wakeOrder: (n) => `Night wake order: #${n}`,
+    tipsTitle: 'Strategy & Tips:',
+    hideBtn: 'Hide Card',
+    enterBtn: 'Enter Match',
+    tourBtn: '🧭 5-Step Guide',
+  },
+  fr: {
+    headerBadge: 'Carte de Rôle 3D',
+    alive: 'En Vie',
+    dead: 'Éliminé',
+    closeAria: 'Fermer la Carte de Rôle',
+    factionWolf: 'Camp des Loups',
+    factionNeutral: 'Camp Neutre (Solo)',
+    factionVillager: 'Camp du Village',
+    sealTitle: 'Sceau du Loup-Garou',
+    sealDesc: 'Votre carte est cachée. Cliquez ci-dessous pour la révéler !',
+    revealBtn: 'Révéler Mon Rôle',
+    wakeOrder: (n) => `Ordre de nuit : #${n}`,
+    tipsTitle: 'Stratégie & Conseils :',
+    hideBtn: 'Cacher la Carte',
+    enterBtn: 'Jouer',
+    tourBtn: '🧭 Guide en 5 étapes',
+  },
+  es: {
+    headerBadge: 'Carta de Rol 3D',
+    alive: 'Vivo',
+    dead: 'Eliminado',
+    closeAria: 'Cerrar Carta de Rol',
+    factionWolf: 'Bando de los Lobos',
+    factionNeutral: 'Tercero (Solitario)',
+    factionVillager: 'Bando Aldeano',
+    sealTitle: 'Sello del Lobo',
+    sealDesc: 'Tu carta está oculta. ¡Pulsa el botón para revelarla!',
+    revealBtn: 'Revelar Rol Secreto',
+    wakeOrder: (n) => `Orden nocturno: #${n}`,
+    tipsTitle: 'Estrategia y Consejos:',
+    hideBtn: 'Ocultar Carta',
+    enterBtn: 'Entrar al Juego',
+    tourBtn: '🧭 Guía de 5 pasos',
+  },
+  ja: {
+    headerBadge: '3D 秘密の役職カード',
+    alive: '生存中',
+    dead: '脱落',
+    closeAria: '役職カードを閉じる',
+    factionWolf: '人狼陣営',
+    factionNeutral: '第三陣営（単独）',
+    factionVillager: '村人陣営',
+    sealTitle: '人狼の封印',
+    sealDesc: 'カードは伏せられています。下のボタンで確認してください。',
+    revealBtn: '役職カードをめくる',
+    wakeOrder: (n) => `夜の行動順: #${n}`,
+    tipsTitle: '戦略とヒント：',
+    hideBtn: 'カードを伏せる',
+    enterBtn: '試合へ進む',
+    tourBtn: '🧭 5ステップガイド',
+  },
+};
 
 export const RoleCardModal: React.FC<RoleCardModalProps> = ({
   roleId,
@@ -18,9 +126,18 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
   isAlive,
   lang,
   onClose,
+  onStartTour,
 }) => {
   const [isRevealed, setIsRevealed] = useState(true);
   const role = ROLES[roleId];
+  const ct = ROLE_CARD_TEXT[lang] || ROLE_CARD_TEXT.en;
+
+  let isFirstVisit = false;
+  try {
+    isFirstVisit = !localStorage.getItem('werewolf_3d_tour_done');
+  } catch {
+    isFirstVisit = false;
+  }
 
   const handleToggleReveal = () => {
     sound.playCardFlip();
@@ -36,10 +153,10 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
 
   const factionLabel =
     role.faction === 'werewolf'
-      ? 'Phe Ma Sói'
+      ? ct.factionWolf
       : role.faction === 'neutral'
-      ? 'Phe Thứ Ba (Độc Lập)'
-      : 'Phe Dân Làng';
+      ? ct.factionNeutral
+      : ct.factionVillager;
 
   const roleEmoji =
     role.id === 'werewolf'
@@ -70,24 +187,32 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="role-card-modal-title"
+      data-testid="role-card-modal"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto pointer-events-auto"
       style={{ backgroundColor: 'rgba(5, 8, 17, 0.88)' }}
     >
       <div className="relative w-full max-w-md bg-[#0d1322] border-2 border-amber-600/50 rounded-2xl p-5 shadow-2xl text-slate-100">
         {/* Close Button */}
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
-          aria-label="Close Role Card"
+          className="absolute top-4 right-4 p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+          aria-label={ct.closeAria}
         >
           <X className="w-5 h-5" />
         </button>
 
         <div className="text-center mb-4">
           <span className="text-[11px] font-mono uppercase tracking-widest text-amber-400">
-            Thẻ Bài Định Mệnh 3D
+            {ct.headerBadge}
           </span>
-          <h3 className="text-xl font-extrabold text-amber-100 tracking-wide mt-0.5">
+          <h3
+            id="role-card-modal-title"
+            className="text-xl font-extrabold text-amber-100 tracking-wide mt-0.5"
+          >
             {playerName}
           </h3>
           <div className="flex items-center justify-center gap-2 mt-1">
@@ -98,16 +223,13 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
                   : 'border-rose-800 bg-rose-950 text-rose-300'
               }`}
             >
-              {isAlive ? 'Đang Sống' : 'Đã Ngã Xuống'}
+              {isAlive ? ct.alive : ct.dead}
             </span>
           </div>
         </div>
 
-        {/* 3D Tarot Card Container */}
-        <div
-          onClick={handleToggleReveal}
-          className="cursor-pointer mx-auto w-full max-w-[320px] min-h-[380px] rounded-2xl border-2 border-amber-500/50 bg-[#090d18] shadow-2xl flex flex-col items-center justify-center p-6 text-center transition-transform duration-300 hover:scale-[1.01]"
-        >
+        {/* 3D Tarot Card Container (Keyboard-safe button controls inside, no nested clickable div) */}
+        <div className="mx-auto w-full max-w-[320px] min-h-[380px] rounded-2xl border-2 border-amber-500/50 bg-[#090d18] shadow-2xl flex flex-col items-center justify-center p-6 text-center">
           {!isRevealed ? (
             <div className="flex flex-col items-center justify-center space-y-4 py-8">
               <div className="w-24 h-24 rounded-full bg-rose-950 border-2 border-amber-500/60 flex items-center justify-center shadow-lg">
@@ -115,22 +237,19 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
               </div>
               <div>
                 <h4 className="font-bold text-lg text-amber-200 tracking-widest uppercase">
-                  Ấn Ký Ma Sói
+                  {ct.sealTitle}
                 </h4>
                 <p className="text-xs text-slate-400 mt-1 max-w-[220px]">
-                  Thẻ bài đang được úp bảo mật. Chạm vào thẻ để lật mở!
+                  {ct.sealDesc}
                 </p>
               </div>
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleToggleReveal();
-                }}
-                className="mt-2 px-5 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-600 text-white text-xs font-bold shadow-lg flex items-center gap-2"
+                onClick={handleToggleReveal}
+                className="mt-2 px-5 py-2.5 rounded-xl bg-rose-700 hover:bg-rose-600 text-white text-xs font-bold shadow-lg flex items-center gap-2 cursor-pointer"
               >
                 <Eye className="w-4 h-4" />
-                Lật Thẻ Để Xem Vai Trò
+                {ct.revealBtn}
               </button>
             </div>
           ) : (
@@ -149,7 +268,7 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
 
               {role.wakeOrder > 0 && (
                 <span className="mt-1 text-[11px] font-mono text-slate-400">
-                  Thứ tự thức đêm: #{role.wakeOrder}
+                  {ct.wakeOrder(role.wakeOrder)}
                 </span>
               )}
 
@@ -161,7 +280,7 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
               <div className="mt-4 w-full bg-[#111827] border border-amber-700/40 rounded-xl p-3 text-left">
                 <div className="flex items-center gap-1.5 text-amber-300 font-bold text-xs mb-1">
                   <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Chiến Thuật & Mẹo Chơi:</span>
+                  <span>{ct.tipsTitle}</span>
                 </div>
                 <p className="text-[11px] text-slate-300 leading-normal">
                   {role.guideForNewbie[lang] || role.guideForNewbie.vi}
@@ -171,26 +290,35 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
               <div className="mt-4 flex items-center gap-2 w-full">
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleToggleReveal();
-                  }}
-                  className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5"
+                  onClick={handleToggleReveal}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <EyeOff className="w-3.5 h-3.5" />
-                  Úp Thẻ Bảo Mật
+                  {ct.hideBtn}
                 </button>
                 <button
                   type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onClose();
-                  }}
-                  className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-extrabold"
+                  data-testid="role-card-enter-match-btn"
+                  onClick={onClose}
+                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-extrabold cursor-pointer"
                 >
-                  Vào Trận Ngay
+                  {ct.enterBtn}
                 </button>
               </div>
+
+              {isFirstVisit && onStartTour && (
+                <button
+                  type="button"
+                  data-testid="role-card-start-tour-btn"
+                  onClick={() => {
+                    sound.playCardFlip();
+                    onStartTour();
+                  }}
+                  className="mt-2.5 w-full py-2 rounded-xl bg-sky-950/90 hover:bg-sky-900 border border-sky-500/60 text-sky-200 text-xs font-bold cursor-pointer"
+                >
+                  {ct.tourBtn}
+                </button>
+              )}
             </div>
           )}
         </div>

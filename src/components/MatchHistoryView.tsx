@@ -1,5 +1,5 @@
 import React from 'react';
-import { History, Award, Calendar, Users, Moon, Skull, CheckCircle2 } from 'lucide-react';
+import { History, Award, Calendar, Users, Moon } from 'lucide-react';
 import { GameHistoryRecord, Language } from '../types/game';
 import { loadHistory } from '../utils/storage';
 import { ROLES } from '../game/roles';
@@ -11,6 +11,7 @@ interface MatchHistoryViewProps {
 
 export const MatchHistoryView: React.FC<MatchHistoryViewProps> = ({ lang }) => {
   const t = TRANSLATIONS[lang];
+  const isVi = lang === 'vi';
   const history: GameHistoryRecord[] = loadHistory();
 
   return (
@@ -22,12 +23,14 @@ export const MatchHistoryView: React.FC<MatchHistoryViewProps> = ({ lang }) => {
             <span className="p-2 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/30">
               <History className="w-5 h-5" />
             </span>
-            <h2 className="text-xl sm:text-2xl font-bold font-['Cinzel'] text-sky-200">
+            <h2 className="text-xl sm:text-2xl font-bold font-display text-sky-200">
               {t.matchHistory}
             </h2>
           </div>
           <p className="text-xs text-slate-300 mt-1 max-w-lg">
-            Nhật ký lưu lại kết quả từng ván đấu, phe chiến thắng, danh sách vai trò bí mật và nhân tố xuất sắc nhất (MVP).
+            {isVi
+              ? 'Nhật ký lưu lại kết quả từng ván đấu, phe chiến thắng, danh sách vai trò bí mật và nhân tố xuất sắc nhất (MVP).'
+              : 'Log of past match outcomes, winning factions, final role reveals, and match MVPs.'}
           </p>
         </div>
       </div>
@@ -40,12 +43,20 @@ export const MatchHistoryView: React.FC<MatchHistoryViewProps> = ({ lang }) => {
           const isLoversWin = record.winner === 'lovers';
 
           const winnerText = isWolfWin
-            ? 'Phe Ma Sói Thắng'
+            ? isVi
+              ? 'Phe Ma Sói Thắng'
+              : 'Werewolves Win'
             : isTannerWin
-            ? 'Kẻ Chán Đời Thắng'
+            ? isVi
+              ? 'Kẻ Chán Đời Thắng'
+              : 'Tanner Wins'
             : isLoversWin
-            ? 'Phe Tình Nhân Thắng'
-            : 'Phe Dân Làng Thắng';
+            ? isVi
+              ? 'Phe Tình Nhân Thắng'
+              : 'Lovers Win'
+            : isVi
+            ? 'Phe Dân Làng Thắng'
+            : 'Villagers Win';
 
           const winnerBadgeColor = isWolfWin
             ? 'bg-red-950 border-red-700 text-red-300'
@@ -69,7 +80,7 @@ export const MatchHistoryView: React.FC<MatchHistoryViewProps> = ({ lang }) => {
                     {winnerText}
                   </span>
                   <span className="text-xs font-mono text-slate-400">
-                    Phòng: {record.roomId}
+                    {isVi ? 'Phòng:' : 'Room:'} {record.roomId}
                   </span>
                 </div>
 
@@ -80,11 +91,11 @@ export const MatchHistoryView: React.FC<MatchHistoryViewProps> = ({ lang }) => {
                   </span>
                   <span className="flex items-center gap-1">
                     <Moon className="w-3.5 h-3.5 text-slate-500" />
-                    {record.rounds} Vòng Đêm
+                    {record.rounds} {isVi ? 'Vòng Đêm' : 'Nights'}
                   </span>
                   <span className="flex items-center gap-1">
                     <Users className="w-3.5 h-3.5 text-slate-500" />
-                    {record.playersCount} Người Chơi
+                    {record.playersCount} {isVi ? 'Người Chơi' : 'Players'}
                   </span>
                 </div>
               </div>
@@ -92,14 +103,14 @@ export const MatchHistoryView: React.FC<MatchHistoryViewProps> = ({ lang }) => {
               {/* MVP Bar */}
               <div className="flex items-center gap-2 text-xs text-amber-300 font-semibold bg-slate-950/70 border border-amber-950/80 rounded-xl px-3 py-2">
                 <Award className="w-4 h-4 text-amber-400" />
-                <span>MVP Trận Đấu:</span>
+                <span>{isVi ? 'MVP Trận Đấu:' : 'Match MVP:'}</span>
                 <span className="text-slate-100">{record.mvp}</span>
               </div>
 
               {/* Roster & Role Reveal */}
               <div>
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">
-                  Bảng Roster Công Khai:
+                  {isVi ? 'Danh Sách Vai Trò Cuối Trận:' : 'Final Role Roster:'}
                 </span>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                   {record.roster.map((player, idx) => {

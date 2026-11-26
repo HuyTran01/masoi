@@ -70,7 +70,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
       >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="px-1.5 py-0.5 rounded bg-[#e86f24] text-[#fff8ed] font-black text-[10px] uppercase shrink-0">
+            <span className="px-1.5 py-0.5 rounded bg-[#b84b10] text-white font-black text-[10px] uppercase shrink-0">
               ☀️ {t.dayDiscussTitle(round)}
             </span>
             <span
@@ -222,7 +222,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
               type="button"
               data-testid="voting-console-confirm-btn"
               onClick={onResolveDayVoting}
-              className="px-2.5 py-1 rounded-xl bg-[#e86f24] hover:bg-[#f28139] border border-[#fbc266] text-[#fff8ed] font-extrabold text-[11px] flex items-center gap-1 cursor-pointer shadow"
+              className="px-2.5 py-1 rounded-xl bg-[#b84b10] hover:bg-[#9e3f0c] border border-[#fbc266] text-white font-extrabold text-[11px] flex items-center gap-1 cursor-pointer shadow"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
               <span>
@@ -298,7 +298,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                 <span className="font-extrabold text-[#fde7c3] whitespace-nowrap flex items-center gap-1">
                   <span>🔥</span>
                   <span>{lang === 'vi' ? 'Phiếu Trắng (Lửa Trại)' : 'Campfire Abstain'}</span>
-                  <span className="px-1 py-0.2 rounded bg-[#e86f24] text-[#fff8ed] font-mono text-[9px]">
+                  <span className="px-1 py-0.2 rounded bg-[#b84b10] text-white font-mono text-[9px]">
                     {mayorTally.abstainCount} {t.votesUnit}
                   </span>
                 </span>

@@ -49,15 +49,15 @@ const VOICE_I18N: Record<
   }
 > = {
   vi: {
-    dayChannel: '☀️ Kênh Voice Dân Làng (Thức Dậy)',
-    wolfChannel: '🐺 Kênh Voice Đàn Sói (Mật)',
-    nightAwakeChannel: '🔮 Mic Thức Đêm (Thì Thầm)',
-    ghostChannel: '👻 Kênh Voice Hồn Ma (Đã Chết)',
-    micOnBtn: 'Đang Bật Mic',
-    micOffBtn: 'Bật Mic Nói',
-    speakNowBtn: '🗣️ Phát Giọng Nói',
+    dayChannel: '🎙️ Mic Local / Thoại Nhanh',
+    wolfChannel: '🐺 Mic Local / Thoại Nhanh (Đàn Sói)',
+    nightAwakeChannel: '🔮 Mic Local / Thoại Nhanh (Đêm)',
+    ghostChannel: '👻 Kênh Hồn Ma (Đã Chết)',
+    micOnBtn: 'Mic Local BẬT',
+    micOffBtn: 'Mic Local',
+    speakNowBtn: '💬 Thoại Nhanh',
     speakingPrefix: 'Đang nói:',
-    listeningIdle: 'Kênh thoại đang mở — Nhấn Bật Mic để thảo luận...',
+    listeningIdle: 'Mic local & nút Thoại Nhanh (gửi câu mẫu vào chat)...',
     antiCheatGhostTag: 'Cách ly Hồn Ma',
     antiCheatEncryptedTag: 'Chống Gian Lận',
     ttsOn: 'Giọng đọc AI: BẬT',
@@ -84,15 +84,15 @@ const VOICE_I18N: Record<
     ],
   },
   en: {
-    dayChannel: '☀️ Village Voice Channel (Awake)',
-    wolfChannel: '🐺 Wolf Pack Secret Voice',
-    nightAwakeChannel: '🔮 Night Awake Mic (Whisper)',
-    ghostChannel: '👻 Ghost Voice Channel (Dead)',
-    micOnBtn: 'Mic LIVE',
-    micOffBtn: 'Turn Mic ON',
-    speakNowBtn: '🗣️ Push to Speak',
+    dayChannel: '🎙️ Local Mic / Quick Speech',
+    wolfChannel: '🐺 Local Mic / Quick Speech (Wolves)',
+    nightAwakeChannel: '🔮 Local Mic / Quick Speech (Night)',
+    ghostChannel: '👻 Ghost Channel (Dead)',
+    micOnBtn: 'Local Mic ON',
+    micOffBtn: 'Local Mic',
+    speakNowBtn: '💬 Quick Speech',
     speakingPrefix: 'Speaking:',
-    listeningIdle: 'Voice channel active — Turn on Mic to discuss...',
+    listeningIdle: 'Local mic meter & Quick Speech lines sent to chat...',
     antiCheatGhostTag: 'Ghost Isolated',
     antiCheatEncryptedTag: 'Anti-Cheat ON',
     ttsOn: 'Voice Audio: ON',
@@ -119,15 +119,15 @@ const VOICE_I18N: Record<
     ],
   },
   fr: {
-    dayChannel: '☀️ Canal Vocal du Village (Éveillé)',
-    wolfChannel: '🐺 Canal Vocal Meute de Loups',
-    nightAwakeChannel: '🔮 Micro Nuit (Chuchotement)',
-    ghostChannel: '👻 Canal Vocal Fantômes',
-    micOnBtn: 'Micro ACTIF',
-    micOffBtn: 'Activer Micro',
-    speakNowBtn: '🗣️ Parler',
+    dayChannel: '🎙️ Micro Local / Parole Rapide',
+    wolfChannel: '🐺 Micro Local / Meute de Loups',
+    nightAwakeChannel: '🔮 Micro Local / Nuit',
+    ghostChannel: '👻 Canal Fantômes',
+    micOnBtn: 'Micro Local ON',
+    micOffBtn: 'Micro Local',
+    speakNowBtn: '💬 Parole Rapide',
     speakingPrefix: 'Parle :',
-    listeningIdle: 'Canal vocal ouvert — Activez le micro pour parler...',
+    listeningIdle: 'Micro local et phrases rapides vers le chat...',
     antiCheatGhostTag: 'Fantômes Isolés',
     antiCheatEncryptedTag: 'Anti-Triche',
     ttsOn: 'Voix IA: ON',
@@ -149,15 +149,15 @@ const VOICE_I18N: Record<
     ],
   },
   es: {
-    dayChannel: '☀️ Voz de la Aldea (Despiertos)',
-    wolfChannel: '🐺 Voz Secreta de Lobos',
-    nightAwakeChannel: '🔮 Micrófono Nocturno',
-    ghostChannel: '👻 Canal de Voz Fantasma',
-    micOnBtn: 'Micro ACTIVO',
-    micOffBtn: 'Activar Micro',
-    speakNowBtn: '🗣️ Hablar Ahora',
+    dayChannel: '🎙️ Mic Local / Voz Rápida',
+    wolfChannel: '🐺 Mic Local / Lobos',
+    nightAwakeChannel: '🔮 Mic Local / Noche',
+    ghostChannel: '👻 Canal Fantasma',
+    micOnBtn: 'Mic Local ON',
+    micOffBtn: 'Mic Local',
+    speakNowBtn: '💬 Voz Rápida',
     speakingPrefix: 'Hablando:',
-    listeningIdle: 'Canal de voz abierto — Activa el micro para debatir...',
+    listeningIdle: 'Mic local y frases rápidas hacia el chat...',
     antiCheatGhostTag: 'Fantasmas Aislados',
     antiCheatEncryptedTag: 'Anti-Trampas',
     ttsOn: 'Voz IA: ON',
@@ -179,15 +179,15 @@ const VOICE_I18N: Record<
     ],
   },
   ja: {
-    dayChannel: '☀️ 村人ボイスチャット (起床中)',
-    wolfChannel: '🐺 人狼秘密ボイスチャンネル',
-    nightAwakeChannel: '🔮 夜間行動マイク (ささやき)',
-    ghostChannel: '👻 霊界ボイスチャンネル (幽霊)',
-    micOnBtn: 'マイク ON',
-    micOffBtn: 'マイクをONにする',
-    speakNowBtn: '🗣️ 発言する',
+    dayChannel: '🎙️ ローカルマイク / クイック発言',
+    wolfChannel: '🐺 ローカルマイク / 人狼',
+    nightAwakeChannel: '🔮 ローカルマイク / 夜間',
+    ghostChannel: '👻 霊界チャンネル (幽霊)',
+    micOnBtn: 'ローカルマイク ON',
+    micOffBtn: 'ローカルマイク',
+    speakNowBtn: '💬 クイック発言',
     speakingPrefix: '発言中:',
-    listeningIdle: 'ボイスチャット稼働中 — マイクONで議論に参加...',
+    listeningIdle: 'ローカルマイク計測 & チャット用クイック発言...',
     antiCheatGhostTag: '霊界隔離ON',
     antiCheatEncryptedTag: '不正防止ON',
     ttsOn: 'AI音声: ON',
@@ -355,22 +355,49 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
     };
   }, [isMicOn]);
 
-  // BUG-13: Filter activeSpeakers strictly on Night Wolf Channel so Villagers NEVER speak in Wolf channel
-  const filteredActiveSpeakers =
-    phase === 'night' && isWerewolf
-      ? activeSpeakers.filter((key) => {
-          const p = players.find((pl) => pl.id === key || pl.name === key);
-          return Boolean(
-            p &&
-              p.isAlive &&
-              p.id !== userPlayerId &&
-              (p.roleId === 'werewolf' || p.roleId === 'wolf_pup')
-          );
-        })
-      : activeSpeakers;
+  // Filter activeSpeakers strictly so:
+  // - Dead Ghost users NEVER see living players paired with Ghost quotes (anti-leak!)
+  // - Night Wolf Channel strictly isolates to OTHER living wolves
+  const filteredActiveSpeakers = !isUserAlive
+    ? activeSpeakers.filter((key) => {
+        const p = players.find((pl) => pl.id === key || pl.name === key);
+        return Boolean(p && !p.isAlive && p.id !== userPlayerId);
+      })
+    : phase === 'night' && isWerewolf
+    ? activeSpeakers.filter((key) => {
+        const p = players.find((pl) => pl.id === key || pl.name === key);
+        return Boolean(
+          p &&
+            p.isAlive &&
+            p.id !== userPlayerId &&
+            (p.roleId === 'werewolf' || p.roleId === 'wolf_pup')
+        );
+      })
+    : activeSpeakers;
 
   // Update live voice transcript snippet when filteredActiveSpeakers change
   useEffect(() => {
+    if (!isUserAlive) {
+      const deadOther =
+        filteredActiveSpeakers
+          .map((key) => players.find((p) => (p.id === key || p.name === key) && !p.isAlive))
+          .find((p): p is Player => Boolean(p && p.id !== userPlayerId)) ||
+        players.find((p) => !p.isAlive && p.id !== userPlayerId) ||
+        null;
+      if (!deadOther) {
+        setLiveTranscript(
+          lang === 'vi'
+            ? 'Kênh Hồn Ma đang im lặng — quan sát ván đấu...'
+            : 'Ghost channel silent — spectating the match...'
+        );
+        return;
+      }
+      const quote =
+        vt.sampleQuotesGhost[Math.floor(Math.random() * vt.sampleQuotesGhost.length)] ||
+        vt.sampleQuotesGhost[0];
+      setLiveTranscript(`👻 ${deadOther.name}: "${quote}"`);
+      return;
+    }
     if (isSoloWolfAtNight) {
       setLiveTranscript(
         lang === 'vi'
@@ -385,13 +412,9 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
     }
     const speakerKey = filteredActiveSpeakers[0];
     const speaker = players.find((p) => p.id === speakerKey || p.name === speakerKey);
-    if (!speaker) return;
+    if (!speaker || !speaker.isAlive) return;
 
-    const pool = !isUserAlive
-      ? vt.sampleQuotesGhost
-      : phase === 'night' && isWerewolf
-      ? vt.sampleQuotesWolf
-      : vt.sampleQuotesDay;
+    const pool = phase === 'night' && isWerewolf ? vt.sampleQuotesWolf : vt.sampleQuotesDay;
     const quote = pool[Math.floor(Math.random() * pool.length)] || pool[0];
     const line = `${speaker.name}: "${quote}"`;
     setLiveTranscript(line);
@@ -399,7 +422,7 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
     if (ttsEnabled && !sound.getMuted()) {
       sound.speakLocalized(quote, lang, { rate: 1.06, volume: 0.72 });
     }
-  }, [filteredActiveSpeakers.join(','), isSoloWolfAtNight, players, isUserAlive, phase, isWerewolf, vt, ttsEnabled, lang]);
+  }, [filteredActiveSpeakers.join(','), isSoloWolfAtNight, players, isUserAlive, userPlayerId, phase, isWerewolf, vt, ttsEnabled, lang]);
 
   const handlePushToSpeak = () => {
     if (!isUserAlive) return;

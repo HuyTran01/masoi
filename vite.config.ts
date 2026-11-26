@@ -27,6 +27,24 @@ export default defineConfig(() => {
         'firebase/firestore',
       ],
     },
+    build: {
+      // three.js core alone is ~574 kB minified (~144 kB gzip); all app & firebase chunks stay < 500 kB
+      chunkSizeWarningLimit: 600,
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              { name: 'three-vendor', test: /node_modules[\\/]three[\\/]/ },
+              { name: 'firebase-firestore', test: /node_modules[\\/]@?firebase[\\/]firestore/ },
+              { name: 'firebase-core', test: /node_modules[\\/](?:firebase|@firebase)[\\/]/ },
+              { name: 'react-vendor', test: /node_modules[\\/](?:react|react-dom|scheduler)[\\/]/ },
+              { name: 'icons-vendor', test: /node_modules[\\/]lucide-react[\\/]/ },
+              { name: 'village-3d', test: /src[\\/]components[\\/]WerewolfVillage3D/ },
+            ],
+          },
+        },
+      },
+    },
     server: {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.

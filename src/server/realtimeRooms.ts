@@ -30,7 +30,7 @@ export interface RealtimeChatMessage {
 
 export interface RealtimePropEvent {
   id: string;
-  propType: 'tomato' | 'rose' | 'egg';
+  propType: 'tomato' | 'rose' | 'egg' | 'water';
   fromPlayerId: string;
   targetPlayerId: string;
   timestamp: number;
@@ -88,12 +88,30 @@ export function normalizeRoomCode(raw: string): string {
     .slice(0, 16);
 }
 
+const IDLE_ROOM_TTL_MS = 2 * 60 * 60 * 1000;
+const MAX_ACTIVE_ROOMS = 500;
+
 /**
  * Pure, server-authoritative multiplayer room manager with strict room isolation,
  * host permissions, idempotent reconnects, and disconnect cleanup.
  */
 export class RealtimeRoomManager {
   private rooms = new Map<string, RealtimeRoomState>();
+
+  private pruneRooms(now = Date.now()) {
+    for (const [code, room] of this.rooms.entries()) {
+      if (now - room.updatedAt > IDLE_ROOM_TTL_MS) {
+        this.rooms.delete(code);
+      }
+    }
+    if (this.rooms.size >= MAX_ACTIVE_ROOMS) {
+      const oldest = Array.from(this.rooms.values()).sort((a, b) => a.updatedAt - b.updatedAt);
+      const excess = this.rooms.size - MAX_ACTIVE_ROOMS + 1;
+      for (let i = 0; i < excess && i < oldest.length; i++) {
+        this.rooms.delete(oldest[i].code);
+      }
+    }
+  }
 
   getRoom(rawCode: string): RealtimeRoomState | null {
     const code = normalizeRoomCode(rawCode);
@@ -164,6 +182,7 @@ export class RealtimeRoomManager {
         createdAt: now,
         updatedAt: now,
       };
+      this.pruneRooms(now);
       this.rooms.set(code, newRoom);
       return { ok: true, room: this.cloneRoom(newRoom), created: true };
     }
@@ -213,10 +232,30 @@ export class RealtimeRoomManager {
     return { ok: true, room: this.cloneRoom(existing), created: false };
   }
 
-  leaveRoom(rawCode: string, userId: string): { room: RealtimeRoomState | null; deleted: boolean } {
+  leaveRoom(
+    rawCode: string,
+    userId: string,
+    options?: { isDisconnect?: boolean }
+  ): { room: RealtimeRoomState | null; deleted: boolean } {
     const code = normalizeRoomCode(rawCode);
     const room = this.rooms.get(code);
     if (!room) return { room: null, deleted: false };
+
+    if (options?.isDisconnect && room.status === 'in_match') {
+      const participant = room.participants.find((p) => p.id === userId);
+      if (participant) {
+        participant.connected = false;
+      }
+      const connectedHumans = room.participants.filter(
+        (p) => !p.isBot && p.connected !== false
+      );
+      if (connectedHumans.length === 0) {
+        this.rooms.delete(code);
+        return { room: null, deleted: true };
+      }
+      room.updatedAt = Date.now();
+      return { room: this.cloneRoom(room), deleted: false };
+    }
 
     room.participants = room.participants.filter((p) => p.id !== userId);
     const remainingHumans = room.participants.filter((p) => !p.isBot);

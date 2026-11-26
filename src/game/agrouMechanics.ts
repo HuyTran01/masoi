@@ -75,7 +75,7 @@ export const AGROU_BIOMES: Record<AgrouMapBiome, AgrouBiomePalette> = {
       ja: '巨木の森キャンプ',
     },
     subtitle: {
-      vi: 'Rừng cổ thụ mờ sương, lều vải & ánh lửa trại ấm áp chuẩn Agrou',
+      vi: 'Rừng cổ thụ mờ sương, lều vải & ánh lửa ấm áp quanh lửa trại',
       en: 'Towering misty redwoods, canvas expedition tents & glowing campfire',
       fr: 'Séquoias brumeux, tentes d’expédition et feu de camp ardent',
       es: 'Secuoyas brumosas, tiendas de lona y cálida fogata',
@@ -497,7 +497,11 @@ export function tallyVotesWithMayor(
     }
   }
 
-  if (maxVotes === 0 || candidates.length === 0) {
+  if (
+    maxVotes === 0 ||
+    candidates.length === 0 ||
+    (abstainCount > 0 && abstainCount >= maxVotes)
+  ) {
     return {
       targetId: null,
       isTie: false,

@@ -41,6 +41,9 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={lang === 'vi' ? 'Tủ Đồ Nhân Vật & Bản Đồ 3D' : '3D Character Locker & Maps'}
       data-testid="agrou-avatar-locker-modal"
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 pointer-events-auto"
       style={{ backgroundColor: 'rgba(10, 7, 4, 0.72)' }}

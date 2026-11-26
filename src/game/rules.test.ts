@@ -6,6 +6,7 @@ import {
   run1000MatchExperienceCampaign,
 } from './qa1000TestSuite.ts';
 import {
+  applyDayLynch,
   assignPreferredRoleToDeck,
   buildVoteTallyEntries,
   castSingleDayVote,
@@ -13,6 +14,7 @@ import {
   computeFactionAliveCounts,
   fisherYatesShuffle,
   generateBalancedRoster,
+  getDyingWolfVictimsForWitch,
   resolveHunterShot,
   resolveNightActions,
   tallyVotes,
@@ -30,6 +32,7 @@ import {
   getHumanRoleWakeGuidance,
   computeAutoGMBotNightStepAction,
   computeSmartBotDayVotes,
+  pickSmartBotHunterTarget,
   extractChatVoteSignals,
   stripMarkdownAsterisks,
   buildBotDayDiscussionLines,
@@ -280,18 +283,23 @@ test('[All 13 Roles Wake Guidance] Verifies getHumanRoleWakeGuidance across all 
   }
 });
 
-test('[Human Turn Protection] prepareNightStartForHuman, shouldAutoAdvanceOnTimerZero, and random active role guarantee', () => {
-  const activeEveryNight = new Set<RoleId>(['werewolf', 'wolf_pup', 'seer', 'witch', 'bodyguard']);
+test('[Human Turn Protection] prepareNightStartForHuman, shouldAutoAdvanceOnTimerZero, and true balanced random role selection', () => {
+  const oldFiveRoleLock = new Set<RoleId>(['werewolf', 'wolf_pup', 'seer', 'witch', 'bodyguard']);
+  const seenRandomRoles12 = new Set<RoleId>();
   for (const count of [6, 8, 10, 12]) {
-    for (let i = 0; i < 25; i++) {
-      const deck = assignPreferredRoleToDeck(generateBalancedRoster(count), 'random');
-      assert.equal(
-        activeEveryNight.has(deck[0]),
-        true,
-        `Expected deck[0] to be an every-night active role for 'random', got ${deck[0]}`
-      );
+    for (let i = 0; i < 40; i++) {
+      const base = generateBalancedRoster(count);
+      const deck = assignPreferredRoleToDeck(base, 'random');
+      assert.equal(deck.length, count);
+      assert.deepEqual([...deck].sort(), [...base].sort(), 'random selection must preserve exact roster multiset');
+      if (count === 12) seenRandomRoles12.add(deck[0]);
     }
   }
+  const nonFiveRolesSeen = Array.from(seenRandomRoles12).filter((r) => !oldFiveRoleLock.has(r));
+  assert.ok(
+    nonFiveRolesSeen.length >= 3,
+    `Expected random selection on 12p roster to deal roles outside the old 5-role set, got ${Array.from(seenRandomRoles12).join(', ')}`
+  );
 
   // Verify prepareNightStartForHuman starts Night 1 directly at the human player's step and pre-simulates preceding bot steps
   const players: Player[] = [
@@ -362,25 +370,27 @@ test('[Deck Fairness & Dialogue] fisherYatesShuffle preserves multiset without m
     { id: 'b3', name: 'Gia Bảo', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true },
   ];
 
-  const day1Lines = buildBotDayDiscussionLines(players, [], 'vi', null, 1);
-  assert.ok(day1Lines.length >= 2);
-  for (const line of day1Lines) {
-    assert.equal(
-      line.text.includes('hơi im lặng từ đầu ván'),
-      false,
-      `Day 1 dialogue must not falsely accuse silence: ${line.text}`
-    );
+  const seenDay1Texts = new Set<string>();
+  const seenDay2Texts = new Set<string>();
+  for (let i = 0; i < 30; i++) {
+    const day1Lines = buildBotDayDiscussionLines(players, [], 'vi', null, 1);
+    assert.ok(day1Lines.length >= 2);
+    for (const line of day1Lines) {
+      assert.equal(
+        line.text.includes('hơi im lặng từ đầu ván'),
+        false,
+        `Day 1 dialogue must not falsely accuse silence: ${line.text}`
+      );
+      seenDay1Texts.add(line.text);
+    }
+    const day2Lines = buildBotDayDiscussionLines(players, ['Gia Bảo'], 'vi', null, 2);
+    assert.ok(day2Lines.length >= 2);
+    for (const line of day2Lines) {
+      seenDay2Texts.add(line.text);
+    }
   }
-  assert.ok(
-    day1Lines.some((l) => l.text.includes('Mới sáng ngày đầu tiên')),
-    'Day 1 dialogue should acknowledge Day 1 naturally'
-  );
-
-  const day2Lines = buildBotDayDiscussionLines(players, ['Gia Bảo'], 'vi', null, 2);
-  assert.ok(
-    day2Lines.some((l) => l.text.includes('Qua mấy lượt vừa rồi')),
-    'Day 2+ dialogue may reference previous rounds'
-  );
+  assert.ok(seenDay1Texts.size >= 5, `Expected varied Day 1 dialogue pool, got ${seenDay1Texts.size}`);
+  assert.ok(seenDay2Texts.size >= 5, `Expected varied Day 2+ dialogue pool, got ${seenDay2Texts.size}`);
 });
 
 test('[Authentic AI GM Announcements] Dawn/Dusk briefings announce casualties clearly without leaking secret night roles/causes', () => {
@@ -1014,4 +1024,342 @@ test('[QA Regression] BUG-16 & BUG-20: Offline QR matrix generator & markdown as
     stripMarkdownAsterisks('*Đêm xuống...* **Ma Sói** thức dậy!'),
     'Đêm xuống... Ma Sói thức dậy!'
   );
+});
+
+test('[P1-1] Elder Lynch Power-Seal prevents sealed Villager roles from waking and seals Doppelganger villager inheritance', () => {
+  const sealedSeer: Player = { id: 's1', name: 'Tiên Tri', avatar: '🔮', roleId: 'seer', isAlive: true, hasUsedPower: true };
+  const sealedGuard: Player = { id: 'g1', name: 'Bảo Vệ', avatar: '🛡️', roleId: 'bodyguard', isAlive: true, hasUsedPower: true };
+  const sealedWitch: Player = { id: 'w1', name: 'Phù Thủy', avatar: '🧪', roleId: 'witch', isAlive: true, hasUsedPower: true };
+  const wolf: Player = { id: 'wf1', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true };
+
+  assert.equal(isPlayerAwakeForNightStep(sealedSeer, 'seer', 2), false);
+  assert.equal(isPlayerAwakeForNightStep(sealedGuard, 'bodyguard', 2), false);
+  assert.equal(isPlayerAwakeForNightStep(sealedWitch, 'witch', 2), false);
+  assert.equal(isPlayerAwakeForNightStep(wolf, 'werewolf', 2), true);
+
+  const schedule = buildAutoGMNightSchedule([sealedSeer, sealedGuard, sealedWitch, wolf], 2, DEFAULT_TIMER_CONFIG, 's1');
+  assert.equal(findHumanNightStepIndex(schedule, sealedSeer, 2), -1, 'Sealed human Seer must not stall Night');
+
+  // Night inheritance under active elderSealActive seals villager power role (Witch), but NOT Werewolf
+  const nightRoster: Player[] = [
+    { id: 'wf', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
+    { id: 'wt', name: 'Phù Thủy', avatar: '🧪', roleId: 'witch', isAlive: true, hasUsedPower: true, hasUsedHeal: true, hasUsedPoison: true },
+    { id: 'dp', name: 'Nhân Bản', avatar: '🎭', roleId: 'doppelganger', isAlive: true, targetPlayerId: 'wt', targetRoleId: 'witch' },
+  ];
+  const nightOut = resolveNightActions(nightRoster, { wolfTargetId: 'wt' }, { roundNumber: 2, elderSealActive: true });
+  const inheritedWitch = nightOut.updatedPlayers.find((p) => p.id === 'dp')!;
+  assert.equal(inheritedWitch.roleId, 'witch');
+  assert.equal(inheritedWitch.hasUsedPower, true);
+  assert.equal(inheritedWitch.hasUsedHeal, true);
+  assert.equal(inheritedWitch.hasUsedPoison, true);
+
+  // Day lynch directly executing Elder while Doppelganger copies Elder's Lover (Seer) seals Doppelganger in same cascade
+  const dayRoster: Player[] = [
+    { id: 'el', name: 'Già Làng', avatar: '👑', roleId: 'elder', isAlive: true, elderLives: 2, loverId: 'se' },
+    { id: 'se', name: 'Tiên Tri', avatar: '🔮', roleId: 'seer', isAlive: true, loverId: 'el' },
+    { id: 'dp', name: 'Nhân Bản', avatar: '🎭', roleId: 'doppelganger', isAlive: true, targetPlayerId: 'se', targetRoleId: 'seer' },
+    { id: 'wf', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
+  ];
+  const lynchOut = applyDayLynch(dayRoster, 'el');
+  assert.equal(lynchOut.elderLynchedPenalty, true);
+  const dpAfterLynch = lynchOut.updatedPlayers.find((p) => p.id === 'dp')!;
+  assert.equal(dpAfterLynch.roleId, 'seer');
+  assert.equal(dpAfterLynch.hasUsedPower, true);
+  assert.equal(dpAfterLynch.hasUsedHeal, true);
+  assert.equal(dpAfterLynch.hasUsedPoison, true);
+
+  // Hunter shot inheritance under elderSealActive seals villager Hunter, does NOT seal Werewolf
+  const shotRoster: Player[] = [
+    { id: 'h1', name: 'Thợ Săn 1', avatar: '🎯', roleId: 'hunter', isAlive: false },
+    { id: 'h2', name: 'Thợ Săn 2', avatar: '🎯', roleId: 'hunter', isAlive: true, hasUsedPower: true },
+    { id: 'dp', name: 'Nhân Bản', avatar: '🎭', roleId: 'doppelganger', isAlive: true, targetPlayerId: 'h2', targetRoleId: 'hunter' },
+    { id: 'wf', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
+  ];
+  const shotOut = resolveHunterShot(shotRoster, 'h1', 'h2', { elderSealActive: true });
+  const dpAfterShot = shotOut.updatedPlayers.find((p) => p.id === 'dp')!;
+  assert.equal(dpAfterShot.roleId, 'hunter');
+  assert.equal(dpAfterShot.hasUsedPower, true);
+
+  const wolfDoppelRoster: Player[] = [
+    { id: 'h1', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: false },
+    { id: 'wf', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
+    { id: 'dp', name: 'Nhân Bản', avatar: '🎭', roleId: 'doppelganger', isAlive: true, targetPlayerId: 'wf', targetRoleId: 'werewolf' },
+  ];
+  const wolfShot = resolveHunterShot(wolfDoppelRoster, 'h1', 'wf', { elderSealActive: true });
+  const dpWolf = wolfShot.updatedPlayers.find((p) => p.id === 'dp')!;
+  assert.equal(dpWolf.roleId, 'werewolf');
+  assert.notEqual(dpWolf.hasUsedPower, true, 'Werewolf inheritance must NOT be sealed by Elder penalty');
+});
+
+test('[P1-3] getDyingWolfVictimsForWitch handles Wolf Pup frenzy 2nd victim cleanly with zero meta-leak and Bot Witch heals Victim #2', () => {
+  const players: Player[] = [
+    { id: 'u1', name: 'Bạn', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+    { id: 'w1', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true, isBot: true },
+    { id: 'bg', name: 'Bảo Vệ', avatar: '🛡️', roleId: 'bodyguard', isAlive: true, isBot: true },
+    { id: 'wt', name: 'Phù Thủy', avatar: '🧪', roleId: 'witch', isAlive: true, isBot: true, loverId: 'v2' },
+    { id: 'cu', name: 'Bán Sói', avatar: '🌓', roleId: 'cursed', isAlive: true, isBot: true },
+    { id: 'el2', name: 'Già 2 Mạng', avatar: '👑', roleId: 'elder', isAlive: true, isBot: true, elderLives: 2 },
+    { id: 'el1', name: 'Già 1 Mạng', avatar: '👑', roleId: 'elder', isAlive: true, isBot: true, elderLives: 1 },
+    { id: 'v2', name: 'Dân 2', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true, loverId: 'wt' },
+  ];
+
+  // Excludes guarded target, cursed, and 2-life elder; includes 1-life elder & frenzy 2nd victim
+  assert.deepEqual(
+    getDyingWolfVictimsForWitch(players, { wolfTargetId: 'u1', secondWolfTargetId: 'v2', guardTargetId: 'u1' }, true),
+    ['v2']
+  );
+  assert.deepEqual(
+    getDyingWolfVictimsForWitch(players, { wolfTargetId: 'cu', secondWolfTargetId: 'el2' }, true),
+    []
+  );
+  assert.deepEqual(
+    getDyingWolfVictimsForWitch(players, { wolfTargetId: 'el1', secondWolfTargetId: 'v2' }, true),
+    ['el1', 'v2']
+  );
+  // Without wolfPupTriggered, secondWolfTargetId is ignored
+  assert.deepEqual(
+    getDyingWolfVictimsForWitch(players, { wolfTargetId: 'u1', secondWolfTargetId: 'v2' }, false),
+    ['u1']
+  );
+  // Guard target who was protectedLastNight is NOT shielded -> still dying
+  const repeatGuarded = players.map((p) => (p.id === 'u1' ? { ...p, protectedLastNight: true } : p));
+  assert.deepEqual(
+    getDyingWolfVictimsForWitch(repeatGuarded, { wolfTargetId: 'u1', guardTargetId: 'u1' }, false),
+    ['u1']
+  );
+
+  // Bot Witch heals her Lover (Victim #2) during Wolf Pup frenzy
+  const botWitchAct = computeAutoGMBotNightStepAction(
+    'witch',
+    players,
+    { wolfTargetId: 'u1', secondWolfTargetId: 'v2' },
+    { round: 3, wolfPupFrenzy: true, humanPlayerId: 'u1' }
+  );
+  assert.equal(botWitchAct.witchHealTargetId, 'v2', 'Bot Witch must heal her Lover even when Lover is Wolf Pup Victim #2');
+
+  // Bot Witch heals herself when she is Victim #2
+  const botWitchSelfAct = computeAutoGMBotNightStepAction(
+    'witch',
+    players,
+    { wolfTargetId: 'u1', secondWolfTargetId: 'wt' },
+    { round: 3, wolfPupFrenzy: true, humanPlayerId: 'u1' }
+  );
+  assert.equal(botWitchSelfAct.witchHealTargetId, 'wt', 'Bot Witch must heal herself when she is Victim #2');
+});
+
+test('[P1-9 & P3-7] Multi-Hunter cascade preserves all triggeredHunterIds and cross-faction Lovers prevent premature Werewolf win', () => {
+  // Multi-Hunter night cascade (Hunter 1 & Hunter 2 are Lovers)
+  const nightHunters: Player[] = [
+    { id: 'w1', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
+    { id: 'h1', name: 'Thợ Săn 1', avatar: '🎯', roleId: 'hunter', isAlive: true, loverId: 'h2' },
+    { id: 'h2', name: 'Thợ Săn 2', avatar: '🎯', roleId: 'hunter', isAlive: true, loverId: 'h1' },
+    { id: 'v1', name: 'Dân', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+  ];
+  const nightRes = resolveNightActions(nightHunters, { wolfTargetId: 'h1' });
+  assert.equal(nightRes.result.triggeredHunterId, 'h1');
+  assert.deepEqual(nightRes.result.triggeredHunterIds, ['h1', 'h2']);
+
+  // Multi-Hunter day lynch cascade
+  const dayRes = applyDayLynch(nightHunters, 'h1');
+  assert.equal(dayRes.triggeredHunterId, 'h1');
+  assert.deepEqual(dayRes.triggeredHunterIds, ['h1', 'h2']);
+
+  // Multi-Hunter shot cascade (h0 shoots h1 whose Lover is h2)
+  const shotHunters: Player[] = [
+    { id: 'h0', name: 'Thợ Săn 0', avatar: '🎯', roleId: 'hunter', isAlive: false },
+    ...nightHunters,
+  ];
+  const shotRes = resolveHunterShot(shotHunters, 'h0', 'h1');
+  assert.equal(shotRes.triggeredHunterId, 'h1');
+  assert.deepEqual(shotRes.triggeredHunterIds, ['h1', 'h2']);
+
+  // P3-7: 3 alive = Wolf A + Villager B (Lovers) + Wolf C -> MUST NOT end as Werewolves win!
+  const threeAliveCrossLovers: Player[] = [
+    { id: 'wA', name: 'Sói A', avatar: '🐺', roleId: 'werewolf', isAlive: true, loverId: 'vB' },
+    { id: 'vB', name: 'Dân B', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, loverId: 'wA' },
+    { id: 'wC', name: 'Sói C', avatar: '🐺', roleId: 'werewolf', isAlive: true },
+  ];
+  const midWin = checkWinCondition(threeAliveCrossLovers);
+  assert.equal(midWin.isOver, false, 'Must NOT declare Werewolves win when cross-faction Lovers can still eliminate outsider Wolf C');
+
+  // Once Wolf C is lynched, Wolf A + Villager B Lovers immediately win!
+  const afterLynchC = threeAliveCrossLovers.map((p) => (p.id === 'wC' ? { ...p, isAlive: false } : p));
+  const finalWin = checkWinCondition(afterLynchC);
+  assert.equal(finalWin.isOver, true);
+  assert.equal(finalWin.winner, 'lovers');
+
+  // Same-faction Lovers (Wolf A + Wolf B Lovers + Villager C) -> Werewolves DO win immediately!
+  const sameFactionLovers: Player[] = [
+    { id: 'wA', name: 'Sói A', avatar: '🐺', roleId: 'werewolf', isAlive: true, loverId: 'wB' },
+    { id: 'wB', name: 'Sói B', avatar: '🐺', roleId: 'werewolf', isAlive: true, loverId: 'wA' },
+    { id: 'vC', name: 'Dân C', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+  ];
+  const wolfWin = checkWinCondition(sameFactionLovers);
+  assert.equal(wolfWin.isOver, true);
+  assert.equal(wolfWin.winner, 'werewolves');
+});
+
+test('[P1-11 & P2-12] Fair Bot AI: non-cheating Witch Poison, non-omniscient Traitor, subtle Seer, Dawn-scoped chat signals, & smart Bot Hunter', () => {
+  // 1. Bot Witch uses suspectedIds when provided and never peeks at roleId
+  const witchRoster: Player[] = [
+    { id: 'u1', name: 'Bạn', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+    { id: 'wt', name: 'Phù Thủy', avatar: '🧪', roleId: 'witch', isAlive: true, isBot: true },
+    { id: 'w1', name: 'Sói 1', avatar: '🐺', roleId: 'werewolf', isAlive: true, isBot: true },
+    { id: 'v1', name: 'Dân 1', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true },
+    { id: 'v2', name: 'Dân 2', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true },
+    { id: 'v3', name: 'Dân 3', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true },
+    { id: 'v4', name: 'Dân 4', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true },
+    { id: 'v5', name: 'Dân 5', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true },
+    { id: 'v6', name: 'Dân 6', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true },
+  ];
+  let poisonHitsSuspect = 0;
+  for (let i = 0; i < 60; i++) {
+    const act = computeAutoGMBotNightStepAction(
+      'witch',
+      witchRoster,
+      { wolfTargetId: 'v6' },
+      { round: 2, wolfPupFrenzy: false, humanPlayerId: 'u1', suspectedIds: ['v2'] }
+    );
+    if (act.witchPoisonTargetId) {
+      assert.equal(act.witchPoisonTargetId, 'v2', 'Bot Witch must honor suspectedIds instead of peeking at wolf roleId');
+      poisonHitsSuspect++;
+    }
+  }
+  assert.ok(poisonHitsSuspect > 0, 'Expected Bot Witch to poison at least once across 60 trials');
+
+  // Without suspectedIds, Bot Witch chooses uniformly (NOT ~50% wolf bias)
+  let wolfPoisons = 0;
+  let totalPoisons = 0;
+  for (let i = 0; i < 500; i++) {
+    const act = computeAutoGMBotNightStepAction(
+      'witch',
+      witchRoster,
+      { wolfTargetId: 'v6' },
+      { round: 2, wolfPupFrenzy: false, humanPlayerId: 'u1' }
+    );
+    if (act.witchPoisonTargetId) {
+      totalPoisons++;
+      if (act.witchPoisonTargetId === 'w1') wolfPoisons++;
+    }
+  }
+  assert.ok(totalPoisons >= 100);
+  assert.ok(
+    wolfPoisons / totalPoisons < 0.35,
+    `Expected uniform (~14%) poison rate on wolf without suspectedIds, got ${(wolfPoisons / totalPoisons * 100).toFixed(1)}%`
+  );
+
+  // 2. Bot Traitor is NOT omniscient about packmates on Day 1
+  const traitorRoster: Player[] = [
+    { id: 'u1', name: 'Bạn', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+    { id: 'tr', name: 'Phản Bội', avatar: '🗡️', roleId: 'traitor', isAlive: true, isBot: true },
+    { id: 'w1', name: 'Sói 1', avatar: '🐺', roleId: 'werewolf', isAlive: true, isBot: true },
+  ];
+  let traitorVotedWolf = false;
+  for (let i = 0; i < 50; i++) {
+    const votes = computeSmartBotDayVotes(traitorRoster);
+    const trVote = votes.find((v) => v.voterId === 'tr');
+    if (trVote?.targetId === 'w1') {
+      traitorVotedWolf = true;
+      break;
+    }
+  }
+  assert.equal(traitorVotedWolf, true, 'Bot Traitor must NOT secretly know and avoid voting wolves on Day 1');
+
+  // 3. Bot Seer Day 1 safe check does NOT scream crystal ball emoji; Wolves never accuse packmates; Tanner baits
+  const discussRoster: Player[] = [
+    { id: 'u1', name: 'Bạn', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+    { id: 'se', name: 'Bot Tiên Tri', avatar: '🔮', roleId: 'seer', isAlive: true, isBot: true },
+    { id: 'w1', name: 'Sói Một', avatar: '🐺', roleId: 'werewolf', isAlive: true, isBot: true },
+    { id: 'w2', name: 'Sói Hai', avatar: '🐺', roleId: 'wolf_pup', isAlive: true, isBot: true },
+    { id: 'tn', name: 'Chán Đời', avatar: '🎭', roleId: 'tanner', isAlive: true, isBot: true },
+  ];
+  const day1SafeLines = buildBotDayDiscussionLines(
+    discussRoster,
+    [],
+    'vi',
+    { playerId: 'u1', roleId: 'villager', isWerewolf: false },
+    1
+  );
+  const seerLineDay1 = day1SafeLines.find((l) => l.senderId === 'se');
+  assert.ok(seerLineDay1);
+  assert.equal(seerLineDay1.text.includes('🔮'), false, 'Bot Seer Day 1 safe check must not leak role with 🔮 prefix');
+
+  // Wolves never accuse their packmate in random Day 2+ lines
+  const wolfPackRoster: Player[] = [
+    { id: 'u1', name: 'Bạn', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+    { id: 'w1', name: 'Sói Một', avatar: '🐺', roleId: 'werewolf', isAlive: true, isBot: true },
+    { id: 'w2', name: 'Sói Hai', avatar: '🐺', roleId: 'wolf_pup', isAlive: true, isBot: true },
+  ];
+  for (let i = 0; i < 40; i++) {
+    const d2Lines = buildBotDayDiscussionLines(wolfPackRoster, ['Ai Đó'], 'vi', null, 2);
+    for (const l of d2Lines) {
+      if (l.senderId === 'w1') assert.equal(l.text.includes('Sói Hai'), false, `Wolf w1 accused packmate w2: ${l.text}`);
+      if (l.senderId === 'w2') assert.equal(l.text.includes('Sói Một'), false, `Wolf w2 accused packmate w1: ${l.text}`);
+    }
+  }
+
+  // Tanner speaks a defensive/baiting line
+  const tannerRoster: Player[] = [
+    { id: 'u1', name: 'Bạn', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+    { id: 'tn', name: 'Chán Đời', avatar: '🎭', roleId: 'tanner', isAlive: true, isBot: true },
+  ];
+  const tannerLines = buildBotDayDiscussionLines(tannerRoster, [], 'vi', null, 1);
+  assert.equal(tannerLines.length, 1);
+  assert.equal(tannerLines[0].senderId, 'tn');
+  assert.equal(tannerLines[0].text.includes('Bạn'), false, 'Tanner bait line should draw heat onto self, not redirect');
+
+  // 4. extractChatVoteSignals scopes after latest Dawn, ignores question prompts, and captures named silence accusations
+  const chatPlayers: Player[] = [
+    { id: 'u1', name: 'Bạn', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+    { id: 'b1', name: 'Đức Huy', avatar: '🐺', roleId: 'werewolf', isAlive: true, isBot: true },
+    { id: 'b2', name: 'Thảo My', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true },
+    { id: 'b3', name: 'Minh Hoàng', avatar: '🔮', roleId: 'seer', isAlive: true, isBot: true },
+  ];
+  const scopedSignals = extractChatVoteSignals(
+    [
+      // Stale Day 1 accusation BEFORE Day 2 dawn -> MUST be ignored!
+      { id: 'old_1', senderId: 'b3', text: 'Tôi nghi Đức Huy là Sói, treo cổ Đức Huy!' },
+      { id: 'sys_dawn_2', senderId: 'sys', text: '☀️ [Sáng Ngày 2] Trời đã sáng!', isSystem: true },
+      // Question prompt -> MUST NOT mark Thảo My as accused!
+      { id: 'cur_1', senderId: 'b3', text: 'Mới sáng ngày đầu tiên, Thảo My, bạn nghi ngờ ai nhất?' },
+      // Named silent accusation -> MUST add Đức Huy directly to suspectsByVoter.b2!
+      { id: 'cur_2', senderId: 'b2', text: 'Qua mấy lượt vừa rồi, tôi thấy Đức Huy hơi im lặng — mọi người nghĩ sao?' },
+    ],
+    chatPlayers
+  );
+  assert.equal(scopedSignals.suspectsByVoter.b3, undefined, 'Stale pre-dawn accusation & question prompt must not mark suspects');
+  assert.deepEqual(scopedSignals.suspectsByVoter.b2, ['b1'], 'Named silent accusation must directly suspect the named player');
+
+  // 5. pickSmartBotHunterTarget respects knownWolfIds, suspects, allies, and loverId
+  const hunter: Player = { id: 'h1', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: false, isBot: true, loverId: 'b2' };
+  const hunterPool: Player[] = [
+    hunter,
+    { id: 'b1', name: 'Đức Huy', avatar: '🐺', roleId: 'werewolf', isAlive: true, isBot: true },
+    { id: 'b2', name: 'Thảo My', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true, loverId: 'h1' },
+    { id: 'b3', name: 'Minh Hoàng', avatar: '🔮', roleId: 'seer', isAlive: true, isBot: true },
+    { id: 'b4', name: 'Tuấn Kiệt', avatar: '🛡️', roleId: 'bodyguard', isAlive: false, isBot: true },
+  ];
+  assert.equal(pickSmartBotHunterTarget(hunterPool, hunter, ['b1'], null)?.id, 'b1');
+  assert.equal(
+    pickSmartBotHunterTarget(hunterPool, hunter, [], {
+      suspectsByVoter: { h1: ['b3'] },
+      alliesByVoter: {},
+      suspectsSilentVoters: [],
+      silentPlayerIds: [],
+    })?.id,
+    'b3'
+  );
+  // Avoids Lover (b2) and ally (b3) and dead (b4) -> picks b1
+  assert.equal(
+    pickSmartBotHunterTarget(hunterPool, hunter, [], {
+      suspectsByVoter: {},
+      alliesByVoter: { h1: ['b3'] },
+      suspectsSilentVoters: [],
+      silentPlayerIds: [],
+    })?.id,
+    'b1'
+  );
+  // If only Lover is alive, falls back to Lover cleanly
+  const onlyLoverAlive = hunterPool.map((p) => (p.id === 'b2' ? p : { ...p, isAlive: false }));
+  assert.equal(pickSmartBotHunterTarget(onlyLoverAlive, hunter)?.id, 'b2');
 });
