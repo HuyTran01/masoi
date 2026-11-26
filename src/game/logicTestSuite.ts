@@ -92,18 +92,18 @@ export const LOGIC_TEST_SCENARIOS: LogicTestScenario[] = [
     category: 'Roster & Setup',
     title: 'Thứ tự gọi thức dậy ban đêm (Wake Order)',
     description:
-      'Đảm bảo Nhân Bản (5) -> Cupid (10) -> Ma Sói (20) -> Sói Con (22) -> Phù Thủy (30) -> Tiên Tri (40) -> Bảo Vệ (50).',
-    expectedSummary: 'doppelganger -> cupid -> werewolf -> wolf_pup -> witch -> seer -> bodyguard',
+      'Đảm bảo Nhân Bản (5) -> Cupid (10) -> Bảo Vệ (15) -> Ma Sói (20) -> Sói Con (22) -> Phù Thủy (30) -> Tiên Tri (40).',
+    expectedSummary: 'doppelganger -> cupid -> bodyguard -> werewolf -> wolf_pup -> witch -> seer',
     run: () => {
       const order = getNightCallOrder().map((r) => r.id);
       const expected = [
         'doppelganger',
         'cupid',
+        'bodyguard',
         'werewolf',
         'wolf_pup',
         'witch',
         'seer',
-        'bodyguard',
       ];
       const passed = JSON.stringify(order) === JSON.stringify(expected);
       return {

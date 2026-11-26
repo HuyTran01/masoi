@@ -25,6 +25,7 @@ import {
 import { UI_TEXT } from '../utils/i18n';
 import { sound } from '../utils/sound';
 import { AccountModalTab, UserProfileData } from './SocialLoginModal';
+import { BIOME_DESCRIPTIONS, BiomeThumbSvg } from './BiomeThumbSvg';
 
 interface TitleScreenOverlayProps {
   lang: Language;
@@ -49,6 +50,7 @@ interface TitleScreenOverlayProps {
   onOpenLobbyModal: (mode: 'online' | 'gm') => void;
   onStartAIPractice: () => void;
   onStartOnboardingTour: () => void;
+  onOpenRulesEncyclopedia?: () => void;
 }
 
 export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
@@ -74,8 +76,10 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
   onOpenLobbyModal,
   onStartAIPractice,
   onStartOnboardingTour,
+  onOpenRulesEncyclopedia,
 }) => {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [guideMenuOpen, setGuideMenuOpen] = useState(false);
   const t = UI_TEXT[lang];
 
   const isLoggedIn = Boolean(
@@ -165,15 +169,65 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
             <Volume2 className={`w-4 h-4 ${isMuted ? 'text-[#8c7258]' : 'text-[#5cb85c]'}`} />
           </button>
 
-          <button
-            type="button"
-            data-testid="open-onboarding-tour-btn"
-            onClick={onStartOnboardingTour}
-            className="px-2.5 sm:px-3 py-2 rounded-xl agrou-wood-panel hover:border-[#e89c3e] text-xs font-bold text-[#fde7c3] flex items-center gap-1.5 cursor-pointer"
-          >
-            <HelpCircle className="w-4 h-4 text-[#f5b82e] shrink-0" />
-            <span className="hidden sm:inline">{t.newbieGuide}</span>
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              data-testid="open-onboarding-tour-btn"
+              aria-expanded={guideMenuOpen}
+              title={t.newbieGuide}
+              aria-label={t.newbieGuide}
+              onClick={() => {
+                sound.playCardFlip();
+                setGuideMenuOpen((v) => !v);
+              }}
+              className="px-2.5 sm:px-3 py-2 rounded-xl agrou-wood-panel hover:border-[#e89c3e] text-xs font-bold text-[#fde7c3] flex items-center gap-1.5 cursor-pointer"
+            >
+              <HelpCircle className="w-4 h-4 text-[#f5b82e] shrink-0" />
+              <span className="hidden sm:inline">{t.newbieGuide}</span>
+            </button>
+
+            {guideMenuOpen && (
+              <div
+                data-testid="guide-options-menu"
+                className="absolute right-0 mt-1.5 w-64 agrou-wood-panel !border-[#e89c3e] rounded-2xl p-2 shadow-2xl space-y-1.5 z-50"
+              >
+                <button
+                  type="button"
+                  data-testid="guide-option-rules-btn"
+                  onClick={() => {
+                    sound.playCardFlip();
+                    setGuideMenuOpen(false);
+                    if (onOpenRulesEncyclopedia) {
+                      onOpenRulesEncyclopedia();
+                    } else {
+                      onStartOnboardingTour();
+                    }
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl bg-[#2a1c12] hover:bg-[#3d2818] border border-[#785334] text-xs font-extrabold text-[#fde7c3] cursor-pointer"
+                >
+                  <div>📖 {lang === 'vi' ? 'Xem nhanh Luật & 13 Vai Trò' : 'Quick Rules & 13 Roles'}</div>
+                  <div className="text-[11px] font-normal text-[#d6bfa2] mt-0.5">
+                    {lang === 'vi' ? 'Đọc kỹ năng từng vai, không cần vào trận' : 'Read role abilities without starting a match'}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  data-testid="guide-option-tutorial-btn"
+                  onClick={() => {
+                    sound.playCardFlip();
+                    setGuideMenuOpen(false);
+                    onStartOnboardingTour();
+                  }}
+                  className="w-full text-left px-3 py-2 rounded-xl bg-[#422614] hover:bg-[#57321a] border border-[#e89c3e]/80 text-xs font-extrabold text-[#fff4de] cursor-pointer"
+                >
+                  <div>🧭 {lang === 'vi' ? 'Chơi Tutorial hướng dẫn 5 bước' : 'Play 5-Step Interactive Tutorial'}</div>
+                  <div className="text-[11px] font-normal text-[#fde7c3]/85 mt-0.5">
+                    {lang === 'vi' ? 'Vào bàn tập thực hành trực tiếp cùng AI' : 'Jump into a guided live practice table'}
+                  </div>
+                </button>
+              </div>
+            )}
+          </div>
 
           <select
             value={lang}
@@ -289,12 +343,17 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
 
         {!isTitleMenuMinimized && (
           <>
-            {/* Quick 3D Biome Selector Strip (Live 3D Switching right on the Title Screen!) */}
-            <div className="flex items-center justify-between gap-2 bg-[#1a110a]/90 border border-[#6b4a2e]/70 rounded-xl px-2.5 py-1.5">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#d9a65d] shrink-0">
-                🗺️ {lang === 'vi' ? 'Bản đồ 3D:' : '3D Map:'}
-              </span>
-              <div className="flex items-center gap-1 overflow-x-auto">
+            {/* Quick 3D Biome Selector Strip with Preview Thumbnails & Descriptions (BUG-25) */}
+            <div className="bg-[#1a110a]/90 border border-[#6b4a2e]/70 rounded-xl p-2 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-[#f5b82e]">
+                  🗺️ {lang === 'vi' ? 'Bản đồ 3D quanh lửa trại:' : '3D Campfire Map:'}
+                </span>
+                <span className="text-[11px] text-[#e6d5b8] truncate hidden sm:inline">
+                  {BIOME_DESCRIPTIONS[avatarConfig.mapBiome][lang]}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
                 {(['forest', 'frostpeak', 'autumn'] as AgrouMapBiome[]).map((bId) => {
                   const biome = AGROU_BIOMES[bId];
                   const active = avatarConfig.mapBiome === bId;
@@ -303,17 +362,26 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                       key={bId}
                       type="button"
                       data-testid={`title-biome-btn-${bId}`}
+                      title={BIOME_DESCRIPTIONS[bId][lang]}
                       onClick={() => {
                         sound.playCardFlip();
                         onChangeBiome(bId);
                       }}
-                      className={`px-2 py-1 rounded-lg text-[11px] font-extrabold border whitespace-nowrap cursor-pointer transition-colors ${
+                      className={`p-1.5 rounded-xl border text-left flex items-center gap-1.5 cursor-pointer transition-colors min-w-0 ${
                         active
-                          ? 'bg-[#e86f24] text-[#fff8ed] border-[#fbc266]'
-                          : 'bg-[#2a1c12] text-[#d6bfa2] border-[#6b4a2e] hover:border-[#d9973b]'
+                          ? 'bg-[#e86f24]/25 text-[#fff8ed] border-[#fbc266]'
+                          : 'bg-[#2a1c12] text-[#e6d5b8] border-[#6b4a2e] hover:border-[#d9973b]'
                       }`}
                     >
-                      {biome.icon} {biome.name[lang]}
+                      <BiomeThumbSvg biome={bId} className="w-9 h-6 rounded border border-white/15 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-[11px] font-extrabold truncate leading-tight">
+                          {biome.icon} {biome.name[lang]}
+                        </div>
+                        <div className="text-[9px] text-[#d6bfa2] truncate hidden md:block">
+                          {BIOME_DESCRIPTIONS[bId][lang]}
+                        </div>
+                      </div>
                     </button>
                   );
                 })}

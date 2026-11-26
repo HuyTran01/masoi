@@ -233,6 +233,14 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
   };
   const isWerewolf =
     userPlayer?.roleId === 'werewolf' || userPlayer?.roleId === 'wolf_pup';
+  const otherLivingWolfTeammates = players.filter(
+    (p) =>
+      p.isAlive &&
+      p.id !== userPlayerId &&
+      (p.roleId === 'werewolf' || p.roleId === 'wolf_pup')
+  );
+  const isSoloWolfAtNight =
+    isUserAlive && phase === 'night' && isWerewolf && otherLivingWolfTeammates.length === 0;
 
   const [micLevel, setMicLevel] = useState<number>(0);
   const [liveTranscript, setLiveTranscript] = useState<string>('');
@@ -347,13 +355,35 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
     };
   }, [isMicOn]);
 
-  // Update live voice transcript snippet when activeSpeakers change
+  // BUG-13: Filter activeSpeakers strictly on Night Wolf Channel so Villagers NEVER speak in Wolf channel
+  const filteredActiveSpeakers =
+    phase === 'night' && isWerewolf
+      ? activeSpeakers.filter((key) => {
+          const p = players.find((pl) => pl.id === key || pl.name === key);
+          return Boolean(
+            p &&
+              p.isAlive &&
+              p.id !== userPlayerId &&
+              (p.roleId === 'werewolf' || p.roleId === 'wolf_pup')
+          );
+        })
+      : activeSpeakers;
+
+  // Update live voice transcript snippet when filteredActiveSpeakers change
   useEffect(() => {
-    if (activeSpeakers.length === 0) {
+    if (isSoloWolfAtNight) {
+      setLiveTranscript(
+        lang === 'vi'
+          ? 'Bạn là Sói duy nhất đêm nay — hãy tự chọn mục tiêu.'
+          : 'You are the lone Wolf tonight — choose your target.'
+      );
+      return;
+    }
+    if (filteredActiveSpeakers.length === 0) {
       setLiveTranscript('');
       return;
     }
-    const speakerKey = activeSpeakers[0];
+    const speakerKey = filteredActiveSpeakers[0];
     const speaker = players.find((p) => p.id === speakerKey || p.name === speakerKey);
     if (!speaker) return;
 
@@ -369,7 +399,7 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
     if (ttsEnabled && !sound.getMuted()) {
       sound.speakLocalized(quote, lang, { rate: 1.06, volume: 0.72 });
     }
-  }, [activeSpeakers, players, isUserAlive, phase, isWerewolf, vt, ttsEnabled, lang]);
+  }, [filteredActiveSpeakers.join(','), isSoloWolfAtNight, players, isUserAlive, phase, isWerewolf, vt, ttsEnabled, lang]);
 
   const handlePushToSpeak = () => {
     if (!isUserAlive) return;
@@ -386,7 +416,7 @@ export const VoiceChatBar: React.FC<VoiceChatBarProps> = ({
     }
   };
 
-  const speakerNames = activeSpeakers
+  const speakerNames = filteredActiveSpeakers
     .map((key) => players.find((p) => p.id === key || p.name === key)?.name || key)
     .filter(Boolean) as string[];
 

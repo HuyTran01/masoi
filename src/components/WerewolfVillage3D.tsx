@@ -1,6 +1,7 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { Village2DFallback } from './Village2DFallback';
 import {
   Player,
   Phase,
@@ -185,6 +186,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
   const campfireLabelRef = useRef<HTMLDivElement | null>(null);
   const processedPropsRef = useRef<Set<string>>(new Set());
   const processedEmotesRef = useRef<Set<string>>(new Set());
+  const [webglUnavailable, setWebglUnavailable] = useState(false);
 
   // Mutable ref holding latest props so 60Hz WebGL loop never tears down on React state changes
   const stateRef = useRef({
@@ -436,18 +438,19 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       }
     })();
 
-    // 2. Initialize Renderer, Scene, Camera (Graceful WebGL fallback)
+    // 2. Initialize Renderer, Scene, Camera (Graceful WebGL -> 2D Campfire fallback for BUG-04/BUG-06)
     let renderer: THREE.WebGLRenderer;
     try {
       renderer = new THREE.WebGLRenderer({
         antialias: !isSoftwareGl,
-        powerPreference: 'high-performance',
+        powerPreference: isSoftwareGl ? 'default' : 'high-performance',
       });
     } catch {
       try {
         renderer = new THREE.WebGLRenderer({ antialias: false });
       } catch (err) {
-        console.warn('WebGLRenderer unavailable:', err);
+        console.warn('WebGLRenderer unavailable, switching to 2D Campfire mode:', err);
+        setWebglUnavailable(true);
         return;
       }
     }
@@ -464,6 +467,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     container.innerHTML = '';
     container.appendChild(renderer.domElement);
 
+    const onWebglContextLost = (e: Event) => {
+      e.preventDefault();
+      console.warn('WebGL context lost — activating 2D Campfire fallback');
+      setWebglUnavailable(true);
+    };
+    renderer.domElement.addEventListener('webglcontextlost', onWebglContextLost, false);
+
     const scene = new THREE.Scene();
     const initialBiome = stateRef.current.mapBiome || 'forest';
     const initialSky = AGROU_BIOMES[initialBiome].daySky;
@@ -475,11 +485,17 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     camera.lookAt(0, 1.25, -1.2);
     scene.add(camera);
 
-    // Subtle Studio Environment Reflection Map for Metallic Armor Pauldrons & Buckles
-    const pmremGenerator = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-    scene.environmentIntensity = 0.42;
-    pmremGenerator.dispose();
+    // Subtle Studio Environment Reflection Map (Skipped in software GL to prevent tab OOM/crash on rapid transitions)
+    if (!isSoftwareGl) {
+      try {
+        const pmremGenerator = new THREE.PMREMGenerator(renderer);
+        scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+        scene.environmentIntensity = 0.42;
+        pmremGenerator.dispose();
+      } catch {
+        // Skip reflection env map safely if unsupported
+      }
+    }
 
     // 3. First-Person Viewmodel Rig (Hands + Village Lantern + Claws / Held Prop)
     const fpvRigGroup = new THREE.Group();
@@ -1358,19 +1374,28 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     let lastLabelSync = 0;
 
     function afterDraw(cb: () => void) {
-      const gl = renderer.getContext() as WebGL2RenderingContext;
-      const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-      gl.flush();
-      const poll = () => {
-        const state = sync && gl.getSyncParameter(sync, gl.SYNC_STATUS);
-        if (state === gl.UNSIGNALED) {
-          frameId = window.setTimeout(poll, 5);
-        } else {
-          if (sync) gl.deleteSync(sync);
-          frameId = window.setTimeout(cb, 80);
+      try {
+        const gl = renderer.getContext() as WebGL2RenderingContext;
+        if (!gl || gl.isContextLost?.() || typeof gl.fenceSync !== 'function') {
+          frameId = window.setTimeout(cb, 90);
+          return;
         }
-      };
-      frameId = window.setTimeout(poll, 5);
+        const sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+        gl.flush();
+        const poll = () => {
+          if (gl.isContextLost?.()) return;
+          const state = sync && gl.getSyncParameter(sync, gl.SYNC_STATUS);
+          if (state === gl.UNSIGNALED) {
+            frameId = window.setTimeout(poll, 8);
+          } else {
+            if (sync) gl.deleteSync(sync);
+            frameId = window.setTimeout(cb, 85);
+          }
+        };
+        frameId = window.setTimeout(poll, 8);
+      } catch {
+        frameId = window.setTimeout(cb, 90);
+      }
     }
 
     function tick() {
@@ -2899,6 +2924,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       document.removeEventListener('pointerlockchange', onPointerLockChange);
       releaseCanvasPointerLock();
       domElem.removeEventListener('wheel', onWheel);
+      domElem.removeEventListener('webglcontextlost', onWebglContextLost);
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       delete (window as unknown as Record<string, unknown>).__VILLAGE_DEBUG__;
@@ -2915,6 +2941,28 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       renderer.dispose();
     };
   }, []);
+
+  if (webglUnavailable) {
+    return (
+      <Village2DFallback
+        players={players}
+        userPlayerId={userPlayerId}
+        phase={phase}
+        lang={lang}
+        isTitleScreen={isTitleScreen}
+        isPlayerAwakeAtNight={isPlayerAwakeAtNight}
+        selectedTargetId={selectedTargetId}
+        secondaryTargetId={secondaryTargetId}
+        votesMap={votesMap}
+        activeSpeakers={activeSpeakers}
+        revealAllRoles={revealAllRoles}
+        mapBiome={mapBiome}
+        mayorId={mayorId}
+        onSelectPlayer={onSelectPlayer}
+        onVoteCampfireAbstain={onVoteCampfireAbstain}
+      />
+    );
+  }
 
   const me = players.find((p) => p.id === userPlayerId);
   const nowRender = Date.now();

@@ -287,10 +287,16 @@ class SoundEngine {
   private bgmMode: 'night' | 'day' | 'lobby' = 'lobby';
   private bgmInterval: number | null = null;
   private bgmStepCounter: number = 0;
+  private ttsQueueTimer: number | null = null;
+  private lastTtsAt: number = 0;
 
   constructor() {
     if (typeof window !== 'undefined') {
-      this.isMuted = localStorage.getItem('werewolf_muted') === 'true';
+      try {
+        this.isMuted = localStorage.getItem('werewolf_muted') === 'true';
+      } catch {
+        this.isMuted = false;
+      }
       // Pre-warm speechSynthesis voice list if available
       if ('speechSynthesis' in window) {
         try {
@@ -339,16 +345,31 @@ class SoundEngine {
     return buffer;
   }
 
+  public cancelSpeech() {
+    if (typeof window === 'undefined') return;
+    if (this.ttsQueueTimer !== null) {
+      window.clearTimeout(this.ttsQueueTimer);
+      this.ttsQueueTimer = null;
+    }
+    if ('speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   public toggleMute(): boolean {
     this.isMuted = !this.isMuted;
     if (typeof window !== 'undefined') {
-      localStorage.setItem('werewolf_muted', String(this.isMuted));
-      if (this.isMuted && 'speechSynthesis' in window) {
-        try {
-          window.speechSynthesis.cancel();
-        } catch {
-          // ignore
-        }
+      try {
+        localStorage.setItem('werewolf_muted', String(this.isMuted));
+      } catch {
+        // ignore
+      }
+      if (this.isMuted) {
+        this.cancelSpeech();
       }
     }
     return this.isMuted;
@@ -360,8 +381,8 @@ class SoundEngine {
 
   /**
    * Speaks localized text ONLY if the user's browser/OS actually has a voice installed
-   * for `lang`. Never falls back to an English voice when `lang === 'vi'` (fixes the
-   * bug where PC browsers read Vietnamese text with an English accent).
+   * for `lang`. Uses a debounced, serialized queue so rapid phase transitions never
+   * overload Chromium's speechSynthesis engine (BUG-04).
    */
   public speakLocalized(
     text: string,
@@ -376,18 +397,34 @@ class SoundEngine {
       const voices = window.speechSynthesis.getVoices();
       const matchedVoice = selectBestVoiceForLanguage(voices, lang);
       if (!matchedVoice) {
-        // Do NOT speak with a mismatched OS default English voice!
         return false;
       }
 
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.voice = matchedVoice;
-      utter.lang = matchedVoice.lang;
-      utter.pitch = options?.pitch ?? 1.0;
-      utter.rate = options?.rate ?? 1.0;
-      utter.volume = options?.volume ?? 0.85;
-      window.speechSynthesis.speak(utter);
+      if (this.ttsQueueTimer !== null) {
+        window.clearTimeout(this.ttsQueueTimer);
+        this.ttsQueueTimer = null;
+      }
+
+      const now = Date.now();
+      const delayMs = now - this.lastTtsAt < 280 ? 180 : 60;
+      this.lastTtsAt = now;
+
+      this.ttsQueueTimer = window.setTimeout(() => {
+        this.ttsQueueTimer = null;
+        if (this.isMuted || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+        try {
+          window.speechSynthesis.cancel();
+          const utter = new SpeechSynthesisUtterance(text);
+          utter.voice = matchedVoice;
+          utter.lang = matchedVoice.lang;
+          utter.pitch = options?.pitch ?? 1.0;
+          utter.rate = options?.rate ?? 1.0;
+          utter.volume = options?.volume ?? 0.85;
+          window.speechSynthesis.speak(utter);
+        } catch {
+          // ignore speech synthesis runtime errors
+        }
+      }, delayMs);
       return true;
     } catch {
       return false;

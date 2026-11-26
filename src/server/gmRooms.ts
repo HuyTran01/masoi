@@ -21,6 +21,7 @@ export interface GMPlayerSeat {
 
 export interface GMRoomHostState {
   code: string;
+  matchId: string;
   hostId: string;
   deckMode: GMDeckMode;
   status: GMRoomStatus;
@@ -37,6 +38,7 @@ export interface GMRoomHostState {
  */
 export interface GMRoomPlayerView {
   code: string;
+  matchId: string;
   deckMode: GMDeckMode;
   status: GMRoomStatus;
   round: number;
@@ -63,6 +65,7 @@ export interface GMRoomPlayerView {
 
 export interface GMRoomSummary {
   code: string;
+  matchId: string;
   deckMode: GMDeckMode;
   status: GMRoomStatus;
   playerCount: number;
@@ -113,6 +116,7 @@ export class GMRoomManager {
     for (const room of this.rooms.values()) {
       list.push({
         code: room.code,
+        matchId: room.matchId,
         deckMode: room.deckMode,
         status: room.status,
         playerCount: room.seats.length,
@@ -141,6 +145,7 @@ export class GMRoomManager {
       status?: GMRoomStatus;
       round?: number;
       phase?: 'setup' | 'night' | 'day';
+      resetMatch?: boolean;
       seats?: Array<{
         id?: string;
         name: string;
@@ -195,6 +200,11 @@ export class GMRoomManager {
           : 'night'
         : 'setup';
 
+    const isReset = Boolean(payload.resetMatch);
+    const nextMatchId = isReset || !existing?.matchId
+      ? `gm_${now}_${Math.random().toString(36).slice(2, 7)}`
+      : existing.matchId;
+
     let nextSeats: GMPlayerSeat[];
     if (Array.isArray(payload.seats) && payload.seats.length > 0) {
       const existingById = new Map<string, GMPlayerSeat>(
@@ -204,8 +214,9 @@ export class GMRoomManager {
         const seatId = String(incoming.id || `p_${idx + 1}`).slice(0, 48);
         const prev = existingById.get(seatId);
 
-        // Preserve player self-entered physical card if host sent a stale unassigned payload
+        // On explicit resetMatch, clear previous self-input roles so players start fresh for the new round
         const isStaleUnassignedOverSelfInput =
+          !isReset &&
           Boolean(
             prev &&
               prev.roleSource === 'self_input' &&
@@ -220,14 +231,17 @@ export class GMRoomManager {
           ? null
           : isValidRoleId(incoming.roleId)
           ? incoming.roleId
+          : isReset
+          ? null
           : prev?.roleId ?? null;
 
         let roleSource: GMRoleSource = isStaleUnassignedOverSelfInput
           ? 'self_input'
-          : incoming.roleSource || prev?.roleSource || 'unassigned';
+          : incoming.roleSource || (isReset ? 'unassigned' : prev?.roleSource || 'unassigned');
         if (safeRoleId === null) {
           roleSource = 'unassigned';
         } else if (
+          !isReset &&
           prev &&
           prev.roleSource === 'self_input' &&
           prev.roleId === safeRoleId &&
@@ -238,25 +252,35 @@ export class GMRoomManager {
           roleSource = deckMode === 'virtual_deck' ? 'auto_dealt' : 'gm_assigned';
         }
 
-        // Never let a stale host sync with claimedByUserId: null wipe out a player's active seat claim
+        // Preserve player claim and player-chosen display name across syncs
         const preservedClaim = incoming.claimedByUserId || prev?.claimedByUserId || null;
+        const incomingName = String(incoming.name || '').trim();
+        const isDefaultPlaceholder = /^Người Chơi #\d+$/i.test(incomingName);
+        const resolvedName =
+          prev?.claimedByUserId && prev.name && isDefaultPlaceholder
+            ? prev.name
+            : incomingName || DEFAULT_SEAT_NAMES[idx] || `Người Chơi #${idx + 1}`;
 
         return {
           id: seatId,
           seatNumber: idx + 1,
-          name: String(incoming.name || DEFAULT_SEAT_NAMES[idx] || `Người Chơi #${idx + 1}`)
-            .trim()
-            .slice(0, 40),
+          name: resolvedName.slice(0, 40),
           avatar: String(incoming.avatar || prev?.avatar || SEAT_AVATARS[idx % SEAT_AVATARS.length]).slice(0, 16),
           roleId: safeRoleId,
           roleSource,
-          isAlive: incoming.isAlive !== undefined ? Boolean(incoming.isAlive) : prev?.isAlive ?? true,
+          isAlive: isReset ? true : incoming.isAlive !== undefined ? Boolean(incoming.isAlive) : prev?.isAlive ?? true,
           claimedByUserId: preservedClaim,
           elderLives: safeRoleId === 'elder' ? 2 : undefined,
         };
       });
     } else if (existing) {
-      nextSeats = existing.seats.map((s, idx) => ({ ...s, seatNumber: idx + 1 }));
+      nextSeats = existing.seats.map((s, idx) => ({
+        ...s,
+        seatNumber: idx + 1,
+        isAlive: isReset ? true : s.isAlive,
+        roleId: isReset && deckMode === 'physical_cards' ? null : s.roleId,
+        roleSource: isReset && deckMode === 'physical_cards' ? 'unassigned' : s.roleSource,
+      }));
     } else {
       const count = Math.max(4, Math.min(20, Math.round(payload.playerCount ?? 8)));
       const autoRoles = deckMode === 'virtual_deck' ? generateBalancedRoster(count) : [];
@@ -278,11 +302,12 @@ export class GMRoomManager {
 
     const updated: GMRoomHostState = {
       code,
+      matchId: nextMatchId,
       hostId: existing?.hostId || cleanHostId,
       deckMode,
-      status,
-      round,
-      phase,
+      status: isReset ? 'setup' : status,
+      round: isReset ? 1 : round,
+      phase: isReset ? 'setup' : phase,
       seats: nextSeats,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
@@ -525,6 +550,7 @@ export class GMRoomManager {
 
     return {
       code: room.code,
+      matchId: room.matchId,
       deckMode: room.deckMode,
       status: room.status,
       round: room.round,

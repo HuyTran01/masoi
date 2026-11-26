@@ -313,42 +313,84 @@ export const DEFAULT_AGROU_AVATAR: AgrouAvatarConfig = {
 };
 
 const STORAGE_KEY = 'werewolf_agrou_avatar_v1';
+const AVATAR_SCHEMA_VERSION = 2;
+
+export function migrateAgrouAvatarPayload(rawParsed: unknown): AgrouAvatarConfig {
+  if (!rawParsed || typeof rawParsed !== 'object') {
+    return { ...DEFAULT_AGROU_AVATAR };
+  }
+  const parsed = rawParsed as Record<string, unknown>;
+  const validHat = AGROU_HATS.some((h) => h.id === parsed.hat)
+    ? (parsed.hat as AgrouHatId)
+    : DEFAULT_AGROU_AVATAR.hat;
+
+  let normalizedColor: number | null = null;
+  if (typeof parsed.cloakColor === 'number' && Number.isFinite(parsed.cloakColor)) {
+    normalizedColor = parsed.cloakColor;
+  } else if (typeof parsed.cloakColor === 'string') {
+    const cleanHex = parsed.cloakColor.replace(/^#/, '');
+    const asInt = parseInt(cleanHex, 16);
+    if (!Number.isNaN(asInt)) normalizedColor = asInt;
+  }
+  const validColor =
+    normalizedColor !== null && AGROU_CLOAK_COLORS.some((c) => c.hex === normalizedColor)
+      ? normalizedColor
+      : DEFAULT_AGROU_AVATAR.cloakColor;
+
+  const validTitle = AGROU_TITLES.some((t) => t.id === parsed.titleId)
+    ? String(parsed.titleId)
+    : DEFAULT_AGROU_AVATAR.titleId;
+
+  const legacyBiomeMap: Record<string, AgrouMapBiome> = {
+    forest: 'forest',
+    redwood: 'forest',
+    frostpeak: 'frostpeak',
+    snow: 'frostpeak',
+    winter: 'frostpeak',
+    autumn: 'autumn',
+    meadow: 'autumn',
+    river: 'autumn',
+  };
+  const biomeKey = typeof parsed.mapBiome === 'string' ? parsed.mapBiome.toLowerCase() : '';
+  const validBiome: AgrouMapBiome = legacyBiomeMap[biomeKey] || DEFAULT_AGROU_AVATAR.mapBiome;
+
+  return {
+    hat: validHat,
+    cloakColor: validColor,
+    titleId: validTitle,
+    mapBiome: validBiome,
+  };
+}
 
 export function loadAgrouAvatarConfig(): AgrouAvatarConfig {
   try {
+    if (typeof localStorage === 'undefined') return { ...DEFAULT_AGROU_AVATAR };
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_AGROU_AVATAR };
     const parsed = JSON.parse(raw);
-    const validHat = AGROU_HATS.some((h) => h.id === parsed.hat)
-      ? (parsed.hat as AgrouHatId)
-      : DEFAULT_AGROU_AVATAR.hat;
-    const validColor = AGROU_CLOAK_COLORS.some((c) => c.hex === parsed.cloakColor)
-      ? Number(parsed.cloakColor)
-      : DEFAULT_AGROU_AVATAR.cloakColor;
-    const validTitle = AGROU_TITLES.some((t) => t.id === parsed.titleId)
-      ? String(parsed.titleId)
-      : DEFAULT_AGROU_AVATAR.titleId;
-    const validBiome: AgrouMapBiome =
-      parsed.mapBiome === 'forest' ||
-      parsed.mapBiome === 'frostpeak' ||
-      parsed.mapBiome === 'autumn'
-        ? parsed.mapBiome
-        : DEFAULT_AGROU_AVATAR.mapBiome;
-
-    return {
-      hat: validHat,
-      cloakColor: validColor,
-      titleId: validTitle,
-      mapBiome: validBiome,
-    };
+    const migrated = migrateAgrouAvatarPayload(parsed);
+    if (!parsed || typeof parsed !== 'object' || parsed._v !== AVATAR_SCHEMA_VERSION) {
+      saveAgrouAvatarConfig(migrated);
+    }
+    return migrated;
   } catch {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
+    }
     return { ...DEFAULT_AGROU_AVATAR };
   }
 }
 
 export function saveAgrouAvatarConfig(cfg: AgrouAvatarConfig): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+    if (typeof localStorage === 'undefined') return;
+    const safeCfg = migrateAgrouAvatarPayload(cfg);
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...safeCfg, _v: AVATAR_SCHEMA_VERSION })
+    );
   } catch {
     // ignore storage quota errors
   }

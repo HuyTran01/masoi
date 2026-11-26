@@ -108,19 +108,19 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ lang }) => {
                     </td>
 
                     {/* Favorite Role */}
-                    <td className="py-3.5 px-4">
-                      <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 text-[11px] font-semibold">
+                    <td className="py-3.5 px-4 whitespace-nowrap min-w-[130px]">
+                      <span className="inline-block px-2.5 py-1 rounded-lg bg-slate-800 text-slate-200 border border-slate-700 text-[11px] font-semibold whitespace-nowrap">
                         {favRole.name[lang] || favRole.name.vi}
                       </span>
                     </td>
 
                     {/* Badges */}
-                    <td className="py-3.5 px-4">
-                      <div className="flex flex-wrap gap-1">
+                    <td className="py-3.5 px-4 min-w-[150px]">
+                      <div className="flex flex-wrap gap-1.5">
                         {user.badges.slice(0, 2).map((b, i) => (
                           <span
                             key={i}
-                            className="px-1.5 py-0.5 rounded bg-amber-950/50 text-amber-300 border border-amber-800/40 text-[10px]"
+                            className="px-2 py-0.5 rounded-md bg-amber-950/60 text-amber-200 border border-amber-700/50 text-[11px] whitespace-nowrap"
                           >
                             {b}
                           </span>

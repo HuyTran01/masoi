@@ -96,14 +96,40 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   const [openGMRooms, setOpenGMRooms] = useState<GMRoomSummary[]>([]);
   const [gmDeckMode, setGmDeckMode] = useState<GMDeckMode>('virtual_deck');
   const [isJoining, setIsJoining] = useState<boolean>(false);
+  const [connectTimedOut, setConnectTimedOut] = useState<boolean>(false);
 
   const launchedRef = useRef(false);
   const pendingJoinCodeRef = useRef<string | null>(null);
   const isJoinedGuestRoomRef = useRef(false);
   const liveRoomRef = useRef<RealtimeRoomState | null>(null);
   liveRoomRef.current = liveRoom;
+  const preservedCodesRef = useRef<{ online: string; gm: string }>({
+    online: generateRoomCode('ONL-'),
+    gm: generateRoomCode('GM-'),
+  });
+  const joinTimeoutRef = useRef<number | null>(null);
+  const connectTimeoutRef = useRef<number | null>(null);
 
   const t = UI_TEXT[lang];
+
+  const clearJoinTimeout = useCallback(() => {
+    if (joinTimeoutRef.current !== null) {
+      window.clearTimeout(joinTimeoutRef.current);
+      joinTimeoutRef.current = null;
+    }
+  }, []);
+
+  const fetchOpenOnlineRooms = useCallback(async () => {
+    try {
+      const res = await fetch('/api/rooms');
+      const data = await res.json();
+      if (data?.ok && Array.isArray(data.rooms)) {
+        setOpenRooms(data.rooms);
+      }
+    } catch {
+      // ignore transient errors
+    }
+  }, []);
 
   const fetchOpenGMRooms = useCallback(async () => {
     try {
@@ -117,24 +143,27 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     }
   }, []);
 
-  // Reset modal session when opening
+  // Preserve active room code across close/reopen instead of wiping it (BUG-26)
   useEffect(() => {
     if (!isOpen) return;
     launchedRef.current = false;
     pendingJoinCodeRef.current = null;
-    isJoinedGuestRoomRef.current = false;
     setIsJoining(false);
+    setConnectTimedOut(false);
     setModeTab(initialMode);
-    setActionTab('create');
-    setCreatedRoomId(generateRoomCode(initialMode === 'online' ? 'ONL-' : 'GM-'));
-    setJoinCodeInput('');
+    if (initialMode === 'gm' || !liveRoomRef.current) {
+      setActionTab('create');
+      const nextCode =
+        initialMode === 'online'
+          ? preservedCodesRef.current.online
+          : preservedCodesRef.current.gm;
+      setCreatedRoomId(nextCode);
+    }
     setLobbyNotice('');
     setJoinError('');
-    setLiveRoom(null);
-    if (initialMode === 'gm') {
-      fetchOpenGMRooms();
-    }
-  }, [initialMode, isOpen, fetchOpenGMRooms]);
+    fetchOpenOnlineRooms();
+    fetchOpenGMRooms();
+  }, [initialMode, isOpen, fetchOpenOnlineRooms, fetchOpenGMRooms]);
 
   // Subscribe to real WebSocket room events while modal is open
   useEffect(() => {
@@ -147,8 +176,14 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
       } else if (evt.type === 'gm:room_list') {
         setOpenGMRooms(evt.rooms);
       } else if (evt.type === 'room:state') {
+        clearJoinTimeout();
+        setConnectTimedOut(false);
         setLiveRoom(evt.room);
         setJoinError('');
+        if (evt.room.hostId === currentUser.id) {
+          preservedCodesRef.current.online = evt.room.code;
+          setCreatedRoomId(evt.room.code);
+        }
         if (pendingJoinCodeRef.current && evt.room.code === pendingJoinCodeRef.current) {
           pendingJoinCodeRef.current = null;
           isJoinedGuestRoomRef.current = evt.room.hostId !== currentUser.id;
@@ -157,6 +192,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
           setActionTab('create');
         }
       } else if (evt.type === 'room:kicked' && evt.targetId === currentUser.id) {
+        clearJoinTimeout();
         isJoinedGuestRoomRef.current = false;
         pendingJoinCodeRef.current = null;
         setIsJoining(false);
@@ -166,6 +202,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         setLobbyNotice(evt.reason);
         realtimeClient.requestRoomList();
       } else if (evt.type === 'room:match_started' && !launchedRef.current) {
+        clearJoinTimeout();
         launchedRef.current = true;
         sound.playNightBell();
         const mapped: LobbyParticipant[] = evt.room.participants.map((p) => ({
@@ -183,6 +220,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
           evt.room.timerConfig
         );
       } else if (evt.type === 'error') {
+        clearJoinTimeout();
         if (pendingJoinCodeRef.current) {
           pendingJoinCodeRef.current = null;
           setIsJoining(false);
@@ -193,13 +231,15 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     });
 
     realtimeClient.requestRoomList();
+    fetchOpenOnlineRooms();
     fetchOpenGMRooms();
 
     return () => {
+      clearJoinTimeout();
       unsubStatus();
       unsubEvents();
     };
-  }, [isOpen, currentUser.id, onLaunchOnlineRoom, fetchOpenGMRooms]);
+  }, [isOpen, currentUser.id, onLaunchOnlineRoom, fetchOpenOnlineRooms, fetchOpenGMRooms, clearJoinTimeout]);
 
   // Automatically create the Host's own online room ONLY when on Create tab and NOT joining via invite code
   useEffect(() => {
@@ -208,6 +248,8 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     if (liveRoomRef.current && liveRoomRef.current.hostId !== currentUser.id) return;
     if (!createdRoomId.startsWith('ONL-')) return;
 
+    preservedCodesRef.current.online = createdRoomId;
+    setConnectTimedOut(false);
     realtimeClient.createOrJoinRoom({
       code: createdRoomId,
       user: {
@@ -220,6 +262,22 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
       timerConfig,
       createIfMissing: true,
     });
+
+    if (connectTimeoutRef.current !== null) {
+      window.clearTimeout(connectTimeoutRef.current);
+    }
+    connectTimeoutRef.current = window.setTimeout(() => {
+      if (!liveRoomRef.current) {
+        setConnectTimedOut(true);
+      }
+    }, 10000);
+
+    return () => {
+      if (connectTimeoutRef.current !== null) {
+        window.clearTimeout(connectTimeoutRef.current);
+        connectTimeoutRef.current = null;
+      }
+    };
   }, [
     isOpen,
     modeTab,
@@ -234,11 +292,16 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   if (!isOpen) return null;
 
   const isInJoinedOnlineRoom = modeTab === 'online' && Boolean(liveRoom);
+  const isGuestInOnlineRoom =
+    modeTab === 'online' && Boolean(liveRoom) && liveRoom!.hostId !== currentUser.id;
+  // BUG-11 fix: Host creating a room is recognized as Host immediately (not misclassified as Guest while WS handshake completes)
   const isHost =
     modeTab === 'gm'
       ? true
-      : Boolean(liveRoom && liveRoom.hostId === currentUser.id);
-  const isGuestInOnlineRoom = modeTab === 'online' && Boolean(liveRoom) && !isHost;
+      : liveRoom
+      ? liveRoom.hostId === currentUser.id
+      : actionTab === 'create' && !isJoinedGuestRoomRef.current && !pendingJoinCodeRef.current;
+  const isHostSyncing = modeTab === 'online' && isHost && !liveRoom;
 
   const activeRoomCode = liveRoom?.code || createdRoomId;
   const participants: LobbyParticipant[] = liveRoom
@@ -270,6 +333,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   const humanCount = participants.length - botCount;
 
   const leaveActiveOnlineRoomIfAny = () => {
+    clearJoinTimeout();
     if (liveRoomRef.current && !launchedRef.current) {
       realtimeClient.leaveRoom(liveRoomRef.current.code, currentUser.id);
     }
@@ -279,9 +343,31 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     setLiveRoom(null);
   };
 
+  // BUG-26: Closing the modal preserves the active/created room code unless user clicks "Rời phòng"
   const handleCloseModal = () => {
-    leaveActiveOnlineRoomIfAny();
+    clearJoinTimeout();
+    setIsJoining(false);
     onClose();
+  };
+
+  const handleRetryOnlineConnect = () => {
+    sound.playCardFlip();
+    setConnectTimedOut(false);
+    setLobbyNotice('');
+    setJoinError('');
+    realtimeClient.forceReconnect();
+    realtimeClient.createOrJoinRoom({
+      code: createdRoomId,
+      user: {
+        id: currentUser.id,
+        name: currentUser.name,
+        avatar: currentUser.avatar,
+        elo: currentUser.elo,
+      },
+      villageSize,
+      timerConfig,
+      createIfMissing: true,
+    });
   };
 
   const handleLeaveJoinedRoom = () => {
@@ -403,12 +489,24 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
       return;
     }
 
-    // Online 3D room join: NEVER auto-create a missing room; wait for server room:state confirmation!
+    // Online 3D room join: NEVER auto-create a missing room; wait for server room:state confirmation with 10s timeout (BUG-01)
     setModeTab('online');
     setJoinError('');
     setLobbyNotice('');
     setIsJoining(true);
     pendingJoinCodeRef.current = clean;
+    clearJoinTimeout();
+    joinTimeoutRef.current = window.setTimeout(() => {
+      if (pendingJoinCodeRef.current === clean) {
+        pendingJoinCodeRef.current = null;
+        setIsJoining(false);
+        setJoinError(
+          lang === 'vi'
+            ? `Quá thời gian kết nối máy chủ phòng "${clean}" (10s). Kiểm tra mạng hoặc bấm Thử lại.`
+            : `Connection timed out while joining "${clean}" (10s). Please retry.`
+        );
+      }
+    }, 10000);
     realtimeClient.createOrJoinRoom({
       code: clean,
       user: {
@@ -491,7 +589,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
               leaveActiveOnlineRoomIfAny();
               setModeTab('online');
               setActionTab('create');
-              setCreatedRoomId(generateRoomCode('ONL-'));
+              setCreatedRoomId(preservedCodesRef.current.online);
               setJoinError('');
               setLobbyNotice('');
             }}
@@ -513,7 +611,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
               leaveActiveOnlineRoomIfAny();
               setModeTab('gm');
               setActionTab('create');
-              setCreatedRoomId(generateRoomCode('GM-'));
+              setCreatedRoomId(preservedCodesRef.current.gm);
               setJoinError('');
               setLobbyNotice('');
               fetchOpenGMRooms();
@@ -793,6 +891,28 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                       : 'Participant list and room rules are synced live from the Room Host.'}
                   </p>
 
+                  {connectTimedOut && isHostSyncing && (
+                    <div
+                      role="alert"
+                      data-testid="lobby-connect-timeout-banner"
+                      className="px-3 py-2.5 rounded-xl bg-rose-950/70 border border-rose-500/60 text-xs text-rose-200 font-semibold flex flex-wrap items-center justify-between gap-2"
+                    >
+                      <span>
+                        {lang === 'vi'
+                          ? 'Không thể kết nối máy chủ phòng trực tuyến sau 10 giây. Vui lòng thử lại.'
+                          : 'Could not reach the live room server after 10s. Please retry.'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleRetryOnlineConnect}
+                        className="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>{lang === 'vi' ? 'Thử lại' : 'Retry'}</span>
+                      </button>
+                    </div>
+                  )}
+
                   {lobbyNotice && (
                     <div className="px-3 py-2 rounded-xl bg-amber-950/60 border border-amber-500/50 text-xs text-amber-200 font-semibold">
                       {lobbyNotice}
@@ -988,17 +1108,27 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                 <button
                   type="button"
                   data-testid="lobby-start-online-btn"
-                  disabled={!isHost}
+                  disabled={!isHost || isHostSyncing}
                   onClick={handleStartOnlineClick}
                   className={`w-full py-3.5 rounded-2xl font-extrabold text-xs sm:text-sm shadow-xl flex items-center justify-center gap-2 ${
-                    isHost
+                    isHost && !isHostSyncing
                       ? 'bg-rose-600 hover:bg-rose-500 text-white cursor-pointer'
                       : 'bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed'
                   }`}
                 >
-                  {isHost ? <Play className="w-4 h-4 fill-white" /> : <Lock className="w-4 h-4" />}
+                  {isHost && !isHostSyncing ? (
+                    <Play className="w-4 h-4 fill-white" />
+                  ) : isHostSyncing ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Lock className="w-4 h-4" />
+                  )}
                   <span>
-                    {isHost
+                    {isHostSyncing
+                      ? lang === 'vi'
+                        ? 'Đang đồng bộ phòng với máy chủ...'
+                        : 'Syncing room with server...'
+                      : isHost
                       ? t.startOnlineMatchBtn(participants.length, activeRoomCode)
                       : lang === 'vi'
                       ? 'Đang chờ Chủ phòng bắt đầu ván đấu...'
@@ -1124,7 +1254,10 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                   </span>
                   <button
                     type="button"
-                    onClick={() => realtimeClient.requestRoomList()}
+                    onClick={() => {
+                      realtimeClient.requestRoomList();
+                      fetchOpenOnlineRooms();
+                    }}
                     className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-sky-300 flex items-center gap-1 cursor-pointer"
                   >
                     <RefreshCw className="w-3 h-3" />

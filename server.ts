@@ -419,6 +419,7 @@ app.post('/api/gm-rooms/:code/sync', (req, res) => {
     phase: body.phase,
     seats: Array.isArray(body.seats) ? body.seats : undefined,
     playerCount: typeof body.playerCount === 'number' ? body.playerCount : undefined,
+    resetMatch: Boolean(body.resetMatch),
   });
   if (!result.ok) {
     res.status(result.error.includes('Chỉ Quản Trò') ? 403 : 400).json(result);

@@ -9,14 +9,19 @@ import {
   assignPreferredRoleToDeck,
   buildVoteTallyEntries,
   castSingleDayVote,
+  checkWinCondition,
+  computeFactionAliveCounts,
   fisherYatesShuffle,
   generateBalancedRoster,
+  resolveHunterShot,
   resolveNightActions,
   tallyVotes,
 } from './rules.ts';
+import { AGROU_CLOAK_COLORS, migrateAgrouAvatarPayload } from './agrouMechanics.ts';
+import { generateQrMatrix } from '../utils/qrSvg.ts';
 import { UI_TEXT } from '../utils/i18n.ts';
 import { ROLES } from './roles.ts';
-import { Language, Player, PropType, RoleId } from '../types/game.ts';
+import { ChatMessage, Language, Player, PropType, RoleId } from '../types/game.ts';
 import { PROP_REACTION_META, ROLE_CALLOUT_LINES } from '../utils/sound.ts';
 import {
   buildAutoGMNightSchedule,
@@ -25,6 +30,8 @@ import {
   getHumanRoleWakeGuidance,
   computeAutoGMBotNightStepAction,
   computeSmartBotDayVotes,
+  extractChatVoteSignals,
+  stripMarkdownAsterisks,
   buildBotDayDiscussionLines,
   prepareNightStartForHuman,
   shouldAutoAdvanceOnTimerZero,
@@ -181,11 +188,11 @@ test('[Auto-GM Agent] Sequential night call schedule, strict role wake rules, bo
     hunterShotSec: 18,
   };
 
-  // Night 1 schedule includes doppelganger & cupid before werewolf, witch, seer, bodyguard
+  // Night 1 schedule follows canonical order: doppelganger -> cupid -> bodyguard -> werewolf -> witch -> seer
   const night1 = buildAutoGMNightSchedule(roster, 1, customCfg, 'u1');
   assert.deepEqual(
     night1.map((s) => s.key),
-    ['doppelganger', 'cupid', 'werewolf', 'witch', 'seer', 'bodyguard']
+    ['doppelganger', 'cupid', 'bodyguard', 'werewolf', 'witch', 'seer']
   );
 
   // Verify custom timer config is respected: human turn gets nightActionSec (25s), bot steps get botStepSec (4s)
@@ -200,7 +207,7 @@ test('[Auto-GM Agent] Sequential night call schedule, strict role wake rules, bo
 
   // Verify findHumanNightStepIndex and getHumanRoleWakeGuidance
   const humanIdx = findHumanNightStepIndex(night1, roster[0], 1);
-  assert.equal(humanIdx, 4);
+  assert.equal(humanIdx, 5);
   const wakeGuidance = getHumanRoleWakeGuidance(roster[0], 1, 'vi');
   assert.equal(wakeGuidance.wakesTonight, true);
   assert.ok(wakeGuidance.headline.length > 0);
@@ -214,7 +221,7 @@ test('[Auto-GM Agent] Sequential night call schedule, strict role wake rules, bo
   const night2 = buildAutoGMNightSchedule(roster, 2);
   assert.deepEqual(
     night2.map((s) => s.key),
-    ['werewolf', 'witch', 'seer', 'bodyguard']
+    ['bodyguard', 'werewolf', 'witch', 'seer']
   );
 
   // Seer only opens eyes during 'seer' step, NOT during 'werewolf' or 'witch'
@@ -296,14 +303,15 @@ test('[Human Turn Protection] prepareNightStartForHuman, shouldAutoAdvanceOnTime
   ];
 
   const prepared = prepareNightStartForHuman(players, 1, DEFAULT_TIMER_CONFIG, 'u1');
-  // Schedule: cupid (0), werewolf (1), witch (2), seer (3), bodyguard (4)
-  assert.equal(prepared.initialStepIndex, 3);
+  // Schedule: cupid (0), bodyguard (1), werewolf (2), witch (3), seer (4)
+  assert.equal(prepared.initialStepIndex, 4);
   assert.equal(prepared.schedule[prepared.initialStepIndex].key, 'seer');
   assert.equal(prepared.schedule[prepared.initialStepIndex].isHumanTurn, true);
   assert.ok(prepared.preSimulatedActions.wolfTargetId, 'Bot werewolf should have selected a victim before human Seer wakes');
   assert.ok(prepared.preSimulatedActions.cupidLovers, 'Bot cupid should have linked lovers before human Seer wakes');
 
-  // Verify shouldAutoAdvanceOnTimerZero NEVER auto-skips human night turn or human day vote
+  // Verify shouldAutoAdvanceOnTimerZero NEVER auto-skips human night turn,
+  // while day_voting at 0s MUST auto-advance with abstain so timer never freezes (BUG-15)
   assert.equal(
     shouldAutoAdvanceOnTimerZero({
       shellState: 'playing',
@@ -328,8 +336,8 @@ test('[Human Turn Protection] prepareNightStartForHuman, shouldAutoAdvanceOnTime
       hasHumanVoted: false,
       isHumanHunterRevenge: false,
     }),
-    false,
-    'Must NEVER auto-advance day voting before living human player has voted'
+    true,
+    'Day voting MUST auto-advance at 0s with abstain instead of hanging forever (BUG-15)'
   );
 });
 
@@ -897,7 +905,113 @@ test('[Zero-Leak Night Kill Short Film & Dawn Hunter] End-of-night cinematic act
   }
 });
 
+test('[QA Regression] BUG-02: migrateAgrouAvatarPayload auto-repairs corrupt and legacy configs', () => {
+  const repairedNull = migrateAgrouAvatarPayload(null);
+  assert.equal(repairedNull.hat, 'witch');
+  assert.equal(repairedNull.mapBiome, 'forest');
 
+  const repairedCorrupt = migrateAgrouAvatarPayload({
+    hat: 'invalid_hat_xyz',
+    cloakColor: 'not-a-hex-color',
+    mapBiome: 'lava_world',
+  });
+  assert.equal(repairedCorrupt.hat, 'witch');
+  assert.equal(repairedCorrupt.mapBiome, 'forest');
+  assert.equal(typeof repairedCorrupt.cloakColor, 'number');
 
+  const paletteHex = AGROU_CLOAK_COLORS[1].hex;
+  const valid = migrateAgrouAvatarPayload({
+    version: 2,
+    hat: 'crown',
+    cloakColor: paletteHex,
+    mapBiome: 'frostpeak',
+  });
+  assert.equal(valid.hat, 'crown');
+  assert.equal(valid.cloakColor, paletteHex);
+  assert.equal(valid.mapBiome, 'frostpeak');
+});
 
+test('[QA Regression] BUG-08: Chained Hunter cascade and pendingDeathCascade win guard', () => {
+  const players: Player[] = [
+    { id: 'w1', name: 'Sói 1', avatar: '🐺', roleId: 'werewolf', isAlive: true },
+    { id: 'h1', name: 'Thợ Săn 1', avatar: '🎯', roleId: 'hunter', isAlive: false },
+    { id: 'h2', name: 'Thợ Săn 2', avatar: '🎯', roleId: 'hunter', isAlive: true },
+    { id: 'v1', name: 'Dân 1', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+  ];
 
+  // Must NOT end early while a Hunter death cascade is pending
+  const guarded = checkWinCondition(
+    [
+      { id: 'w1', name: 'Sói 1', avatar: '🐺', roleId: 'werewolf', isAlive: true },
+      { id: 'h1', name: 'Thợ Săn 1', avatar: '🎯', roleId: 'hunter', isAlive: false },
+      { id: 'v1', name: 'Dân 1', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+    ],
+    undefined,
+    { hasPendingDeathCascade: true }
+  );
+  assert.equal(guarded.isOver, false);
+
+  // Shooting another Hunter returns triggeredHunterId for chained resolution
+  const shot = resolveHunterShot(players, 'h1', 'h2');
+  assert.equal(shot.triggeredHunterId, 'h2');
+  assert.equal(shot.updatedPlayers.find((p) => p.id === 'h2')?.isAlive, false);
+});
+
+test('[QA Regression] BUG-10: computeFactionAliveCounts separates Wolves, Villagers, and Third-Party (Tanner/Traitor)', () => {
+  const mixedPlayers: Player[] = [
+    { id: 'w1', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
+    { id: 't1', name: 'Kẻ Chán Đời', avatar: '🎭', roleId: 'tanner', isAlive: true },
+    { id: 'tr1', name: 'Kẻ Phản Bội', avatar: '🗡️', roleId: 'traitor', isAlive: true },
+    { id: 'v1', name: 'Dân 1', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+    { id: 'v2', name: 'Dân 2', avatar: '🔮', roleId: 'seer', isAlive: true },
+    { id: 'v3', name: 'Dân 3', avatar: '🛡️', roleId: 'bodyguard', isAlive: false },
+  ];
+  const counts = computeFactionAliveCounts(mixedPlayers);
+  assert.equal(counts.wolves, 1);
+  assert.equal(counts.villagers, 2);
+  assert.equal(counts.thirdParty, 2);
+  assert.equal(counts.hasThirdPartyInMatch, true);
+});
+
+test('[QA Regression] BUG-14: Bot day votes stay consistent with chat accusations', () => {
+  const players: Player[] = [
+    { id: 'u1', name: 'Bạn', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
+    { id: 'b1', name: 'Đức Huy', avatar: '🐺', roleId: 'werewolf', isAlive: true, isBot: true },
+    { id: 'b2', name: 'Thảo My', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, isBot: true },
+    { id: 'b3', name: 'Minh Hoàng', avatar: '🔮', roleId: 'seer', isAlive: true, isBot: true },
+    { id: 'b4', name: 'Tuấn Kiệt', avatar: '🛡️', roleId: 'bodyguard', isAlive: true, isBot: true },
+  ];
+  const messages: ChatMessage[] = [
+    {
+      id: 'm1',
+      senderId: 'b2',
+      senderName: 'Thảo My',
+      text: 'Mình nghi Đức Huy là Sói, mọi người cân nhắc vote Đức Huy nhé!',
+      timestamp: Date.now(),
+    },
+  ];
+  const signals = extractChatVoteSignals(messages, players);
+  assert.deepEqual(signals.suspectsByVoter.b2, ['b1']);
+
+  const votes = computeSmartBotDayVotes(players, [], null, signals);
+  const b2Vote = votes.find((v) => v.voterId === 'b2');
+  assert.equal(b2Vote?.targetId, 'b1');
+});
+
+test('[QA Regression] BUG-16 & BUG-20: Offline QR matrix generator & markdown asterisk stripper', () => {
+  const qr = generateQrMatrix('https://example.com/?gm=GM-4821');
+  assert.ok(qr.length >= 21);
+  assert.equal(qr.length, qr[0].length, 'QR matrix must be square');
+  // Verify top-left 7x7 finder pattern outer ring is solid dark
+  for (let i = 0; i < 7; i++) {
+    assert.equal(qr[0][i], true);
+    assert.equal(qr[6][i], true);
+    assert.equal(qr[i][0], true);
+    assert.equal(qr[i][6], true);
+  }
+
+  assert.equal(
+    stripMarkdownAsterisks('*Đêm xuống...* **Ma Sói** thức dậy!'),
+    'Đêm xuống... Ma Sói thức dậy!'
+  );
+});

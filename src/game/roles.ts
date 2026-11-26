@@ -119,7 +119,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
       ja: '騎士 / 狩人',
     },
     faction: 'villager',
-    wakeOrder: 50,
+    wakeOrder: 15,
     description: {
       vi: 'Mỗi đêm bảo vệ 1 người chơi thoát khỏi móng vuốt sói. Không thể bảo vệ cùng 1 người 2 đêm liên tiếp.',
       en: 'Each night protects one player from werewolves. Cannot protect the same person two nights in a row.',

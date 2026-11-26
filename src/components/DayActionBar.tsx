@@ -24,6 +24,8 @@ interface DayActionBarProps {
   onVoteCampfireAbstain?: () => void;
   onClearVote?: () => void;
   onReopenGMAnnouncement?: () => void;
+  canUserShootHunter?: boolean;
+  onSkipHunterShot?: () => void;
 }
 
 export const DayActionBar: React.FC<DayActionBarProps> = ({
@@ -45,6 +47,8 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
   onVoteCampfireAbstain,
   onClearVote,
   onReopenGMAnnouncement,
+  canUserShootHunter = false,
+  onSkipHunterShot,
 }) => {
   const t = UI_TEXT[lang];
 
@@ -238,7 +242,7 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
         {(voteEntries.length > 0 || mayorTally.abstainCount > 0) && (
           <div
             data-testid="live-vote-breakdown"
-            className="bg-[#1a110a] border border-[#6b4a2e] rounded-xl px-1.5 py-1 max-h-[68px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1"
+            className="bg-[#1a110a] border border-[#6b4a2e] rounded-xl p-2 max-h-[176px] overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5"
           >
             {voteEntries.map((entry) => {
               const isMyTarget = selectedTargetId === entry.playerId;
@@ -246,8 +250,8 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
                 <div
                   key={entry.playerId}
                   data-testid={`live-vote-row-${entry.playerId}`}
-                  className={`flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-snug rounded-lg px-1.5 py-0.5 ${
-                    isMyTarget ? 'bg-[#5c1d16] border border-[#f97316]/60' : ''
+                  className={`flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] leading-snug rounded-lg px-2 py-1 ${
+                    isMyTarget ? 'bg-[#5c1d16] border border-[#f97316]/60' : 'bg-[#24180f]/60'
                   }`}
                 >
                   <span className="font-extrabold text-[#fde7c3] whitespace-nowrap flex items-center gap-1">
@@ -321,8 +325,21 @@ export const DayActionBar: React.FC<DayActionBarProps> = ({
 
   if (phase === 'hunter_revenge') {
     return (
-      <div className="px-3 py-1 rounded-xl bg-[#4f1814] border border-[#f87171] text-xs font-extrabold text-[#fde7c3] shadow text-center pointer-events-none">
-        {eventBanner}
+      <div
+        data-testid="hunter-revenge-bar"
+        className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 px-3.5 py-2 rounded-xl bg-[#4f1814] border-2 border-[#f87171] text-xs font-extrabold text-[#fde7c3] shadow-xl text-center"
+      >
+        <span>{eventBanner}</span>
+        {canUserShootHunter && onSkipHunterShot && (
+          <button
+            type="button"
+            data-testid="hunter-hold-fire-btn"
+            onClick={onSkipHunterShot}
+            className="px-3 py-1 rounded-lg bg-[#1b120b] hover:bg-[#312115] border border-[#f5b82e]/80 text-[#fde7c3] text-[11px] font-extrabold cursor-pointer"
+          >
+            {lang === 'vi' ? 'Giữ súng (Không bắn)' : 'Hold Fire (No Shot)'}
+          </button>
+        )}
       </div>
     );
   }

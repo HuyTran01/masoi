@@ -106,6 +106,30 @@ const STEP_TRANSLATIONS: Record<
       ja: '恋人にするプレイヤーを2人（自分も含められます）選んでください。',
     },
   },
+  bodyguard: {
+    roleId: 'bodyguard',
+    title: {
+      vi: 'Bảo Vệ Đặt Khiên',
+      en: 'Bodyguard Shield',
+      fr: 'Bouclier du Salvateur',
+      es: 'Escudo del Guardaespaldas',
+      ja: '騎士の護衛',
+    },
+    gmNarration: {
+      vi: '🤖 Quản Trò Máy: "Bảo Vệ thức dậy! Hãy chọn 1 người để đặt khiên che chở đêm nay (không trùng đêm trước)."',
+      en: '🤖 Auto-GM: "Bodyguard, wake up! Choose 1 player to shield tonight (no consecutive repeats)."',
+      fr: '🤖 MJ Auto : « Le Salvateur se réveille ! Choisissez qui protéger cette nuit (pas 2 nuits de suite). »',
+      es: '🤖 Narrador Auto: "¡Guardaespaldas, despierta! Elige a quién proteger hoy (sin repetir 2 noches seguidas)."',
+      ja: '🤖 自動GM：「騎士は目覚めて、今夜護衛する人を1人選んでください（2夜連続で同じ人は不可）。」',
+    },
+    playerInstruction: {
+      vi: 'Chạm vào 1 người chơi (kể cả chính bạn) để đặt khiên chống Sói cắn. Không được chọn người vừa bảo vệ đêm qua!',
+      en: 'Tap 1 living player to shield from Werewolf bites. Cannot pick the player shielded last night!',
+      fr: 'Cliquez sur un joueur vivant pour le protéger des loups (interdit sur le joueur protégé hier).',
+      es: 'Toca a un jugador vivo para protegerlo de los lobos (no puedes repetir al protegido de anoche).',
+      ja: '人狼の襲撃から守るプレイヤーを1人選んでください（昨夜守った人は選べません）。',
+    },
+  },
   werewolf: {
     roleId: 'werewolf',
     title: {
@@ -116,11 +140,11 @@ const STEP_TRANSLATIONS: Record<
       ja: '人狼の襲撃',
     },
     gmNarration: {
-      vi: '🤖 Quản Trò Máy: "Đàn Ma Sói thức dậy! Nhận diện đồng đội và thống nhất chọn con mồi đêm nay."',
-      en: '🤖 Auto-GM: "Werewolves, wake up! Recognize your pack and choose tonight’s victim."',
-      fr: '🤖 MJ Auto : « Les Loups-Garous se réveillent ! Choisissez votre victime de la nuit. »',
-      es: '🤖 Narrador Auto: "¡Hombres Lobo, despertad! Elegid a vuestra presa de esta noche."',
-      ja: '🤖 自動GM：「人狼は目覚めて仲間を確認し、今夜襲撃する獲物を1人選んでください。」',
+      vi: '🤖 Quản Trò Máy: "Bảo Vệ đi ngủ. Đàn Ma Sói thức dậy! Nhận diện đồng đội và thống nhất chọn con mồi đêm nay."',
+      en: '🤖 Auto-GM: "Bodyguard sleeps. Werewolves, wake up! Recognize your pack and choose tonight’s victim."',
+      fr: '🤖 MJ Auto : « Le Salvateur s’endort. Les Loups-Garous se réveillent ! Choisissez votre victime de la nuit. »',
+      es: '🤖 Narrador Auto: "El Guardaespaldas duerme. ¡Hombres Lobo, despertad! Elegid a vuestra presa de esta noche."',
+      ja: '🤖 自動GM：「騎士は眠り、人狼は目覚めて今夜襲撃する獲物を1人選んでください。」',
     },
     playerInstruction: {
       vi: 'Chọn nạn nhân để cắn đêm nay (nếu Sói Con chết đêm trước, đàn Sói được chọn 2 nạn nhân!).',
@@ -171,38 +195,26 @@ const STEP_TRANSLATIONS: Record<
       ja: '🤖 自動GM：「占い師は目覚めて、今夜正体を占うプレイヤーを1人だけ選んでください。」',
     },
     playerInstruction: {
-      vi: 'Chọn duy nhất 1 người chơi còn sống để soi (👍 Dân Làng hoặc 👎 Ma Sói).',
-      en: 'Select exactly 1 living player to inspect (👍 Villager or 👎 Werewolf).',
-      fr: 'Sélectionnez 1 seul joueur vivant à inspecter (👍 Villageois ou 👎 Loup-Garou).',
-      es: 'Selecciona exactamente a 1 jugador vivo para investigar (👍 Aldeano o 👎 Lobo).',
-      ja: '生存しているプレイヤーを1人だけ選んで占ってください（👍村人陣営 / 👎人狼）。',
-    },
-  },
-  bodyguard: {
-    roleId: 'bodyguard',
-    title: {
-      vi: 'Bảo Vệ Đặt Khiên',
-      en: 'Bodyguard Shield',
-      fr: 'Bouclier du Salvateur',
-      es: 'Escudo del Guardaespaldas',
-      ja: '騎士の護衛',
-    },
-    gmNarration: {
-      vi: '🤖 Quản Trò Máy: "Tiên Tri đi ngủ. Bảo Vệ thức dậy! Chọn 1 người để che chở đêm nay (không trùng đêm trước)."',
-      en: '🤖 Auto-GM: "Seer sleeps. Bodyguard, wake up! Choose 1 player to shield tonight (no consecutive repeats)."',
-      fr: '🤖 MJ Auto : « Le Salvateur se réveille ! Choisissez qui protéger cette nuit (pas 2 nuits de suite). »',
-      es: '🤖 Narrador Auto: "¡Guardaespaldas, despierta! Elige a quién proteger hoy (sin repetir 2 noches seguidas)."',
-      ja: '🤖 自動GM：「騎士は目覚めて、今夜護衛する人を1人選んでください（2夜連続で同じ人は不可）。」',
-    },
-    playerInstruction: {
-      vi: 'Chạm vào 1 người chơi (kể cả chính bạn) để đặt khiên chống Sói cắn. Không được chọn người vừa bảo vệ đêm qua!',
-      en: 'Tap 1 living player to shield from Werewolf bites. Cannot pick the player shielded last night!',
-      fr: 'Cliquez sur un joueur vivant pour le protéger des loups (interdit sur le joueur protégé hier).',
-      es: 'Toca a un jugador vivo para protegerlo de los lobos (no puedes repetir al protegido de anoche).',
-      ja: '人狼の襲撃から守るプレイヤーを1人選んでください（昨夜守った人は選べません）。',
+      vi: 'Chọn 1 người chơi còn sống rồi bấm Xác Nhận Soi để xem phe phái (👍 Dân Làng hoặc 👎 Ma Sói).',
+      en: 'Select 1 living player and click Confirm Inspect to reveal their alignment (👍 Villager or 👎 Werewolf).',
+      fr: 'Sélectionnez 1 joueur vivant puis confirmez pour inspecter son camp (👍 Villageois ou 👎 Loup-Garou).',
+      es: 'Selecciona a 1 jugador vivo y confirma para investigar su bando (👍 Aldeano o 👎 Lobo).',
+      ja: '生存プレイヤーを1人選んで確定すると陣営が判明します（👍村人 / 👎人狼）。',
     },
   },
 };
+
+/**
+ * Strips accidental raw Markdown emphasis asterisks from GM logs/narrations (BUG-20).
+ */
+export function stripMarkdownAsterisks(text: string): string {
+  if (!text) return '';
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^\s*\*+\s*|\s*\*+\s*$/g, '')
+    .trim();
+}
 
 /**
  * Checks whether a specific player is called to open their eyes during the current Auto-GM night step.
@@ -218,14 +230,14 @@ export function isPlayerAwakeForNightStep(
       return round === 1 && player.roleId === 'doppelganger';
     case 'cupid':
       return round === 1 && player.roleId === 'cupid';
+    case 'bodyguard':
+      return player.roleId === 'bodyguard';
     case 'werewolf':
       return player.roleId === 'werewolf' || player.roleId === 'wolf_pup';
     case 'witch':
       return player.roleId === 'witch';
     case 'seer':
       return player.roleId === 'seer';
-    case 'bodyguard':
-      return player.roleId === 'bodyguard';
     default:
       return false;
   }
@@ -233,9 +245,9 @@ export function isPlayerAwakeForNightStep(
 
 /**
  * Builds the sequential Night Call Schedule for the Automated Game Master ("Quản Trò Máy")
- * strictly following canonical Werewolf rules & wakeOrder:
- * Night 1: Doppelgänger (if in roster) -> Cupid (if in roster) -> Werewolves -> Witch -> Seer -> Bodyguard
- * Night 2+: Werewolves -> Witch -> Seer -> Bodyguard
+ * strictly following canonical Werewolf rules & wakeOrder (BUG-12):
+ * Night 1: #5 Doppelgänger -> #10 Cupid -> #15 Bodyguard -> #20/#22 Werewolves -> #30 Witch -> #40 Seer
+ * Night 2+: #15 Bodyguard -> #20/#22 Werewolves -> #30 Witch -> #40 Seer
  * Also attaches custom timer durations and whether the human player wakes up on each step.
  */
 export function buildAutoGMNightSchedule(
@@ -253,12 +265,11 @@ export function buildAutoGMNightSchedule(
     if (hasRoleInMatch('cupid')) keys.push('cupid');
   }
 
-  // Werewolves always wake every night
+  // Canonical wake priority: #15 Bodyguard -> #20/#22 Werewolves -> #30 Witch -> #40 Seer
+  if (hasRoleInMatch('bodyguard')) keys.push('bodyguard');
   keys.push('werewolf');
-
   if (hasRoleInMatch('witch')) keys.push('witch');
   if (hasRoleInMatch('seer')) keys.push('seer');
-  if (hasRoleInMatch('bodyguard')) keys.push('bodyguard');
 
   const humanPlayer = humanPlayerId
     ? players.find((p) => p.id === humanPlayerId)
@@ -685,20 +696,98 @@ export function computeAutoGMBotNightStepAction(
   return {};
 }
 
+export interface BotChatVoteSignals {
+  suspectsByVoter: Record<string, string[]>;
+  alliesByVoter: Record<string, string[]>;
+  suspectsSilentVoters: string[];
+  silentPlayerIds: string[];
+}
+
+/**
+ * Extracts per-bot suspicion & alliance signals from daytime chat logs (BUG-14)
+ * so bots vote consistently with whom they accused/defended and avoid voting for allies who defended them.
+ */
+export function extractChatVoteSignals(
+  messages: Array<{ senderId: string; text: string; isSystem?: boolean; isGhost?: boolean }>,
+  players: Player[]
+): BotChatVoteSignals {
+  const suspectsByVoter: Record<string, Set<string>> = {};
+  const alliesByVoter: Record<string, Set<string>> = {};
+  const suspectsSilent = new Set<string>();
+  const speakers = new Set<string>();
+
+  const alivePlayers = players.filter((p) => p.isAlive);
+  const accusePattern =
+    /(nghi|sói|treo cổ|chất vấn|đáng ngờ|suspect|wolf|vote|lynch|loup|sospech|怪し)/i;
+  const defendPattern =
+    /(tin tưởng|bênh|đáng tin|không phải sói|người tốt|phe dân|trust|innocent|defend|vouch|clean|味方)/i;
+  const silentAccusePattern = /(im lặng|ít nói|không nói|silent|quiet|n'a rien dit|callado|黙って)/i;
+
+  for (const msg of messages) {
+    if (!msg || msg.isSystem || msg.isGhost || !msg.senderId || msg.senderId === 'sys') continue;
+    speakers.add(msg.senderId);
+    const text = msg.text || '';
+    const isAccuse = accusePattern.test(text);
+    const isDefend = defendPattern.test(text);
+    if (silentAccusePattern.test(text)) {
+      suspectsSilent.add(msg.senderId);
+    }
+
+    for (const target of alivePlayers) {
+      if (target.id === msg.senderId) continue;
+      if (!target.name || !text.toLowerCase().includes(target.name.toLowerCase())) continue;
+
+      if (isDefend && !isAccuse) {
+        if (!alliesByVoter[msg.senderId]) alliesByVoter[msg.senderId] = new Set();
+        alliesByVoter[msg.senderId].add(target.id);
+        // Reciprocal alliance: the defended player also treats their defender as an ally!
+        if (!alliesByVoter[target.id]) alliesByVoter[target.id] = new Set();
+        alliesByVoter[target.id].add(msg.senderId);
+      } else if (isAccuse) {
+        if (!suspectsByVoter[msg.senderId]) suspectsByVoter[msg.senderId] = new Set();
+        suspectsByVoter[msg.senderId].add(target.id);
+      }
+    }
+  }
+
+  const silentPlayerIds = alivePlayers
+    .filter((p) => !speakers.has(p.id))
+    .map((p) => p.id);
+
+  const toRecordArray = (rec: Record<string, Set<string>>) => {
+    const out: Record<string, string[]> = {};
+    for (const [k, set] of Object.entries(rec)) {
+      out[k] = Array.from(set);
+    }
+    return out;
+  };
+
+  return {
+    suspectsByVoter: toRecordArray(suspectsByVoter),
+    alliesByVoter: toRecordArray(alliesByVoter),
+    suspectsSilentVoters: Array.from(suspectsSilent),
+    silentPlayerIds,
+  };
+}
+
 /**
  * Generates intelligent, rule-aware AI Bot votes during Day Voting.
  * - Werewolves never vote against fellow Werewolves unless no other option exists.
  * - Players never vote against their Cupid Lover (`loverId`).
  * - Seer & Villagers prioritize known/suspected wolves.
+ * - Honors chat-extracted suspicions and alliances so bots never contradict their own debate lines (BUG-14).
  */
 export function computeSmartBotDayVotes(
   players: Player[],
   knownWolfIds: string[] = [],
-  humanTargetId?: string | null
+  humanTargetId?: string | null,
+  chatSignals?: BotChatVoteSignals | null
 ): VoteRecord[] {
   const alive = players.filter((p) => p.isAlive);
   const aliveBots = alive.filter((p) => p.isBot);
   const knownSet = new Set(knownWolfIds);
+  const silentSet = new Set(chatSignals?.silentPlayerIds || []);
+  const silentVotersSet = new Set(chatSignals?.suspectsSilentVoters || []);
 
   return aliveBots.map((bot) => {
     const validOthers = alive.filter(
@@ -716,31 +805,63 @@ export function computeSmartBotDayVotes(
       bot.roleId === 'wolf_pup' ||
       bot.roleId === 'traitor';
 
+    const mySuspects = new Set(chatSignals?.suspectsByVoter[bot.id] || []);
+    const myAllies = new Set(chatSignals?.alliesByVoter[bot.id] || []);
+
+    // Filter out allies who defended this bot (or whom this bot defended) unless no other choices exist
+    const nonAllyPool = basePool.filter((p) => !myAllies.has(p.id));
+    const preferredPool = nonAllyPool.length > 0 ? nonAllyPool : basePool;
+
     if (isBotWolfTeam) {
-      const nonWolfTargets = basePool.filter(
+      const nonWolfTargets = preferredPool.filter(
         (p) => p.roleId !== 'werewolf' && p.roleId !== 'wolf_pup'
       );
-      if (nonWolfTargets.length > 0) {
+      const wolfCandidatePool =
+        nonWolfTargets.length > 0
+          ? nonWolfTargets
+          : basePool.filter((p) => p.roleId !== 'werewolf' && p.roleId !== 'wolf_pup');
+
+      if (wolfCandidatePool.length > 0) {
+        // Stay consistent with whom this wolf publicly accused in chat
+        const chatSuspectedTargets = wolfCandidatePool.filter((p) => mySuspects.has(p.id));
+        if (chatSuspectedTargets.length > 0) {
+          return { voterId: bot.id, targetId: chatSuspectedTargets[0].id };
+        }
         const pick =
-          nonWolfTargets[Math.floor(Math.random() * nonWolfTargets.length)];
+          wolfCandidatePool[Math.floor(Math.random() * wolfCandidatePool.length)];
         return { voterId: bot.id, targetId: pick.id };
       }
     } else {
-      // If Seer or Villagers have a known wolf suspect, prioritize voting for them
-      const knownWolvesAlive = basePool.filter((p) => knownSet.has(p.id));
-      if (knownWolvesAlive.length > 0 && (bot.roleId === 'seer' || Math.random() < 0.65)) {
+      // 1. Confirmed known wolf takes top priority for Seer & villagers
+      const knownWolvesAlive = preferredPool.filter((p) => knownSet.has(p.id));
+      if (knownWolvesAlive.length > 0 && (bot.roleId === 'seer' || Math.random() < 0.72)) {
         return { voterId: bot.id, targetId: knownWolvesAlive[0].id };
       }
-      // Slight coordination with human player's vote if target is not a confirmed villager
-      if (humanTargetId && Math.random() < 0.35) {
-        const humanTarget = basePool.find((p) => p.id === humanTargetId);
+
+      // 2. Consistent with the player this bot explicitly accused in Day Discussion
+      const accusedAlive = preferredPool.filter((p) => mySuspects.has(p.id));
+      if (accusedAlive.length > 0) {
+        return { voterId: bot.id, targetId: accusedAlive[0].id };
+      }
+
+      // 3. If this bot specifically suspected silent players in chat, target a silent player
+      if (silentVotersSet.has(bot.id)) {
+        const silentTargets = preferredPool.filter((p) => silentSet.has(p.id));
+        if (silentTargets.length > 0) {
+          return { voterId: bot.id, targetId: silentTargets[0].id };
+        }
+      }
+
+      // 4. Slight coordination with human player's vote if target is not an ally
+      if (humanTargetId && !myAllies.has(humanTargetId) && Math.random() < 0.35) {
+        const humanTarget = preferredPool.find((p) => p.id === humanTargetId);
         if (humanTarget) {
           return { voterId: bot.id, targetId: humanTarget.id };
         }
       }
     }
 
-    const pick = basePool[Math.floor(Math.random() * basePool.length)];
+    const pick = preferredPool[Math.floor(Math.random() * preferredPool.length)];
     return { voterId: bot.id, targetId: pick.id };
   });
 }
@@ -1628,9 +1749,8 @@ export function shouldAutoAdvanceOnTimerZero(params: {
   }
 
   if (params.phase === 'day_voting') {
-    if (params.isHumanAlive && !params.hasHumanVoted) {
-      return false;
-    }
+    // BUG-15: When Day Voting countdown hits 0s, auto-cast Campfire Abstain (phiếu trắng)
+    // for any unvoted human player and tally votes cleanly!
     return true;
   }
 

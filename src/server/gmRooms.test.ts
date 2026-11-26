@@ -175,3 +175,46 @@ test('GM room rejects non-host sync, preserves claimed seats and self_input role
   assert.equal(mgr.getPlayerView('GM-4444', 'p_guest_1')?.mySeat, null);
 });
 
+test('[QA Regression] BUG-05: GM resetMatch bumps matchId and preserves claimed seats & names for next match', () => {
+  const mgr = new GMRoomManager();
+  mgr.syncFromHost('GM-5555', 'gm_host_1', {
+    deckMode: 'virtual_deck',
+    status: 'setup',
+    seats: [
+      { id: 'p_1', name: 'Ghế #1', roleId: 'werewolf', roleSource: 'auto_dealt' },
+      { id: 'p_2', name: 'Ghế #2', roleId: 'seer', roleSource: 'auto_dealt' },
+      { id: 'p_3', name: 'Ghế #3', roleId: 'villager', roleSource: 'auto_dealt' },
+      { id: 'p_4', name: 'Ghế #4', roleId: 'villager', roleSource: 'auto_dealt' },
+    ],
+  });
+
+  const joinRes = mgr.joinAsPlayer('GM-5555', { id: 'u_khanh', name: 'Khánh Vy' });
+  assert.equal(joinRes.ok, true);
+  if (!joinRes.ok) return;
+  const initialMatchId = joinRes.view.matchId;
+  assert.equal(typeof initialMatchId, 'string');
+  assert.ok(initialMatchId.length > 0);
+
+  const resetRes = mgr.syncFromHost('GM-5555', 'gm_host_1', {
+    deckMode: 'virtual_deck',
+    status: 'setup',
+    phase: 'setup',
+    round: 1,
+    resetMatch: true,
+    seats: [
+      { id: 'p_1', name: 'Khánh Vy', roleId: 'witch', roleSource: 'auto_dealt', isAlive: true },
+      { id: 'p_2', name: 'Ghế #2', roleId: 'werewolf', roleSource: 'auto_dealt', isAlive: true },
+      { id: 'p_3', name: 'Ghế #3', roleId: 'villager', roleSource: 'auto_dealt', isAlive: true },
+      { id: 'p_4', name: 'Ghế #4', roleId: 'seer', roleSource: 'auto_dealt', isAlive: true },
+    ],
+  });
+  assert.equal(resetRes.ok, true);
+  if (!resetRes.ok) return;
+  assert.notEqual(resetRes.room.matchId, initialMatchId);
+
+  const nextView = mgr.getPlayerView('GM-5555', 'u_khanh');
+  assert.equal(nextView?.matchId, resetRes.room.matchId);
+  assert.equal(nextView?.mySeat?.name, 'Khánh Vy');
+  assert.equal(nextView?.mySeat?.roleId, 'witch');
+  assert.equal(nextView?.mySeat?.isAlive, true);
+});

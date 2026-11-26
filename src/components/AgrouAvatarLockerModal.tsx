@@ -11,6 +11,7 @@ import {
 } from '../game/agrouMechanics';
 import { sound } from '../utils/sound';
 import { AvatarPreview3D } from './AvatarPreview3D';
+import { BIOME_DESCRIPTIONS, BiomeThumbSvg } from './BiomeThumbSvg';
 
 interface AgrouAvatarLockerModalProps {
   isOpen: boolean;
@@ -186,7 +187,7 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
                   <Map className="w-3.5 h-3.5" />
                   <span>{lang === 'vi' ? '3. Bản Đồ Lửa Trại 3D' : '3. 3D Campfire Map'}</span>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {(Object.keys(AGROU_BIOMES) as AgrouMapBiome[]).map((bKey) => {
                     const biome = AGROU_BIOMES[bKey];
                     const isSelected = config.mapBiome === bKey;
@@ -199,16 +200,21 @@ export const AgrouAvatarLockerModal: React.FC<AgrouAvatarLockerModalProps> = ({
                           sound.playCardFlip();
                           onChange({ ...config, mapBiome: bKey });
                         }}
-                        className={`w-full text-left px-2.5 py-2 rounded-xl border transition-all flex items-center justify-between gap-1.5 cursor-pointer ${
+                        className={`w-full text-left p-2 rounded-xl border transition-all flex items-center justify-between gap-2 cursor-pointer ${
                           isSelected
                             ? 'bg-[#462d18] border-[#f59e0b] text-[#fff6e5]'
-                            : 'bg-[#221710] border-[#593c23] text-[#d9c3a5] hover:border-[#a87238]'
+                            : 'bg-[#221710] border-[#593c23] text-[#e6d5b8] hover:border-[#a87238]'
                         }`}
                       >
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="text-base shrink-0">{biome.icon}</span>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <BiomeThumbSvg biome={bKey} className="w-10 h-7 rounded-md border border-white/15 shrink-0" />
                           <div className="min-w-0">
-                            <div className="text-[11px] font-extrabold truncate">{biome.name[lang]}</div>
+                            <div className="text-[11px] font-extrabold truncate">
+                              {biome.icon} {biome.name[lang]}
+                            </div>
+                            <div className="text-[10px] text-[#d6bfa2] truncate">
+                              {BIOME_DESCRIPTIONS[bKey][lang]}
+                            </div>
                           </div>
                         </div>
                         {isSelected && <Check className="w-3.5 h-3.5 text-[#f59e0b] shrink-0" />}

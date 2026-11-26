@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Smartphone,
   Eye,
@@ -84,8 +84,45 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
   const [isEditingOwnRole, setIsEditingOwnRole] = useState<boolean>(false);
   const [pickedRoleId, setPickedRoleId] = useState<RoleId>('villager');
   const [isSavingRole, setIsSavingRole] = useState<boolean>(false);
+  const lastMatchIdRef = useRef<string | null>(null);
 
   const isVi = lang === 'vi';
+
+  const applyIncomingPlayerView = useCallback(
+    (nextView: GMRoomPlayerView) => {
+      const prevMatchId = lastMatchIdRef.current;
+      const matchChanged =
+        Boolean(prevMatchId) &&
+        Boolean(nextView.matchId) &&
+        prevMatchId !== nextView.matchId;
+
+      if (nextView.matchId) {
+        lastMatchIdRef.current = nextView.matchId;
+      }
+
+      setPlayerView(nextView);
+
+      if (matchChanged) {
+        setIsRevealed(false);
+        if (nextView.mySeat?.roleId) {
+          setPickedRoleId(nextView.mySeat.roleId);
+          setIsEditingOwnRole(false);
+        } else if (nextView.canSelfInputRole) {
+          setIsEditingOwnRole(true);
+        } else {
+          setIsEditingOwnRole(false);
+        }
+        setStatusNotice(
+          isVi
+            ? 'Quản Trò đã khởi tạo ván mới! Thẻ bài của bạn đã được làm mới.'
+            : 'The Game Master started a new match! Your role card has been refreshed.'
+        );
+      } else if (!nextView.canSelfInputRole) {
+        setIsEditingOwnRole(false);
+      }
+    },
+    [isVi]
+  );
 
   const fetchOpenRooms = useCallback(async () => {
     try {
@@ -164,6 +201,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
 
         const view = data.view as GMRoomPlayerView;
         setRoomIdInput(view.code);
+        lastMatchIdRef.current = view.matchId || null;
         setPlayerView(view);
         setIsRevealed(false);
         if (view.mySeat?.roleId) {
@@ -202,27 +240,39 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
     }
   }, [initialRoomId]);
 
-  // Real-time WebSocket subscription for live updates ONLY for this player's own seat
+  // Real-time WebSocket subscription + resilient HTTP polling fallback for live updates ONLY for this player's own seat (BUG-05)
   useEffect(() => {
     if (!playerView?.code) return;
     const roomCode = playerView.code;
 
     const unsub = realtimeClient.subscribe((evt) => {
       if (evt.type === 'gm:player_state' && evt.view.code === roomCode) {
-        setPlayerView(evt.view);
-        if (!evt.view.canSelfInputRole) {
-          setIsEditingOwnRole(false);
-        }
+        applyIncomingPlayerView(evt.view);
       }
     });
 
     realtimeClient.subscribeGMPlayer(roomCode, playerUid);
 
+    const pollInterval = window.setInterval(async () => {
+      try {
+        const res = await fetch(
+          `/api/gm-rooms/${encodeURIComponent(roomCode)}/player/${encodeURIComponent(playerUid)}`
+        );
+        const data = await res.json();
+        if (data?.ok && data.view) {
+          applyIncomingPlayerView(data.view);
+        }
+      } catch {
+        // ignore transient network glitches
+      }
+    }, 3000);
+
     return () => {
+      window.clearInterval(pollInterval);
       unsub();
       realtimeClient.unsubscribeGM();
     };
-  }, [playerView?.code, playerUid]);
+  }, [playerView?.code, playerUid, applyIncomingPlayerView]);
 
   const handleSubmitSelfRole = async () => {
     if (!playerView?.code) return;
@@ -275,7 +325,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
       );
       const data = await res.json();
       if (data?.ok && data.view) {
-        setPlayerView(data.view);
+        applyIncomingPlayerView(data.view);
         sound.playCardFlip();
       }
     } catch {

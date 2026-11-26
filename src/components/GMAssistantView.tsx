@@ -40,6 +40,8 @@ import { TRANSLATIONS } from '../utils/i18n';
 import { addMatchHistory } from '../utils/storage';
 import { realtimeClient } from '../utils/realtimeClient';
 import type { GMDeckMode, GMPlayerSeat, GMRoleSource } from '../server/gmRooms';
+import { generateQrMatrix } from '../utils/qrSvg';
+import { RoleRevealRoster } from './RoleRevealRoster';
 import confetti from 'canvas-confetti';
 
 interface GMAssistantViewProps {
@@ -129,6 +131,10 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     'Bấm các nút Âm Hiệu bên dưới để phát tiếng Sói Hú, Phù Thủy Ma Mị hoặc Thợ Săn "Tao có súng đó nha!"'
   );
 
+  const [copyToast, setCopyToast] = useState<string>('');
+  const [hunterTriggerPhase, setHunterTriggerPhase] = useState<'night' | 'day'>('day');
+  const pendingResetMatchRef = React.useRef<boolean>(false);
+
   const skipNextSyncRef = React.useRef<boolean>(false);
   const isGameStartedRef = React.useRef<boolean>(isGameStarted);
   isGameStartedRef.current = isGameStarted;
@@ -137,37 +143,53 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     if (initialRoomId) setRoomId(initialRoomId.trim().toUpperCase());
   }, [initialRoomId]);
 
-  // Subscribe to real-time updates from players joining / leaving / self-entering physical cards
+  const applyIncomingHostSeats = React.useCallback((incomingSeats: GMPlayerSeat[]) => {
+    if (!isGameStartedRef.current) {
+      skipNextSyncRef.current = true;
+      setSeats(incomingSeats);
+      setCustomCountInput(String(incomingSeats.length));
+    } else {
+      skipNextSyncRef.current = true;
+      setSeats((prev) =>
+        prev.map((s) => {
+          const incoming = incomingSeats.find((inc) => inc.id === s.id);
+          return incoming ? { ...s, claimedByUserId: incoming.claimedByUserId } : s;
+        })
+      );
+    }
+  }, []);
+
+  // Subscribe to real-time updates + resilient 2.5s HTTP polling fallback so Tab 1 always syncs claims & self-input roles (BUG-05)
   useEffect(() => {
     const cleanCode = roomId.trim().toUpperCase();
     if (cleanCode.length < 3) return;
 
     const unsub = realtimeClient.subscribe((evt) => {
       if (evt.type === 'gm:host_state' && evt.room.code === cleanCode) {
-        if (!isGameStartedRef.current) {
-          skipNextSyncRef.current = true;
-          setSeats(evt.room.seats);
-          setCustomCountInput(String(evt.room.seats.length));
-        } else {
-          // Even during an active match, keep claimedByUserId in sync if a player reconnects or leaves
-          skipNextSyncRef.current = true;
-          setSeats((prev) =>
-            prev.map((s) => {
-              const incoming = evt.room.seats.find((inc) => inc.id === s.id);
-              return incoming ? { ...s, claimedByUserId: incoming.claimedByUserId } : s;
-            })
-          );
-        }
+        applyIncomingHostSeats(evt.room.seats);
       }
     });
 
     realtimeClient.subscribeGMHost(cleanCode);
 
+    const pollInterval = window.setInterval(async () => {
+      try {
+        const res = await fetch(`/api/gm-rooms/${encodeURIComponent(cleanCode)}/host`);
+        const data = await res.json();
+        if (data?.ok && data.room?.seats) {
+          applyIncomingHostSeats(data.room.seats);
+        }
+      } catch {
+        // ignore transient network errors
+      }
+    }, 2500);
+
     return () => {
+      window.clearInterval(pollInterval);
       unsub();
       realtimeClient.unsubscribeGM();
     };
-  }, [roomId]);
+  }, [roomId, applyIncomingHostSeats]);
 
   // Sync GM room state to server (cross-device live sync + strict per-player privacy)
   useEffect(() => {
@@ -194,6 +216,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
         })
       : seats;
 
+    const shouldResetMatch = pendingResetMatchRef.current;
+    pendingResetMatchRef.current = false;
+
     fetch(`/api/gm-rooms/${encodeURIComponent(cleanCode)}/sync`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -204,6 +229,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
         round: roundNumber,
         phase: isGameStarted ? currentPhase : 'setup',
         seats: syncSeats,
+        resetMatch: shouldResetMatch,
       }),
     }).catch(() => {
       // ignore transient network errors
@@ -243,23 +269,72 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setActiveCalloutBanner(`${info.sfxLabel}: "${info.quote}"`);
   };
 
+  const joinUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.origin}${window.location.pathname}?gm=${encodeURIComponent(roomId)}`
+      : `?gm=${encodeURIComponent(roomId)}`;
+
+  const qrMatrix = React.useMemo(() => generateQrMatrix(joinUrl), [joinUrl]);
+
+  const showToast = (msg: string) => {
+    setCopyToast(msg);
+    window.setTimeout(() => setCopyToast((prev) => (prev === msg ? '' : prev)), 2500);
+  };
+
   const handleCopyRoomCode = () => {
     sound.playCardFlip();
     if (navigator.clipboard) {
       navigator.clipboard.writeText(roomId).catch(() => {});
     }
     setCopiedType('code');
+    showToast(`Đã sao chép mã phòng ${roomId}`);
     setTimeout(() => setCopiedType('none'), 2000);
   };
 
   const handleCopyJoinLink = () => {
     sound.playCardFlip();
-    const url = `${window.location.origin}${window.location.pathname}?gmroom=${encodeURIComponent(roomId)}`;
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(url).catch(() => {});
+      navigator.clipboard.writeText(joinUrl).catch(() => {});
     }
     setCopiedType('link');
+    showToast('Đã sao chép link phòng');
     setTimeout(() => setCopiedType('none'), 2000);
+  };
+
+  const handleResetForNewMatch = () => {
+    sound.playCardFlip();
+    pendingResetMatchRef.current = true;
+    setIsGameStarted(false);
+    setGameResult(null);
+    setShowHunterModal(false);
+    setActiveHunterId('');
+    setHunterVictimId('');
+    setRoundNumber(1);
+    setCurrentPhase('night');
+    setNightStep(0);
+    setWolfPupFrenzy(false);
+    setLastNightSummary([]);
+    setLastNightResult(null);
+    setSelectedLynchTargetId('');
+    setSeats((prev) => {
+      if (deckMode === 'virtual_deck') {
+        const roles = generateBalancedRoster(prev.length);
+        return prev.map((s, idx) => ({
+          ...s,
+          isAlive: true,
+          roleId: roles[idx] || 'villager',
+          roleSource: 'auto_dealt' as GMRoleSource,
+          elderLives: roles[idx] === 'elder' ? 2 : undefined,
+        }));
+      }
+      return prev.map((s) => ({
+        ...s,
+        isAlive: true,
+        roleId: null,
+        roleSource: 'unassigned' as GMRoleSource,
+        elderLives: undefined,
+      }));
+    });
   };
 
   const handleSwitchDeckMode = (nextMode: GMDeckMode) => {
@@ -487,7 +562,18 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     prompt: string;
   }
 
+  // BUG-12: Canonical wake order: #5 Nhân Bản → #10 Cupid → #15 Bảo Vệ → #20 Ma Sói & Sói Con → #30 Phù Thủy → #40 Tiên Tri
   const nightSteps: NightStepDef[] = [];
+
+  if (hasDoppel) {
+    nightSteps.push({
+      id: 'doppelganger',
+      roleId: 'doppelganger',
+      title: 'Nhân Bản Thức Dậy',
+      description: 'Quản trò gọi: "Nhân Bản thức dậy, chọn 1 người làm hình mẫu."',
+      prompt: 'Quản trò ghi nhớ người được chọn.',
+    });
+  }
 
   if (hasCupid) {
     nightSteps.push({
@@ -499,13 +585,13 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     });
   }
 
-  if (hasDoppel) {
+  if (players.some((p) => p.roleId === 'bodyguard' && p.isAlive)) {
     nightSteps.push({
-      id: 'doppelganger',
-      roleId: 'doppelganger',
-      title: 'Nhân Bản Thức Dậy',
-      description: 'Quản trò gọi: "Nhân Bản thức dậy, chọn 1 người làm hình mẫu."',
-      prompt: 'Quản trò ghi nhớ người được chọn.',
+      id: 'bodyguard',
+      roleId: 'bodyguard',
+      title: 'Bảo Vệ Thức Dậy',
+      description: 'Quản trò gọi: "Bảo Vệ thức dậy, chọn 1 người để che chở đêm nay."',
+      prompt: 'Lưu ý: Không được bảo vệ cùng 1 người 2 đêm liên tiếp!',
     });
   }
 
@@ -542,15 +628,29 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     });
   }
 
-  if (players.some((p) => p.roleId === 'bodyguard' && p.isAlive)) {
-    nightSteps.push({
-      id: 'bodyguard',
-      roleId: 'bodyguard',
-      title: 'Bảo Vệ Thức Dậy',
-      description: 'Quản trò gọi: "Bảo Vệ thức dậy, chọn 1 người để che chở đêm nay."',
-      prompt: 'Lưu ý: Không được bảo vệ cùng 1 người 2 đêm liên tiếp!',
+  const recordVictory = (
+    winCheck: { isOver: boolean; winner: string | null; reason: string },
+    rosterPlayers: Player[],
+    mvpLabel: string
+  ) => {
+    setGameResult(winCheck);
+    sound.playVictory();
+    confetti({ particleCount: 95, spread: 75 });
+    addMatchHistory({
+      id: 'match_' + Date.now(),
+      roomId,
+      date: new Date().toLocaleString(),
+      winner: (winCheck.winner as 'villagers' | 'werewolves' | 'lovers' | 'tanner' | 'draw') || 'villagers',
+      rounds: roundNumber,
+      playersCount: rosterPlayers.length,
+      mvp: mvpLabel,
+      roster: rosterPlayers.map((p) => ({
+        name: p.name,
+        roleId: p.roleId,
+        isAlive: p.isAlive,
+      })),
     });
-  }
+  };
 
   const handleResolveNight = () => {
     sound.playDayGong();
@@ -570,6 +670,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
     if (result.triggeredHunterId) {
       triggerRoleVoice('hunter');
+      setHunterTriggerPhase('night');
       setActiveHunterId(result.triggeredHunterId);
       setShowHunterModal(true);
       return;
@@ -577,23 +678,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
     const winCheck = checkWinCondition(updatedPlayers);
     if (winCheck.isOver) {
-      setGameResult(winCheck);
-      sound.playVictory();
-      confetti({ particleCount: 90, spread: 70 });
-      addMatchHistory({
-        id: 'match_' + Date.now(),
-        roomId,
-        date: new Date().toLocaleString(),
-        winner: winCheck.winner || 'villagers',
-        rounds: roundNumber,
-        playersCount: updatedPlayers.length,
-        mvp: 'Quản Trò Vận Hành',
-        roster: updatedPlayers.map((p) => ({
-          name: p.name,
-          roleId: p.roleId,
-          isAlive: p.isAlive,
-        })),
-      });
+      recordVictory(winCheck, updatedPlayers, 'Quản Trò Vận Hành');
     }
   };
 
@@ -620,6 +705,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
     if (triggeredHunterId) {
       triggerRoleVoice('hunter');
+      setHunterTriggerPhase('day');
       setActiveHunterId(triggeredHunterId);
       setShowHunterModal(true);
       return;
@@ -627,23 +713,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
     const winCheck = checkWinCondition(updatedPlayers, lynchedId);
     if (winCheck.isOver) {
-      setGameResult(winCheck);
-      sound.playVictory();
-      confetti({ particleCount: 100, spread: 80 });
-      addMatchHistory({
-        id: 'match_' + Date.now(),
-        roomId,
-        date: new Date().toLocaleString(),
-        winner: winCheck.winner || 'villagers',
-        rounds: roundNumber,
-        playersCount: updatedPlayers.length,
-        mvp: `${target.name}`,
-        roster: updatedPlayers.map((p) => ({
-          name: p.name,
-          roleId: p.roleId,
-          isAlive: p.isAlive,
-        })),
-      });
+      recordVictory(winCheck, updatedPlayers, target.name);
     } else {
       handleNextNight();
     }
@@ -652,26 +722,53 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   const handleConfirmHunterShot = () => {
     if (!hunterVictimId) return;
     sound.playDeath();
-    const { updatedPlayers, wolfPupTriggeredNextNight, cascadeMessages } = resolveHunterShot(
-      players,
-      activeHunterId,
-      hunterVictimId
-    );
+    const { updatedPlayers, wolfPupTriggeredNextNight, triggeredHunterId, cascadeMessages } =
+      resolveHunterShot(players, activeHunterId, hunterVictimId);
     if (wolfPupTriggeredNextNight) {
       setWolfPupFrenzy(true);
     }
     if (cascadeMessages.length > 0) {
       setLastNightSummary((prev) => [...prev, ...cascadeMessages]);
     }
-    setShowHunterModal(false);
     setHunterVictimId('');
     setPlayers(updatedPlayers);
 
+    // BUG-08: Chained Hunter must resolve BEFORE win condition
+    if (triggeredHunterId) {
+      triggerRoleVoice('hunter');
+      setActiveHunterId(triggeredHunterId);
+      setShowHunterModal(true);
+      return;
+    }
+
+    setShowHunterModal(false);
+    setActiveHunterId('');
+
     const winCheck = checkWinCondition(updatedPlayers);
     if (winCheck.isOver) {
-      setGameResult(winCheck);
-      sound.playVictory();
-      confetti({ particleCount: 90, spread: 70 });
+      recordVictory(winCheck, updatedPlayers, 'Phát Súng Thợ Săn');
+    } else if (hunterTriggerPhase === 'day') {
+      // BUG-07: After a Day-lynched Hunter resolves without game over, transition cleanly to Next Night!
+      handleNextNight();
+    }
+  };
+
+  const handleSkipHunterShot = () => {
+    sound.playCardFlip();
+    const hunterName = players.find((p) => p.id === activeHunterId)?.name || 'Thợ Săn';
+    setLastNightSummary((prev) => [
+      ...prev,
+      `🎯 ${hunterName} đã chọn giữ súng (không bắn ai).`,
+    ]);
+    setShowHunterModal(false);
+    setHunterVictimId('');
+    setActiveHunterId('');
+
+    const winCheck = checkWinCondition(players);
+    if (winCheck.isOver) {
+      recordVictory(winCheck, players, 'Quản Trò Vận Hành');
+    } else if (hunterTriggerPhase === 'day') {
+      handleNextNight();
     }
   };
 
@@ -712,47 +809,100 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
           </p>
         </div>
 
-        <div className="bg-[#090d18] border border-amber-600/40 rounded-xl px-4 py-2.5 text-center space-y-1.5">
-          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
-            Mã Phòng Cho Người Chơi
-          </span>
-          <div className="flex items-center justify-center gap-2">
-            <span
-              data-testid="gm-host-room-code"
-              className="text-base font-mono font-extrabold text-amber-300 tracking-widest"
+        <div className="bg-[#090d18] border border-amber-600/40 rounded-xl px-4 py-2.5 flex items-center gap-3.5">
+          {/* BUG-16: Real scannable offline QR code pointing directly to ?gm=ROOM_CODE */}
+          <div
+            data-testid="gm-room-qr"
+            title={`Quét QR để vào phòng ${roomId}`}
+            className="bg-white p-1.5 rounded-lg shrink-0 border border-amber-400/50 shadow"
+          >
+            <svg
+              width={64}
+              height={64}
+              viewBox={`0 0 ${qrMatrix.length + 2} ${qrMatrix.length + 2}`}
+              shapeRendering="crispEdges"
+              role="img"
+              aria-label={`Mã QR phòng ${roomId}`}
             >
-              {roomId}
-            </span>
-            <button
-              type="button"
-              onClick={handleCopyRoomCode}
-              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-amber-200 flex items-center gap-1 cursor-pointer"
-            >
-              {copiedType === 'code' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-              <span>{copiedType === 'code' ? 'Đã chép' : 'Chép mã'}</span>
-            </button>
+              <rect
+                x={0}
+                y={0}
+                width={qrMatrix.length + 2}
+                height={qrMatrix.length + 2}
+                fill="#ffffff"
+              />
+              {qrMatrix.map((row, y) =>
+                row.map((cell, x) =>
+                  cell ? (
+                    <rect
+                      key={`${x}-${y}`}
+                      x={x + 1}
+                      y={y + 1}
+                      width={1}
+                      height={1}
+                      fill="#0f172a"
+                    />
+                  ) : null
+                )
+              )}
+            </svg>
           </div>
-          <div className="flex items-center justify-center gap-2 pt-0.5">
-            <button
-              type="button"
-              onClick={handleCopyJoinLink}
-              className="text-[11px] text-sky-300 hover:text-sky-200 flex items-center gap-1 font-semibold cursor-pointer"
-            >
-              {copiedType === 'link' ? <Check className="w-3 h-3 text-emerald-400" /> : <Link2 className="w-3 h-3" />}
-              <span>{copiedType === 'link' ? 'Đã chép link!' : 'Chép link vào phòng'}</span>
-            </button>
-            <span className="text-slate-700">·</span>
-            <button
-              type="button"
-              onClick={() => onOpenVirtualCards(roomId)}
-              className="text-[11px] text-amber-400 hover:text-amber-300 underline flex items-center gap-1 font-semibold cursor-pointer"
-            >
-              <Smartphone className="w-3 h-3" />
-              <span>Xem Giao Diện Người Chơi</span>
-            </button>
+
+          <div className="text-left space-y-1.5">
+            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+              Mã Phòng & QR Cho Người Chơi
+            </span>
+            <div className="flex items-center gap-2">
+              <span
+                data-testid="gm-host-room-code"
+                className="text-base font-mono font-extrabold text-amber-300 tracking-widest"
+              >
+                {roomId}
+              </span>
+              <button
+                type="button"
+                onClick={handleCopyRoomCode}
+                className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold text-amber-200 flex items-center gap-1 cursor-pointer"
+              >
+                {copiedType === 'code' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                <span>{copiedType === 'code' ? 'Đã chép' : 'Chép mã'}</span>
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 pt-0.5">
+              <button
+                type="button"
+                data-testid="gm-copy-join-link-btn"
+                onClick={handleCopyJoinLink}
+                className="text-[11px] text-sky-300 hover:text-sky-200 flex items-center gap-1 font-semibold cursor-pointer"
+              >
+                {copiedType === 'link' ? <Check className="w-3 h-3 text-emerald-400" /> : <Link2 className="w-3 h-3" />}
+                <span>{copiedType === 'link' ? 'Đã sao chép link phòng' : 'Chép link vào phòng'}</span>
+              </button>
+              <span className="text-slate-700">·</span>
+              <button
+                type="button"
+                data-testid="gm-open-player-view-btn"
+                onClick={() => onOpenVirtualCards(roomId)}
+                className="text-[11px] text-amber-400 hover:text-amber-300 underline flex items-center gap-1 font-semibold cursor-pointer"
+              >
+                <Smartphone className="w-3 h-3" />
+                <span>Xem Giao Diện Người Chơi</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {copyToast && (
+        <div
+          role="status"
+          data-testid="gm-copy-toast"
+          className="fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-xl bg-emerald-950/95 border border-emerald-400/70 text-xs font-extrabold text-emerald-100 shadow-2xl flex items-center gap-2"
+        >
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span>{copyToast}</span>
+        </div>
+      )}
 
       {/* Soundboard & Role Voice Callouts Bar for Real-Life GM */}
       <div className="bg-[#090d18] border border-amber-600/40 rounded-2xl p-3.5 space-y-2.5">
@@ -1089,7 +1239,8 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
             </div>
 
             <button
-              onClick={() => setIsGameStarted(false)}
+              type="button"
+              onClick={handleResetForNewMatch}
               className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 hover:text-white flex items-center gap-1.5 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -1103,6 +1254,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 {nightSteps.map((step, idx) => (
                   <button
                     key={step.id}
+                    type="button"
                     onClick={() => {
                       setNightStep(idx);
                       triggerRoleVoice(step.roleId);
@@ -1110,11 +1262,11 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
                       nightStep === idx
                         ? 'bg-rose-700 text-white'
-                        : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+                        : 'bg-slate-800 text-slate-300 hover:text-white'
                     }`}
                   >
                     <span>#{idx + 1}</span>
-                    <span>{step.title.split(' ')[0]}</span>
+                    <span>{ROLES[step.roleId].name[lang] || ROLES[step.roleId].name.vi}</span>
                   </button>
                 ))}
               </div>
@@ -1794,13 +1946,14 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
       {showHunterModal && (
         <div
+          data-testid="gm-hunter-modal"
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ backgroundColor: 'rgba(5, 8, 17, 0.9)' }}
         >
           <div className="w-full max-w-md bg-[#0f172a] border border-yellow-500/50 rounded-2xl p-6 space-y-4 text-center">
             <h3 className="text-lg font-bold text-yellow-200">🎯 Phát Súng Thợ Săn: "Tao có súng đó nha!"</h3>
             <p className="text-xs text-slate-300">
-              Chọn 1 người chơi bị Thợ Săn bắn hạ theo cùng:
+              Chọn 1 người chơi bị Thợ Săn bắn hạ theo cùng — hoặc chọn giữ súng không bắn:
             </p>
             <div className="grid grid-cols-2 gap-2 text-left">
               {players
@@ -1808,6 +1961,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 .map((p) => (
                   <button
                     key={p.id}
+                    type="button"
                     onClick={() => setHunterVictimId(p.id)}
                     className={`p-2.5 rounded-xl border text-xs font-semibold cursor-pointer ${
                       hunterVictimId === p.id
@@ -1819,23 +1973,36 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   </button>
                 ))}
             </div>
-            <button
-              disabled={!hunterVictimId}
-              onClick={handleConfirmHunterShot}
-              className="w-full py-2.5 rounded-xl bg-yellow-500 hover:bg-yellow-400 disabled:opacity-40 text-slate-950 font-extrabold text-xs cursor-pointer"
-            >
-              Xác Nhận Phát Bắn
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                data-testid="gm-hunter-hold-fire-btn"
+                onClick={handleSkipHunterShot}
+                className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs cursor-pointer"
+              >
+                Giữ súng (Không bắn)
+              </button>
+              <button
+                type="button"
+                data-testid="gm-hunter-confirm-shot-btn"
+                disabled={!hunterVictimId}
+                onClick={handleConfirmHunterShot}
+                className="flex-1 py-2.5 rounded-xl bg-yellow-500 hover:bg-yellow-400 disabled:opacity-40 text-slate-950 font-extrabold text-xs cursor-pointer"
+              >
+                Xác Nhận Phát Bắn
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {gameResult && gameResult.isOver && (
         <div
+          data-testid="gm-victory-modal"
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ backgroundColor: 'rgba(5, 8, 17, 0.92)' }}
         >
-          <div className="w-full max-w-md bg-[#0f172a] border-2 border-amber-500/60 rounded-2xl p-6 text-center space-y-4">
+          <div className="w-full max-w-2xl bg-[#0f172a] border-2 border-amber-500/60 rounded-2xl p-6 text-center space-y-4 max-h-[90vh] overflow-y-auto">
             <h3 className="text-xl font-extrabold text-amber-200">
               {gameResult.winner === 'werewolves'
                 ? '🐺 Phe Ma Sói Chiến Thắng!'
@@ -1846,11 +2013,14 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 : '🏆 Phe Dân Làng Chiến Thắng!'}
             </h3>
             <p className="text-xs text-slate-300">{gameResult.reason}</p>
+
+            {/* BUG-24: Full role reveal roster at match end */}
+            <RoleRevealRoster players={players} lang={lang} />
+
             <button
-              onClick={() => {
-                setIsGameStarted(false);
-                setGameResult(null);
-              }}
+              type="button"
+              data-testid="gm-play-new-match-btn"
+              onClick={handleResetForNewMatch}
               className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs cursor-pointer"
             >
               Chơi Ván Mới

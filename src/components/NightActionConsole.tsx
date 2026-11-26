@@ -21,6 +21,7 @@ interface NightActionConsoleProps {
   seerInspectResult: string | null;
   cupidLovers: [string, string] | null;
   onToggleWitchHeal: () => void;
+  onConfirmSeerInspect?: () => void;
   onConfirmNightAction: () => void;
   onAdvanceBotStep: () => void;
   onCloseEyes: () => void;
@@ -42,6 +43,7 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
   seerInspectResult,
   cupidLovers,
   onToggleWitchHeal,
+  onConfirmSeerInspect,
   onConfirmNightAction,
   onAdvanceBotStep,
   onCloseEyes,
@@ -205,13 +207,33 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
         </div>
       )}
 
-      {/* Seer Result OR Selected Target Chip */}
+      {/* Seer Result OR Confirm-Before-Reveal OR Selected Target Chip (BUG-25) */}
       {seerInspectResult ? (
         <div
           data-testid="role-console-seer-result"
-          className="px-2.5 py-1 rounded-lg bg-[#382147] border border-[#c084fc] text-[#f3e8ff] text-[11px] font-extrabold"
+          className="px-2.5 py-1.5 rounded-lg bg-[#382147] border border-[#c084fc] text-[#f3e8ff] text-xs font-extrabold"
         >
           🔮 {seerInspectResult}
+        </div>
+      ) : me.roleId === 'seer' && currentNightStep.key === 'seer' && selectedTargetId && onConfirmSeerInspect ? (
+        <div
+          data-testid="role-console-seer-pending"
+          className="flex flex-wrap items-center justify-between gap-2 px-2.5 py-1.5 rounded-xl bg-[#2c193a] border border-[#c084fc]/80"
+        >
+          <span className="text-xs font-bold text-[#f3e8ff]">
+            🔮 {lang === 'vi' ? 'Đang ngắm soi:' : 'Target selected:'}{' '}
+            <strong className="text-[#fde047]">
+              {players.find((p) => p.id === selectedTargetId)?.name || ''}
+            </strong>
+          </span>
+          <button
+            type="button"
+            data-testid="role-console-seer-confirm-btn"
+            onClick={onConfirmSeerInspect}
+            className="px-3 py-1 rounded-lg bg-[#9333ea] hover:bg-[#a855f7] border border-[#e9d5ff]/70 text-white text-xs font-extrabold cursor-pointer shadow"
+          >
+            🔮 {lang === 'vi' ? 'Xác Nhận Soi' : 'Confirm Inspect'}
+          </button>
         </div>
       ) : (
         selectedSummary && (

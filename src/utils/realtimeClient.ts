@@ -117,6 +117,25 @@ class WerewolfRealtimeClient {
     }, delay);
   }
 
+  forceReconnect(): void {
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempt = 0;
+    if (this.ws) {
+      try {
+        this.ws.onclose = null;
+        this.ws.close();
+      } catch {
+        // ignore
+      }
+      this.ws = null;
+    }
+    this.setStatus('disconnected');
+    this.connect();
+  }
+
   subscribe(listener: EventListener): () => void {
     this.listeners.add(listener);
     this.connect();

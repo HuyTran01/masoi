@@ -31,6 +31,8 @@ interface GameTopHudProps {
   totalPlayers: number;
   aliveWolvesCount: number;
   aliveVillagersCount: number;
+  aliveThirdPartyCount?: number;
+  hasThirdPartyInMatch?: boolean;
   showFactionHints: boolean;
   showFastForwardBtn: boolean;
   myRole: RoleDefinition;
@@ -64,6 +66,8 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
   totalPlayers,
   aliveWolvesCount,
   aliveVillagersCount,
+  aliveThirdPartyCount = 0,
+  hasThirdPartyInMatch = false,
   showFactionHints,
   showFastForwardBtn,
   myRole,
@@ -202,19 +206,19 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
         >
           {showFactionHints ? (
             <>
-              <div>
-                <span className="text-[8px] font-bold uppercase text-[#f87171] block">
+              <div data-testid="hud-wolves-count">
+                <span className="text-[10px] font-bold uppercase text-[#fca5a5] block">
                   {t.wolvesAlive}
                 </span>
                 <span
-                  className="text-sm font-black text-[#fecaca] font-mono"
+                  className="text-sm font-black text-[#fee2e2] font-mono"
                   style={{ fontVariantNumeric: 'tabular-nums' }}
                 >
                   {aliveWolvesCount}
                 </span>
               </div>
-              <div>
-                <span className="text-[8px] font-bold uppercase text-[#7dd3fc] block">
+              <div data-testid="hud-villagers-count">
+                <span className="text-[10px] font-bold uppercase text-[#7dd3fc] block">
                   {t.villagersAlive}
                 </span>
                 <span
@@ -224,12 +228,25 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
                   {aliveVillagersCount}
                 </span>
               </div>
+              {hasThirdPartyInMatch && (
+                <div data-testid="hud-third-party-count">
+                  <span className="text-[10px] font-bold uppercase text-[#fcd34d] block">
+                    {lang === 'vi' ? 'PHE THỨ 3' : '3RD PARTY'}
+                  </span>
+                  <span
+                    className="text-sm font-black text-[#fef3c7] font-mono"
+                    style={{ fontVariantNumeric: 'tabular-nums' }}
+                  >
+                    {aliveThirdPartyCount}
+                  </span>
+                </div>
+              )}
             </>
           ) : (
             <div className="flex items-center gap-1.5">
               <Users className="w-3.5 h-3.5 text-[#6ee7b7]" />
               <div>
-                <span className="text-[8px] font-bold uppercase text-[#bfa586] block">
+                <span className="text-[10px] font-bold uppercase text-[#e6d5b8] block">
                   {lang === 'vi' ? 'Còn sống' : 'Alive'}
                 </span>
                 <span
@@ -288,13 +305,14 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
         <button
           type="button"
           data-testid="toggle-fpv-btn"
+          aria-pressed={!freeLook360 && cameraPreset === 'first_person'}
           tabIndex={-1}
           onClick={(e) => {
             e.currentTarget.blur();
             onToggleFirstPerson();
           }}
           className={`px-2 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center gap-1 cursor-pointer ${
-            cameraPreset === 'first_person'
+            !freeLook360 && cameraPreset === 'first_person'
               ? 'bg-[#2f7d4d] border-[#86efac] text-white'
               : 'bg-[#1c130c] border-[#6b4a2e] text-[#86efac] hover:bg-[#312115]'
           }`}
@@ -309,13 +327,14 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
         <button
           type="button"
           data-testid="toggle-tpv-btn"
+          aria-pressed={!freeLook360 && cameraPreset === 'third_person'}
           tabIndex={-1}
           onClick={(e) => {
             e.currentTarget.blur();
             onToggleThirdPerson();
           }}
           className={`px-2 py-1.5 rounded-xl border text-[11px] font-extrabold flex items-center gap-1 cursor-pointer ${
-            cameraPreset === 'third_person'
+            !freeLook360 && cameraPreset === 'third_person'
               ? 'bg-[#b45309] border-[#fde68a] text-white'
               : 'bg-[#1c130c] border-[#6b4a2e] text-[#fcd34d] hover:bg-[#312115]'
           }`}
@@ -330,6 +349,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
         <button
           type="button"
           data-testid="toggle-freelook-btn"
+          aria-pressed={freeLook360}
           tabIndex={-1}
           onClick={(e) => {
             e.currentTarget.blur();
@@ -345,6 +365,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
               ? 'Khóa chuột xoay 360° không giới hạn (bấm Esc để mở khóa chuột)'
               : 'Lock cursor for unlimited 360° look (press Esc to unlock)'
           }
+          aria-label={t.freeLook360}
         >
           <Compass className="w-3.5 h-3.5" />
           <span className="hidden lg:inline">{t.freeLook360}</span>

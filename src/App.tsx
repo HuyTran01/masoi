@@ -74,6 +74,7 @@ import { AgrouAvatarLockerModal } from './components/AgrouAvatarLockerModal';
 import { AgrouNotebookDrawer } from './components/AgrouNotebookDrawer';
 import { AgrouEmoteWheel } from './components/AgrouEmoteWheel';
 import { NightDeathCinematicOverlay } from './components/NightDeathCinematicOverlay';
+import { RoleRevealRoster } from './components/RoleRevealRoster';
 import { realtimeClient } from './utils/realtimeClient';
 import type { RealtimeTimerConfig } from './server/realtimeRooms';
 import type { GMDeckMode } from './server/gmRooms';
@@ -100,6 +101,7 @@ import {
   buildVoteTallyEntries,
   checkWinCondition,
   resolveHunterShot,
+  computeFactionAliveCounts,
 } from './game/rules';
 import {
   AgrouAvatarConfig,
@@ -126,6 +128,8 @@ import {
   getHumanRoleWakeGuidance,
   computeAutoGMBotNightStepAction,
   computeSmartBotDayVotes,
+  extractChatVoteSignals,
+  stripMarkdownAsterisks,
   buildBotDayDiscussionLines,
   getStepInitialTimerSeconds,
   prepareNightStartForHuman,
@@ -141,6 +145,62 @@ import { UI_TEXT } from './utils/i18n';
 import { sound } from './utils/sound';
 import { addMatchHistory } from './utils/storage';
 import confetti from 'canvas-confetti';
+
+const ACTIVE_MATCH_SNAPSHOT_KEY = 'werewolf_active_match_v1';
+
+interface SavedAIMatchSnapshot {
+  savedAt: number;
+  players: Player[];
+  phase: Phase;
+  round: number;
+  nightStepIndex: number;
+  timerSeconds: number;
+  mayorId: string | null;
+  wolfPupFrenzy: boolean;
+  votes: VoteRecord[];
+  hasVoted: boolean;
+  messages: ChatMessage[];
+  notebook: AgrouNotebookState;
+  suspectTags: Record<string, 'wolf_suspect' | 'trusted' | undefined>;
+  doppelgangerTargetId: string | null;
+  cupidLovers: [string, string] | null;
+  tonightWolfVictimId: string | null;
+  guardTargetTonightId: string | null;
+  witchSaveUsedTonight: boolean;
+  witchPoisonTargetId: string | null;
+  villageSize: number;
+  preferredRole: RoleId | 'random';
+  eventBanner: string;
+}
+
+function loadSavedAIMatchSnapshot(): SavedAIMatchSnapshot | null {
+  try {
+    const raw = sessionStorage.getItem(ACTIVE_MATCH_SNAPSHOT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SavedAIMatchSnapshot>;
+    if (
+      !parsed ||
+      !Array.isArray(parsed.players) ||
+      parsed.players.length < 4 ||
+      !parsed.phase ||
+      parsed.phase === 'game_over' ||
+      parsed.phase === 'lobby'
+    ) {
+      return null;
+    }
+    return parsed as SavedAIMatchSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+function clearSavedAIMatchSnapshot(): void {
+  try {
+    sessionStorage.removeItem(ACTIVE_MATCH_SNAPSHOT_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 const BOT_NAMES = [
   'Đức Huy',
@@ -245,14 +305,14 @@ export default function App() {
     'title' | 'playing' | 'paused' | 'gameover' | 'gm_host' | 'gm_player'
   >(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('gmroom') || params.get('room')) return 'gm_player';
+    if (params.get('gm') || params.get('gmroom') || params.get('room')) return 'gm_player';
     if (params.get('autostart') === '1') return 'playing';
     return 'title';
   });
 
   const [gameMode, setGameMode] = useState<GameMode>(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('gmroom') || params.get('room')) return 'gm';
+    if (params.get('gm') || params.get('gmroom') || params.get('room')) return 'gm';
     return 'ai_practice';
   });
   const [gmDeckMode, setGmDeckMode] = useState<GMDeckMode>('virtual_deck');
@@ -271,7 +331,13 @@ export default function App() {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [showFactionHints, setShowFactionHints] = useState<boolean>(false);
   const [activeToolPopover, setActiveToolPopover] = useState<'none' | 'props' | 'voice'>('none');
-  const [virtualCardRoomId, setVirtualCardRoomId] = useState<string>('');
+  const [virtualCardRoomId, setVirtualCardRoomId] = useState<string>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get('gm') || params.get('gmroom') || params.get('room') || '').toUpperCase();
+  });
+  const [savedMatchSnapshot, setSavedMatchSnapshot] = useState<SavedAIMatchSnapshot | null>(() =>
+    loadSavedAIMatchSnapshot()
+  );
   const [activeDrawer, setActiveDrawer] = useState<DrawerTool>('none');
   const [isDockCollapsed, setIsDockCollapsed] = useState<boolean>(false);
   const [isTitleMenuMinimized, setIsTitleMenuMinimized] = useState<boolean>(false);
@@ -394,8 +460,26 @@ export default function App() {
   const [roomId, setRoomId] = useState<string>(
     () => 'ONL-' + Math.floor(1000 + Math.random() * 9000)
   );
-  const [villageSize, setVillageSize] = useState<number>(8);
-  const [preferredRole, setPreferredRole] = useState<RoleId | 'random'>('random');
+  const [villageSize, setVillageSize] = useState<number>(() => {
+    try {
+      const saved = Number(localStorage.getItem('werewolf_pref_village_size'));
+      if ([6, 8, 10, 12].includes(saved)) return saved;
+    } catch {
+      // ignore
+    }
+    return 8;
+  });
+  const [preferredRole, setPreferredRole] = useState<RoleId | 'random'>(() => {
+    try {
+      const saved = localStorage.getItem('werewolf_pref_role');
+      if (saved === 'random' || (saved && saved in ROLES)) {
+        return saved as RoleId | 'random';
+      }
+    } catch {
+      // ignore
+    }
+    return 'random';
+  });
   const [timerConfig, setTimerConfig] = useState<CustomTimerConfig>(() => {
     try {
       const saved = localStorage.getItem('werewolf_timer_config');
@@ -556,6 +640,19 @@ export default function App() {
     },
   ]);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<ChatMessage[]>(messages);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('werewolf_pref_village_size', String(villageSize));
+      localStorage.setItem('werewolf_pref_role', preferredRole);
+    } catch {
+      // ignore
+    }
+  }, [villageSize, preferredRole]);
 
   const me = players.find((p) => p.id === currentUser.id) || players[0];
   const myRole = (me && ROLES[me.roleId]) || ROLES.villager;
@@ -851,10 +948,33 @@ export default function App() {
     }
   }, [phase, round, nightStepIndex, shellState, matchInstanceId]);
 
-  // Simulate ambient voice speakers in the village
+  // Simulate ambient voice speakers in the village (Night Wolf Channel strictly isolates to OTHER living wolves)
   useEffect(() => {
     if (shellState !== 'playing') return;
     const interval = setInterval(() => {
+      if (phase === 'night') {
+        const isWolf = me.roleId === 'werewolf' || me.roleId === 'wolf_pup';
+        if (!isWolf || !me.isAlive) {
+          setActiveSpeakers([]);
+          return;
+        }
+        const otherLivingWolves = players.filter(
+          (p) =>
+            p.isAlive &&
+            p.id !== me.id &&
+            (p.roleId === 'werewolf' || p.roleId === 'wolf_pup')
+        );
+        const speakers: string[] = [];
+        if (otherLivingWolves.length > 0) {
+          const pick =
+            otherLivingWolves[Math.floor(Math.random() * otherLivingWolves.length)];
+          speakers.push(pick.name);
+        }
+        if (isMicOn && me.isAlive) speakers.push(me.name);
+        setActiveSpeakers(speakers);
+        return;
+      }
+
       const alive = players.filter((p) => p.isAlive);
       if (alive.length === 0) return;
       const pick = alive[Math.floor(Math.random() * alive.length)];
@@ -863,7 +983,7 @@ export default function App() {
       setActiveSpeakers(speakers);
     }, 3000);
     return () => clearInterval(interval);
-  }, [shellState, players, isMicOn, me]);
+  }, [shellState, phase, players, isMicOn, me]);
 
   // Strictly force Microphone OFF & lock voice whenever player dies (Ghost Silence Rule)
   useEffect(() => {
@@ -1113,6 +1233,8 @@ export default function App() {
       setAimedOwnSeat(false);
       setNotebook(createInitialNotebook());
       setLobbyModalState({ isOpen: false, mode: 'online' });
+      clearSavedAIMatchSnapshot();
+      setSavedMatchSnapshot(null);
       beginNewNight(freshPlayers, 1, false, []);
       setShellState('playing');
 
@@ -1192,6 +1314,8 @@ export default function App() {
         }).catch(() => {});
       }
 
+      clearSavedAIMatchSnapshot();
+      setSavedMatchSnapshot(null);
       setPhase('game_over');
       setShellState('gameover');
       setGameResult({
@@ -1374,48 +1498,16 @@ export default function App() {
     setRoleCalloutToast(null);
 
     if (result.triggeredHunterId) {
-      const hunterPlayer = effectivePlayers.find((p) => p.id === result.triggeredHunterId);
-      if (hunterPlayer) {
+      let pendingHunterId: string | null = result.triggeredHunterId;
+      let chainGuard = 0;
+      while (pendingHunterId && chainGuard < 4) {
+        chainGuard++;
+        const hunterPlayer = effectivePlayers.find((p) => p.id === pendingHunterId);
+        pendingHunterId = null;
+        if (!hunterPlayer) break;
         // Strictly DO NOT play Hunter callout toast/SFX when a Bot Hunter dies at night (anti-leak!)
         if (!hunterPlayer.isBot) {
           triggerNightRoleCallout('hunter');
-        }
-        if (hunterPlayer.isBot) {
-          const aliveTargets = effectivePlayers.filter((p) => p.isAlive);
-          if (aliveTargets.length > 0) {
-            const shotTarget =
-              aliveTargets[Math.floor(Math.random() * aliveTargets.length)];
-            const afterShot = resolveHunterShot(
-              effectivePlayers,
-              hunterPlayer.id,
-              shotTarget.id
-            );
-            effectivePlayers = afterShot.updatedPlayers;
-            if (afterShot.wolfPupTriggeredNextNight) nextFrenzy = true;
-            const hunterSeat =
-              effectivePlayers.findIndex((p) => p.id === hunterPlayer.id) + 1;
-            const targetSeat =
-              effectivePlayers.findIndex((p) => p.id === shotTarget.id) + 1;
-            const extraLover = afterShot.extraVictimId
-              ? effectivePlayers.find((p) => p.id === afterShot.extraVictimId)
-              : null;
-            const extraLoverSeat = extraLover
-              ? effectivePlayers.findIndex((p) => p.id === extraLover.id) + 1
-              : undefined;
-            hunterShotEvent = {
-              hunterId: hunterPlayer.id,
-              hunterName: hunterPlayer.name,
-              hunterSeat,
-              targetId: shotTarget.id,
-              targetName: shotTarget.name,
-              targetSeat,
-              extraLoverId: extraLover?.id,
-              extraLoverName: extraLover?.name,
-              extraLoverSeat,
-            };
-          }
-        } else {
-          // Human Hunter died during the night -> immediately prompt revenge shot with clear dawn deaths context
           setPlayers(effectivePlayers);
           setWolfPupFrenzy(nextFrenzy);
           setPendingDawnContext({
@@ -1434,12 +1526,48 @@ export default function App() {
             lang === 'vi'
               ? `🎯 Đêm qua bạn (${hunterPlayer.name}) đã tử trận${
                   killedNames.length > 1 ? ` cùng ${killedNames.filter((n) => n !== hunterPlayer.name).join(', ')}` : ''
-                }! Hãy chọn 1 người để nổ súng kéo theo!`
-              : `🎯 You (${hunterPlayer.name}) fell last night! Choose 1 living player for your dying Hunter shot!`
+                }! Hãy chọn 1 người để nổ súng kéo theo hoặc bấm Giữ súng!`
+              : `🎯 You (${hunterPlayer.name}) fell last night! Choose 1 living player for your dying Hunter shot or Hold Fire!`
           );
           sound.playDayGong();
           sound.playGhostWail();
           return;
+        }
+        const aliveTargets = effectivePlayers.filter((p) => p.isAlive);
+        if (aliveTargets.length > 0) {
+          const shotTarget =
+            aliveTargets[Math.floor(Math.random() * aliveTargets.length)];
+          const afterShot = resolveHunterShot(
+            effectivePlayers,
+            hunterPlayer.id,
+            shotTarget.id
+          );
+          effectivePlayers = afterShot.updatedPlayers;
+          if (afterShot.wolfPupTriggeredNextNight) nextFrenzy = true;
+          const hunterSeat =
+            effectivePlayers.findIndex((p) => p.id === hunterPlayer.id) + 1;
+          const targetSeat =
+            effectivePlayers.findIndex((p) => p.id === shotTarget.id) + 1;
+          const extraLover = afterShot.extraVictimId
+            ? effectivePlayers.find((p) => p.id === afterShot.extraVictimId)
+            : null;
+          const extraLoverSeat = extraLover
+            ? effectivePlayers.findIndex((p) => p.id === extraLover.id) + 1
+            : undefined;
+          hunterShotEvent = {
+            hunterId: hunterPlayer.id,
+            hunterName: hunterPlayer.name,
+            hunterSeat,
+            targetId: shotTarget.id,
+            targetName: shotTarget.name,
+            targetSeat,
+            extraLoverId: extraLover?.id,
+            extraLoverName: extraLover?.name,
+            extraLoverSeat,
+          };
+          if (afterShot.triggeredHunterId) {
+            pendingHunterId = afterShot.triggeredHunterId;
+          }
         }
       }
     }
@@ -1737,7 +1865,8 @@ export default function App() {
 
     setTimeout(() => {
       const currentPlayers = playersRef.current;
-      const botVotes = computeSmartBotDayVotes(currentPlayers, knownWolfIds, null);
+      const chatSignals = extractChatVoteSignals(messagesRef.current, currentPlayers);
+      const botVotes = computeSmartBotDayVotes(currentPlayers, knownWolfIds, null, chatSignals);
       const botIdSet = new Set(currentPlayers.filter((p) => p.isBot).map((p) => p.id));
       setVotes((prev) => [
         ...prev.filter((v) => !botIdSet.has(v.voterId)),
@@ -1879,19 +2008,25 @@ export default function App() {
 
       if (triggeredHunterId) {
         triggerNightRoleCallout('hunter');
-        const hunter = effectivePlayers.find((p) => p.id === triggeredHunterId);
-        if (hunter && !hunter.isBot) {
-          setPlayers(effectivePlayers);
-          if (wolfPupTriggeredNextNight) setWolfPupFrenzy(true);
-          setActiveHunter(hunter);
-          setHunterOriginPhase('day_voting');
-          setPhase('hunter_revenge');
-          setTimerSeconds(timerConfig.hunterShotSec);
-          setEventBanner(`🎯 ${t.hunterPhaseTitle}: ${ROLES.hunter.instructions[lang]}`);
-          sound.playGavel();
-          sound.playGhostWail();
-          return;
-        } else if (hunter && hunter.isBot) {
+        let pendingHunterId: string | null = triggeredHunterId;
+        let chainGuard = 0;
+        while (pendingHunterId && chainGuard < 4) {
+          chainGuard++;
+          const hunter = effectivePlayers.find((p) => p.id === pendingHunterId);
+          pendingHunterId = null;
+          if (!hunter) break;
+          if (!hunter.isBot) {
+            setPlayers(effectivePlayers);
+            if (nextFrenzy) setWolfPupFrenzy(true);
+            setActiveHunter(hunter);
+            setHunterOriginPhase('day_voting');
+            setPhase('hunter_revenge');
+            setTimerSeconds(timerConfig.hunterShotSec);
+            setEventBanner(`🎯 ${t.hunterPhaseTitle}: ${ROLES.hunter.instructions[lang]}`);
+            sound.playGavel();
+            sound.playGhostWail();
+            return;
+          }
           const aliveTargets = effectivePlayers.filter((p) => p.isAlive);
           if (aliveTargets.length > 0) {
             const target =
@@ -1906,6 +2041,9 @@ export default function App() {
               targetName: target.name,
               targetSeat: effectivePlayers.findIndex((p) => p.id === target.id) + 1,
             };
+            if (shotRes.triggeredHunterId) {
+              pendingHunterId = shotRes.triggeredHunterId;
+            }
           }
         }
       }
@@ -2052,9 +2190,50 @@ export default function App() {
         if (targetId === activeHunter.id) return;
         sound.playShotgunCock();
         sound.playDeath();
-        const { updatedPlayers: shotPlayers, victimName, extraVictimId, wolfPupTriggeredNextNight } =
-          resolveHunterShot(players, activeHunter.id, targetId);
+        const {
+          updatedPlayers: shotPlayers,
+          victimName,
+          extraVictimId,
+          wolfPupTriggeredNextNight,
+          triggeredHunterId: chainedHunterId,
+        } = resolveHunterShot(players, activeHunter.id, targetId);
         let updatedPlayers = shotPlayers;
+        let nextFrenzyAfterShot = Boolean(wolfPupTriggeredNextNight || wolfPupFrenzy);
+
+        // Chained Hunter death cascade: resolve secondary Hunter before evaluating Win Condition!
+        if (chainedHunterId) {
+          let pendingChainId: string | null = chainedHunterId;
+          let chainGuard = 0;
+          while (pendingChainId && chainGuard < 4) {
+            chainGuard++;
+            const chainedHunter = updatedPlayers.find((p) => p.id === pendingChainId);
+            pendingChainId = null;
+            if (!chainedHunter) break;
+            if (!chainedHunter.isBot) {
+              setPlayers(updatedPlayers);
+              if (nextFrenzyAfterShot) setWolfPupFrenzy(true);
+              setActiveHunter(chainedHunter);
+              setSelectedTargetId(null);
+              setTimerSeconds(timerConfig.hunterShotSec);
+              setEventBanner(
+                lang === 'vi'
+                  ? `🎯 Chuỗi Thợ Săn! Bạn (${chainedHunter.name}) bị kéo theo — hãy chọn 1 người để nổ súng hoặc Giữ súng!`
+                  : `🎯 Chained Hunter! You (${chainedHunter.name}) were hit — pick 1 target or Hold Fire!`
+              );
+              return;
+            }
+            const remainingTargets = updatedPlayers.filter((p) => p.isAlive);
+            if (remainingTargets.length > 0) {
+              const chainTarget =
+                remainingTargets[Math.floor(Math.random() * remainingTargets.length)];
+              const chainRes = resolveHunterShot(updatedPlayers, chainedHunter.id, chainTarget.id);
+              updatedPlayers = chainRes.updatedPlayers;
+              if (chainRes.wolfPupTriggeredNextNight) nextFrenzyAfterShot = true;
+              if (chainRes.triggeredHunterId) pendingChainId = chainRes.triggeredHunterId;
+            }
+          }
+        }
+
         const hunterMayorCheck = mayorId
           ? resolveNextMayorIfNeeded(updatedPlayers, mayorId)
           : { nextMayorId: null };
@@ -2068,7 +2247,7 @@ export default function App() {
           }));
         }
         setPlayers(updatedPlayers);
-        if (wolfPupTriggeredNextNight) setWolfPupFrenzy(true);
+        if (nextFrenzyAfterShot) setWolfPupFrenzy(true);
         setActiveHunter(null);
         setSelectedTargetId(null);
         const winCheck = checkWinCondition(updatedPlayers);
@@ -2274,33 +2453,14 @@ export default function App() {
             );
             return;
           }
-          setHasInspectedTonight(true);
+          // 2-step Seer confirmation: click to aim, then press "Xác Nhận Soi" to inspect
           setSeerTargetTonightId(targetId);
           setSelectedTargetId(targetId);
-          sound.playMysticChime();
-          const isWolf = target.roleId === 'werewolf' || target.roleId === 'wolf_pup';
-          // Human Seer's inspection stays strictly private to the human's own notebook (never telepathically shared to AI bots!)
-          setSuspectTags((prev) => ({
-            ...prev,
-            [targetId]: isWolf ? 'wolf_suspect' : 'trusted',
-          }));
-          const resText = `${target.name}: ${
-            isWolf ? `🐺 ${ROLES.werewolf.name[lang]}` : `🛡️ ${ROLES.villager.name[lang]}`
-          }`;
-          setNotebook((prevNb) => {
-            const withEntry = updateNotebookPlayerEntry(prevNb, targetId, {
-              trust: isWolf ? 'wolf_lock' : 'trusted',
-              guessedRole: isWolf ? 'werewolf' : 'villager',
-            });
-            return appendNotebookTimelineEvent(withEntry, {
-              round,
-              phaseLabel: lang === 'vi' ? `Soi Đêm #${round}` : `Seer #${round}`,
-              text: `🔮 ${resText}`,
-              tone: 'clue',
-            });
-          });
-          setSeerInspectResult(resText);
-          setEventBanner(`🔮 ${resText}`);
+          setEventBanner(
+            lang === 'vi'
+              ? `🔮 Đã chọn ${target.name} — Bấm "Xác Nhận Soi" ở bảng điều khiển để xem phe!`
+              : `🔮 Selected ${target.name} — Press "Confirm Inspect" in the console to reveal!`
+          );
         } else if (
           (me.roleId === 'werewolf' || me.roleId === 'wolf_pup') &&
           currentNightStep?.key === 'werewolf'
@@ -2363,7 +2523,22 @@ export default function App() {
           if (targetId === me.id) return;
           setDoppelgangerTargetId(targetId);
           setSelectedTargetId(targetId);
-          setEventBanner(`🪞 ${target.name}!`);
+          setNotebook((prevNb) =>
+            appendNotebookTimelineEvent(prevNb, {
+              round,
+              phaseLabel: lang === 'vi' ? 'Nhân Bản' : 'Doppelgänger',
+              text:
+                lang === 'vi'
+                  ? `🪞 Đã chọn ${target.name} làm hình mẫu sao chép vai trò.`
+                  : `🪞 Selected ${target.name} as your role copy model.`,
+              tone: 'clue',
+            })
+          );
+          setEventBanner(
+            lang === 'vi'
+              ? `🪞 Đã chọn hình mẫu: ${target.name}!`
+              : `🪞 Selected model: ${target.name}!`
+          );
         }
       } else if (phase !== 'night') {
         setSelectedTargetId(targetId);
@@ -2392,10 +2567,154 @@ export default function App() {
       finishGame,
       handleThrowProp,
       timerConfig.dayDiscussSec,
+      timerConfig.hunterShotSec,
+      mayorId,
       t,
       lang,
     ]
   );
+
+  // Confirm 2-step Seer inspection after selecting a target (BUG-25)
+  const handleConfirmSeerInspect = useCallback(() => {
+    if (
+      phase !== 'night' ||
+      !me.isAlive ||
+      me.roleId !== 'seer' ||
+      currentNightStep?.key !== 'seer' ||
+      hasInspectedTonight
+    ) {
+      return;
+    }
+    const targetId = seerTargetTonightId || selectedTargetId;
+    if (!targetId || targetId === me.id) return;
+    const target = players.find((p) => p.id === targetId && p.isAlive);
+    if (!target) return;
+
+    setHasInspectedTonight(true);
+    setSeerTargetTonightId(targetId);
+    setSelectedTargetId(targetId);
+    sound.playMysticChime();
+    const isWolf = target.roleId === 'werewolf' || target.roleId === 'wolf_pup';
+    setSuspectTags((prev) => ({
+      ...prev,
+      [targetId]: isWolf ? 'wolf_suspect' : 'trusted',
+    }));
+    const resText = `${target.name}: ${
+      isWolf ? `🐺 ${ROLES.werewolf.name[lang]}` : `🛡️ ${ROLES.villager.name[lang]}`
+    }`;
+    setNotebook((prevNb) => {
+      const withEntry = updateNotebookPlayerEntry(prevNb, targetId, {
+        trust: isWolf ? 'wolf_lock' : 'trusted',
+        guessedRole: isWolf ? 'werewolf' : 'villager',
+      });
+      return appendNotebookTimelineEvent(withEntry, {
+        round,
+        phaseLabel: lang === 'vi' ? `Soi Đêm #${round}` : `Seer #${round}`,
+        text: `🔮 ${resText}`,
+        tone: 'clue',
+      });
+    });
+    setSeerInspectResult(resText);
+    setEventBanner(`🔮 ${resText}`);
+  }, [phase, me, currentNightStep, hasInspectedTonight, seerTargetTonightId, selectedTargetId, players, round, lang]);
+
+  // Hunter Hold-Fire ("Giữ súng") option — skip revenge shot cleanly (BUG-24)
+  const handleSkipHunterShot = useCallback(() => {
+    if (phase !== 'hunter_revenge' || !activeHunter) return;
+    sound.playCardFlip();
+    const skippedHunter = activeHunter;
+    setActiveHunter(null);
+    setSelectedTargetId(null);
+
+    const winCheck = checkWinCondition(players);
+    if (winCheck.isOver) {
+      finishGame(winCheck.winner || 'villagers', winCheck.reason, players, round);
+      return;
+    }
+
+    if (hunterOriginPhase === 'night') {
+      const dawnCtx = pendingDawnContext;
+      const dawnAfterSkip = buildDawnGMAnnouncement({
+        round,
+        beforePlayers: dawnCtx?.beforePlayers || players,
+        afterPlayers: players,
+        nightKilledIds: dawnCtx?.nightKilledIds || [skippedHunter.id],
+        hunterShotEvent: null,
+        humanPlayerId: me.id,
+        lang,
+      });
+      setPendingDawnContext(null);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `sys_hunter_skip_${Date.now()}`,
+          senderId: 'sys',
+          senderName: lang === 'vi' ? '🎙️ Quản Trò AI' : '🎙️ AI Game Master',
+          text:
+            lang === 'vi'
+              ? `🎯 Thợ Săn ${skippedHunter.name} quyết định giữ súng, không bắn ai.`
+              : `🎯 Hunter ${skippedHunter.name} chose to hold fire.`,
+          timestamp: Date.now(),
+          isSystem: true,
+        },
+      ]);
+      setPhase('day_discussion');
+      setTimerSeconds(timerConfig.dayDiscussSec);
+      setEventBanner(`☀️ ${t.dayDiscussTitle(round)}: ${dawnAfterSkip.dayBarSummary}`);
+      setLastDawnAnnouncement(dawnAfterSkip);
+      setGmAnnouncement(dawnAfterSkip);
+      sound.playGMAnnouncement('dawn', dawnAfterSkip.victims.length > 0, dawnAfterSkip.spokenNarration, lang);
+    } else {
+      const duskAfterSkip = buildDuskGMAnnouncement({
+        round,
+        beforePlayers: players,
+        afterPlayers: players,
+        lynchedVictim: skippedHunter,
+        voteCounts: tallyVotesWithMayor(votes, mayorId).counts,
+        votes: votes.filter((v) => v.targetId !== CAMPFIRE_ABSTAIN_ID),
+        isTie: false,
+        hunterShotEvent: null,
+        humanPlayerId: me.id,
+        lang,
+      });
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `sys_hunter_skip_${Date.now()}`,
+          senderId: 'sys',
+          senderName: lang === 'vi' ? '🎙️ Quản Trò AI' : '🎙️ AI Game Master',
+          text:
+            lang === 'vi'
+              ? `🎯 Thợ Săn ${skippedHunter.name} quyết định giữ súng, không bắn ai.`
+              : `🎯 Hunter ${skippedHunter.name} chose to hold fire.`,
+          timestamp: Date.now(),
+          isSystem: true,
+        },
+      ]);
+      setPendingNightTransition({
+        nextPlayers: players,
+        nextRound: round + 1,
+        nextFrenzy: wolfPupFrenzy,
+      });
+      setGmAnnouncement(duskAfterSkip);
+      sound.playGMAnnouncement('dusk', true, duskAfterSkip.spokenNarration, lang);
+    }
+  }, [
+    phase,
+    activeHunter,
+    players,
+    round,
+    finishGame,
+    hunterOriginPhase,
+    pendingDawnContext,
+    me.id,
+    lang,
+    timerConfig.dayDiscussSec,
+    t,
+    votes,
+    mayorId,
+    wolfPupFrenzy,
+  ]);
 
   // Fast-Forward / Advance Phase Handler (If human night turn hasn't happened yet, jumps to human turn instead of skipping night!)
   const handleAdvancePhaseFast = useCallback(() => {
@@ -2540,20 +2859,134 @@ export default function App() {
       handleAdvanceNightStep();
     } else if (phase === 'day_discussion') {
       handleStartDayVoting();
+    } else if (phase === 'day_voting') {
+      if (me.isAlive && !hasVoted) {
+        const autoVotes = castSingleDayVote(votes, me.id, CAMPFIRE_ABSTAIN_ID);
+        setVotes(autoVotes);
+        setHasVoted(true);
+        handleResolveDayVoting(autoVotes);
+      } else {
+        handleResolveDayVoting();
+      }
     } else {
       handleAdvancePhaseFast();
     }
   }, [
+    shellState,
     timerSeconds,
     canAutoAdvanceOnZero,
     matchInstanceId,
     round,
     phase,
     nightStepIndex,
+    me.isAlive,
+    me.id,
+    hasVoted,
+    votes,
     handleAdvanceNightStep,
     handleStartDayVoting,
+    handleResolveDayVoting,
     handleAdvancePhaseFast,
   ]);
+
+  // Persist active AI Practice match snapshot to sessionStorage so F5 reload can offer instant resume (BUG-09)
+  useEffect(() => {
+    if (
+      shellState !== 'playing' ||
+      gameMode !== 'ai_practice' ||
+      phase === 'game_over' ||
+      phase === 'lobby'
+    ) {
+      return;
+    }
+    try {
+      const snap: SavedAIMatchSnapshot = {
+        savedAt: Date.now(),
+        players,
+        phase,
+        round,
+        nightStepIndex,
+        timerSeconds,
+        mayorId,
+        wolfPupFrenzy,
+        votes,
+        hasVoted,
+        messages: messages.slice(-60),
+        notebook,
+        suspectTags,
+        doppelgangerTargetId,
+        cupidLovers,
+        tonightWolfVictimId,
+        guardTargetTonightId,
+        witchSaveUsedTonight,
+        witchPoisonTargetId,
+        villageSize,
+        preferredRole,
+        eventBanner,
+      };
+      sessionStorage.setItem(ACTIVE_MATCH_SNAPSHOT_KEY, JSON.stringify(snap));
+    } catch {
+      // ignore quota errors
+    }
+  }, [
+    shellState,
+    gameMode,
+    players,
+    phase,
+    round,
+    nightStepIndex,
+    timerSeconds,
+    mayorId,
+    wolfPupFrenzy,
+    votes,
+    hasVoted,
+    messages,
+    notebook,
+    suspectTags,
+    doppelgangerTargetId,
+    cupidLovers,
+    tonightWolfVictimId,
+    guardTargetTonightId,
+    witchSaveUsedTonight,
+    witchPoisonTargetId,
+    villageSize,
+    preferredRole,
+    eventBanner,
+  ]);
+
+  const handleResumeSavedMatch = useCallback(() => {
+    if (!savedMatchSnapshot) return;
+    sound.playCardFlip();
+    setGameMode('ai_practice');
+    setPlayers(savedMatchSnapshot.players);
+    setPhase(savedMatchSnapshot.phase);
+    setRound(savedMatchSnapshot.round);
+    setNightStepIndex(savedMatchSnapshot.nightStepIndex);
+    setTimerSeconds(Math.max(5, savedMatchSnapshot.timerSeconds));
+    setMayorId(savedMatchSnapshot.mayorId);
+    setWolfPupFrenzy(savedMatchSnapshot.wolfPupFrenzy);
+    setVotes(savedMatchSnapshot.votes);
+    setHasVoted(savedMatchSnapshot.hasVoted);
+    setMessages(savedMatchSnapshot.messages);
+    setNotebook(savedMatchSnapshot.notebook || createInitialNotebook());
+    setSuspectTags(savedMatchSnapshot.suspectTags || {});
+    setDoppelgangerTargetId(savedMatchSnapshot.doppelgangerTargetId);
+    setCupidLovers(savedMatchSnapshot.cupidLovers);
+    setTonightWolfVictimId(savedMatchSnapshot.tonightWolfVictimId);
+    setGuardTargetTonightId(savedMatchSnapshot.guardTargetTonightId);
+    setWitchSaveUsedTonight(savedMatchSnapshot.witchSaveUsedTonight);
+    setWitchPoisonTargetId(savedMatchSnapshot.witchPoisonTargetId);
+    setVillageSize(savedMatchSnapshot.villageSize || savedMatchSnapshot.players.length);
+    setPreferredRole(savedMatchSnapshot.preferredRole || 'random');
+    setEventBanner(savedMatchSnapshot.eventBanner || '');
+    setSavedMatchSnapshot(null);
+    setShellState('playing');
+  }, [savedMatchSnapshot]);
+
+  const handleDismissSavedMatch = useCallback(() => {
+    clearSavedAIMatchSnapshot();
+    setSavedMatchSnapshot(null);
+  }, []);
 
   // Toggle First-Person View Mode [V]
   const handleToggleFirstPerson = useCallback(() => {
@@ -2594,8 +3027,9 @@ export default function App() {
   // Keyboard Shortcuts
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      const targetEl = e.target as HTMLElement | null;
+      const tag = targetEl?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || targetEl?.isContentEditable) return;
 
       // In standalone real-life GM mode, ignore 3D game shortcuts (except Escape to close rules modal)
       if (shellState === 'gm_host' || shellState === 'gm_player') {
@@ -2651,6 +3085,8 @@ export default function App() {
           setLobbyModalState({ ...lobbyModalState, isOpen: false });
         } else if (activeDrawer !== 'none') {
           setActiveDrawer('none');
+        } else if (activeToolPopover !== 'none') {
+          setActiveToolPopover('none');
         } else if (shellState === 'playing') {
           setShellState('paused');
         } else if (shellState === 'paused') {
@@ -2695,6 +3131,7 @@ export default function App() {
     shellState,
     phase,
     activeDrawer,
+    activeToolPopover,
     lobbyModalState,
     showOnboardingTour,
     showAvatarLocker,
@@ -2793,12 +3230,9 @@ export default function App() {
     votesMap[CAMPFIRE_ABSTAIN_ID] = weightedVoteTally.abstainCount;
   }
 
-  const aliveWolvesCount = players.filter(
-    (p) => p.isAlive && (p.roleId === 'werewolf' || p.roleId === 'wolf_pup')
-  ).length;
-  const aliveVillagersCount = players.filter(
-    (p) => p.isAlive && p.roleId !== 'werewolf' && p.roleId !== 'wolf_pup'
-  ).length;
+  const factionCounts = computeFactionAliveCounts(players);
+  const aliveWolvesCount = factionCounts.wolves;
+  const aliveVillagersCount = factionCounts.villagers;
 
   const isNightBlindfolded =
     shellState === 'playing' &&
@@ -2952,6 +3386,13 @@ export default function App() {
                 setActiveDrawer('none');
                 setGameMode('ai_practice');
                 setShellState('title');
+                try {
+                  if (window.location.search) {
+                    window.history.replaceState(null, '', window.location.pathname);
+                  }
+                } catch {
+                  // ignore
+                }
               }}
               className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-bold text-slate-100 flex items-center gap-1 cursor-pointer"
             >
@@ -2973,6 +3414,11 @@ export default function App() {
               onOpenVirtualCards={(code) => {
                 setVirtualCardRoomId(code);
                 setShellState('gm_player');
+                try {
+                  window.history.replaceState(null, '', `?gm=${encodeURIComponent(code)}`);
+                } catch {
+                  // ignore
+                }
               }}
             />
           ) : (
@@ -2991,7 +3437,7 @@ export default function App() {
             style={{ backgroundColor: 'rgba(5, 8, 17, 0.88)' }}
           >
             <div className="relative w-full max-w-4xl max-h-[86vh] bg-[#0b101e] border-2 border-amber-600/50 rounded-2xl p-4 sm:p-5 overflow-y-auto shadow-2xl">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+              <div className="sticky top-0 z-20 bg-[#0b101e]/95 -mx-4 sm:-mx-5 px-4 sm:px-5 pt-1 flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
                 <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold">
                   {t.drawerRulesTitle}
                 </span>
@@ -3149,7 +3595,7 @@ export default function App() {
                   </div>
                   <div
                     data-testid="blindfold-wake-guidance"
-                    className="text-[10px] sm:text-[11px] text-[#d6be9c] truncate"
+                    className="text-[10px] sm:text-[11px] text-[#d6be9c] leading-snug"
                   >
                     {myWakeGuidance.headline} ·{' '}
                     {lang === 'vi'
@@ -3170,8 +3616,8 @@ export default function App() {
 
             {currentNightStep && (
               <div className="flex flex-wrap items-center justify-between gap-1.5 bg-[#0a0812]/80 border border-indigo-500/30 rounded-xl px-2.5 py-1.5">
-                <p className="text-[10px] sm:text-[11px] text-indigo-200 italic truncate max-w-full">
-                  “{currentNightStep.gmNarration[lang]}”
+                <p className="text-[10px] sm:text-[11px] text-indigo-200 leading-snug max-w-full">
+                  <em>{stripMarkdownAsterisks(currentNightStep.gmNarration[lang])}</em>
                 </p>
                 <div className="flex flex-wrap items-center gap-1">
                   {nightSchedule.map((st, idx) => (
@@ -3211,7 +3657,7 @@ export default function App() {
                   </span>
                 </button>
               )}
-              {!myWakeGuidance.wakesTonight && gameMode === 'ai_practice' && (
+              {!myWakeGuidance.wakesTonight && gameMode === 'ai_practice' && preferredRole === 'random' && (
                 <button
                   type="button"
                   data-testid="blindfold-switch-active-role-btn"
@@ -3311,7 +3757,38 @@ export default function App() {
             handleStartMatch(villageSize, preferredRole, 'ai_practice');
             setShowOnboardingTour(true);
           }}
+          onOpenRulesEncyclopedia={() => setActiveDrawer('encyclopedia')}
         />
+      )}
+
+      {/* RESUME SAVED AI MATCH BANNER AFTER F5 RELOAD (BUG-09) */}
+      {shellState === 'title' && savedMatchSnapshot && (
+        <div
+          data-testid="resume-match-banner"
+          className="fixed top-14 left-1/2 -translate-x-1/2 z-40 pointer-events-auto flex flex-wrap items-center justify-center gap-2 px-3.5 py-2 rounded-2xl agrou-wood-panel border-2 border-[#f4c062]/80 shadow-2xl max-w-[94vw]"
+        >
+          <span className="text-xs font-bold text-[#ffebc2]">
+            {lang === 'vi'
+              ? `💾 Có ván đấu đang dở (Vòng ${savedMatchSnapshot.round} · ${savedMatchSnapshot.players.filter((p) => p.isAlive).length}/${savedMatchSnapshot.players.length} sống)`
+              : `💾 Unfinished match found (Round ${savedMatchSnapshot.round} · ${savedMatchSnapshot.players.filter((p) => p.isAlive).length}/${savedMatchSnapshot.players.length} alive)`}
+          </span>
+          <button
+            type="button"
+            data-testid="resume-match-btn"
+            onClick={handleResumeSavedMatch}
+            className="px-3 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-extrabold cursor-pointer shadow"
+          >
+            {lang === 'vi' ? '▶️ Tiếp tục ván đang dở' : '▶️ Resume Match'}
+          </button>
+          <button
+            type="button"
+            data-testid="dismiss-saved-match-btn"
+            onClick={handleDismissSavedMatch}
+            className="px-2.5 py-1 rounded-xl bg-[#2a1d14] hover:bg-[#3d2a1c] border border-[#6a4c32] text-[#d6be9c] text-xs font-bold cursor-pointer"
+          >
+            {lang === 'vi' ? 'Bỏ qua' : 'Dismiss'}
+          </button>
+        </div>
       )}
 
       {/* 3. PLAYING HUD (Streamlined Perimeter + Single-Focus Action Console + Unified Bottom Dock) */}
@@ -3329,6 +3806,8 @@ export default function App() {
             totalPlayers={players.length}
             aliveWolvesCount={aliveWolvesCount}
             aliveVillagersCount={aliveVillagersCount}
+            aliveThirdPartyCount={factionCounts.thirdParty}
+            hasThirdPartyInMatch={factionCounts.hasThirdPartyInMatch}
             showFactionHints={showFactionHints}
             showFastForwardBtn={
               !(
@@ -3345,7 +3824,7 @@ export default function App() {
             isDead={!me.isAlive}
             isMuted={isMuted}
             onAdjustTimer={(delta) =>
-              setTimerSeconds((s) => Math.max(3, Math.min(600, s + delta)))
+              setTimerSeconds((s) => Math.max(0, Math.min(600, s + delta)))
             }
             onAdvancePhaseFast={handleAdvancePhaseFast}
             onOpenRoleCard={() => {
@@ -3392,6 +3871,7 @@ export default function App() {
                   sound.playWitchCauldron();
                   setWitchSaveUsedTonight((prev) => !prev);
                 }}
+                onConfirmSeerInspect={handleConfirmSeerInspect}
                 onConfirmNightAction={handleResolveNight}
                 onAdvanceBotStep={handleAdvanceNightStep}
                 onCloseEyes={() => setHasClosedEyesTonight(true)}
@@ -3413,10 +3893,12 @@ export default function App() {
                 hasVoted={hasVoted}
                 selectedTargetId={selectedTargetId}
                 timerSeconds={timerSeconds}
+                canUserShootHunter={Boolean(activeHunter && !activeHunter.isBot)}
                 onStartDayVoting={handleStartDayVoting}
                 onResolveDayVoting={() => handleResolveDayVoting()}
                 onVoteCampfireAbstain={handleVoteCampfireAbstain}
                 onClearVote={handleClearMyVote}
+                onSkipHunterShot={handleSkipHunterShot}
                 onReopenGMAnnouncement={
                   lastDawnAnnouncement
                     ? () => setGmAnnouncement(lastDawnAnnouncement)
@@ -3493,11 +3975,11 @@ export default function App() {
               </div>
             )}
 
-          {/* MOBILE & OPEN-WORLD VIRTUAL D-PAD (Warm Agrou Wood, Zero backdrop-blur) */}
+          {/* MOBILE & OPEN-WORLD VIRTUAL D-PAD (Touch/Small Viewports Only so Desktop FPV/TPV stays uncluttered) */}
           {canUseVirtualDpad && (
             <div
               data-testid="virtual-dpad"
-              className="fixed bottom-24 right-2 sm:right-auto sm:bottom-28 sm:left-3 z-30 pointer-events-auto flex flex-col items-center gap-0.5 agrou-wood-panel p-1 sm:p-1.5 rounded-xl shadow-lg"
+              className="lg:hidden fixed bottom-24 right-2 sm:right-auto sm:bottom-28 sm:left-3 z-30 pointer-events-auto flex flex-col items-center gap-0.5 agrou-wood-panel p-1 sm:p-1.5 rounded-xl shadow-lg"
             >
               <span className="text-[7px] sm:text-[8px] font-mono uppercase text-[#f2be6b] font-bold">
                 {isDirectLookCam && me.isAlive
@@ -3919,8 +4401,14 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Horizontal Player Seat Strip (Single-Line Chips on Mobile, 2-Line on Desktop) */}
-                <div className="flex items-center gap-1 sm:gap-1.5 overflow-x-auto pb-0.5">
+                {/* Player Seat Strip (2-row responsive grid for 10-12 players so seats #10-#12 never clip off-screen) */}
+                <div
+                  className={
+                    players.length >= 10
+                      ? 'grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-1 sm:gap-1.5 pb-0.5'
+                      : 'flex items-center gap-1 sm:gap-1.5 overflow-x-auto pb-0.5'
+                  }
+                >
                   {players.map((p, idx) => {
                     const isDayVoting = phase === 'day_voting';
                     const isSelected = isDayVoting
@@ -3929,6 +4417,9 @@ export default function App() {
                     const vCount = votesMap[p.id] || 0;
                     const voterLabels = votersByTargetLabels[p.id] || [];
                     const isMyLover = me.loverId === p.id;
+                    const isMyDoppelModel =
+                      me.roleId === 'doppelganger' &&
+                      (doppelgangerTargetId === p.id || me.targetPlayerId === p.id);
                     const isMayorSeat = mayorId === p.id && p.isAlive;
                     const isMyWolfPackmate =
                       p.id !== me.id &&
@@ -3965,7 +4456,7 @@ export default function App() {
                           e.preventDefault();
                           handleTogglePlayerSuspectTag(p.id);
                         }}
-                        className={`shrink-0 px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-lg sm:rounded-xl border text-left transition-all flex items-center gap-1 sm:gap-1.5 ${
+                        className={`shrink-0 px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-lg sm:rounded-xl border text-left transition-all flex items-center gap-1 sm:gap-1.5 min-w-0 ${
                           isVoteLockedOut
                             ? 'opacity-45 cursor-not-allowed'
                             : 'cursor-pointer'
@@ -3984,6 +4475,8 @@ export default function App() {
                             ? 'bg-[#19402b] border-[#42a870] text-emerald-100'
                             : p.id === me.id
                             ? 'bg-[#3b2919] border-[#e8a346] text-[#fff1d4]'
+                            : isMyDoppelModel
+                            ? 'bg-fuchsia-950/80 border-fuchsia-400/70 text-fuchsia-100'
                             : isMyLover
                             ? 'bg-pink-950/80 border-pink-500/60 text-pink-100'
                             : isMyWolfPackmate
@@ -3991,11 +4484,11 @@ export default function App() {
                             : 'bg-[#241911] border-[#4f3825] text-[#f0e3cb] hover:border-[#a87544]'
                         }`}
                       >
-                        <span className="text-xs sm:text-sm">{p.isAlive ? p.avatar : '👻'}</span>
-                        <div>
+                        <span className="text-xs sm:text-sm shrink-0">{p.isAlive ? p.avatar : '👻'}</span>
+                        <div className="min-w-0 flex-1">
                           <div className="text-[9px] sm:text-[11px] font-bold whitespace-nowrap flex items-center gap-0.5 sm:gap-1">
                             <span className="text-[#f2be6b] font-mono">#{idx + 1}</span>
-                            <span className="max-w-[68px] sm:max-w-none truncate">{p.name}</span>
+                            <span className="max-w-[68px] sm:max-w-[92px] truncate">{p.name}</span>
                             {isMayorSeat && (
                               <span
                                 className="inline-flex items-center text-[#f7cb66]"
@@ -4009,6 +4502,7 @@ export default function App() {
                                 {lang === 'vi' ? '✓ Bạn bầu' : '✓ Voted'}
                               </span>
                             )}
+                            {isMyDoppelModel && <span title={lang === 'vi' ? 'Hình mẫu Nhân Bản' : 'Doppelgänger Model'}>🪞</span>}
                             {isMyLover && <span title="Tình nhân">💘</span>}
                             {isMyWolfPackmate && <span title="Đồng đội Sói">🐺</span>}
                             {suspectTag === 'wolf_suspect' && (
@@ -4052,6 +4546,10 @@ export default function App() {
                                 : '🛡️ Trusted'
                               : p.id === me.id
                               ? ROLES[p.roleId].name[lang]
+                              : isMyDoppelModel
+                              ? lang === 'vi'
+                                ? '🪞 Hình mẫu'
+                                : '🪞 Model'
                               : isMyLover
                               ? lang === 'vi'
                                 ? '💘 Tình nhân'
@@ -4082,7 +4580,7 @@ export default function App() {
           style={{ backgroundColor: 'rgba(12, 8, 5, 0.84)' }}
         >
           <div className="relative w-full max-w-5xl max-h-[88vh] agrou-wood-panel rounded-2xl p-3.5 sm:p-5 overflow-y-auto shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4 gap-2">
+            <div className="sticky top-0 z-20 bg-[#231810]/95 -mx-3.5 sm:-mx-5 px-3.5 sm:px-5 pt-1 flex items-center justify-between border-b border-slate-800 pb-3 mb-4 gap-2">
               <span className="text-xs font-mono uppercase tracking-widest text-amber-400 font-bold truncate">
                 {activeDrawer === 'chat'
                   ? t.drawerChatTitle
@@ -4202,7 +4700,9 @@ export default function App() {
                             })}
                           </span>
                         </div>
-                        <p>{msg.text}</p>
+                        <p className="whitespace-pre-line">
+                          {msg.isSystem ? stripMarkdownAsterisks(msg.text) : msg.text}
+                        </p>
                       </div>
                     ))}
                   <div ref={chatBottomRef} />
@@ -4231,7 +4731,12 @@ export default function App() {
                     disabled={!me.isAlive}
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                        e.preventDefault();
+                        handleSendMessage();
+                      }
+                    }}
                     placeholder={
                       !me.isAlive
                         ? lang === 'vi'
@@ -4274,6 +4779,11 @@ export default function App() {
                   setVirtualCardRoomId(code);
                   setActiveDrawer('none');
                   setShellState('gm_player');
+                  try {
+                    window.history.replaceState(null, '', `?gm=${encodeURIComponent(code)}`);
+                  } catch {
+                    // ignore
+                  }
                 }}
               />
             )}
@@ -4511,7 +5021,7 @@ export default function App() {
           className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-auto"
           style={{ backgroundColor: 'rgba(5, 8, 17, 0.9)' }}
         >
-          <div className="w-full max-w-lg bg-[#0d1322] border-2 border-amber-500/60 rounded-2xl p-6 text-center space-y-5 shadow-2xl">
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-[#0d1322] border-2 border-amber-500/60 rounded-2xl p-5 sm:p-6 text-center space-y-4 shadow-2xl">
             <div className="w-20 h-20 rounded-2xl bg-rose-950 border-2 border-amber-400 mx-auto flex items-center justify-center text-5xl shadow-xl">
               {gameResult.winner === 'werewolves'
                 ? '🐺'
@@ -4578,6 +5088,9 @@ export default function App() {
               </div>
             </div>
 
+            {/* Full End-of-Match Role Reveal Roster (BUG-24) */}
+            <RoleRevealRoster players={players} lang={lang} />
+
             <div className="flex flex-col sm:flex-row gap-2.5">
               <button
                 type="button"
@@ -4639,6 +5152,11 @@ export default function App() {
           setRoleCalloutToast(null);
           setGameResult(null);
           setShellState('gm_player');
+          try {
+            window.history.replaceState(null, '', `?gm=${encodeURIComponent(code)}`);
+          } catch {
+            // ignore
+          }
         }}
       />
 

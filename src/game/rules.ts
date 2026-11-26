@@ -807,7 +807,7 @@ export function tallyVotes(votes: VoteRecord[]): {
 }
 
 /**
- * Hunter shot resolution with full cascade (Lover suicide, Wolf Pup frenzy, Doppelganger inheritance)
+ * Hunter shot resolution with full cascade (Lover suicide, Wolf Pup frenzy, Doppelganger inheritance, chained Hunter)
  */
 export function resolveHunterShot(
   players: Player[],
@@ -818,6 +818,7 @@ export function resolveHunterShot(
   victimName: string;
   extraVictimId: string | null;
   wolfPupTriggeredNextNight: boolean;
+  triggeredHunterId: string | null;
   cascadeMessages: string[];
 } {
   const updated = players.map((p) => ({ ...p }));
@@ -829,6 +830,7 @@ export function resolveHunterShot(
   let extraVictimId: string | null = null;
   let victimName = '';
   let wolfPupTriggeredNextNight = false;
+  let triggeredHunterId: string | null = null;
   const cascadeMessages: string[] = [];
 
   const toKill = [targetId];
@@ -852,6 +854,11 @@ export function resolveHunterShot(
     if (victim.roleId === 'wolf_pup') {
       wolfPupTriggeredNextNight = true;
       cascadeMessages.push(`Phát súng Thợ Săn bắn trúng Sói Con ${victim.name}! Đêm tới Sói cắn 2 người!`);
+    }
+
+    if (victim.roleId === 'hunter' && !victim.hasUsedPower && victim.id !== hunterId) {
+      triggeredHunterId = victim.id;
+      cascadeMessages.push(`🎯 Thợ Săn ${victim.name} trúng đạn nhưng vẫn kịp rút súng phản công!`);
     }
 
     const doppel = updated.find(
@@ -879,23 +886,70 @@ export function resolveHunterShot(
     victimName,
     extraVictimId,
     wolfPupTriggeredNextNight,
+    triggeredHunterId,
     cascadeMessages,
   };
+}
+
+/**
+ * Separates living player counts into 3 explicit factions for Practice Mode HUD (BUG-10):
+ * - wolves: living biting Werewolves (werewolf, wolf_pup)
+ * - villagers: living Villager-faction players
+ * - thirdParty: living Neutral / Third-Party / Traitor players (tanner, doppelganger, traitor)
+ */
+export function computeFactionAliveCounts(players: Player[]): {
+  wolves: number;
+  villagers: number;
+  thirdParty: number;
+  hasThirdPartyInMatch: boolean;
+} {
+  let wolves = 0;
+  let villagers = 0;
+  let thirdParty = 0;
+  let hasThirdPartyInMatch = false;
+
+  for (const p of players) {
+    const isBitingWolf = p.roleId === 'werewolf' || p.roleId === 'wolf_pup';
+    const isThirdParty = ROLES[p.roleId].faction === 'neutral' || p.roleId === 'traitor';
+    if (isThirdParty) {
+      hasThirdPartyInMatch = true;
+    }
+    if (!p.isAlive) continue;
+    if (isBitingWolf) {
+      wolves++;
+    } else if (isThirdParty) {
+      thirdParty++;
+    } else {
+      villagers++;
+    }
+  }
+
+  return { wolves, villagers, thirdParty, hasThirdPartyInMatch };
 }
 
 /**
  * Check win conditions for all factions
  * Note: Traitor ('traitor') is allied with Werewolves but cannot bite at night;
  * if all actual Werewolves ('werewolf' | 'wolf_pup') die, Villagers win!
+ * BUG-08: Never declare game over while a Hunter revenge shot or death cascade is still pending.
  */
 export function checkWinCondition(
   players: Player[],
-  lastLynchedPlayerId?: string
+  lastLynchedPlayerId?: string,
+  options?: { hasPendingDeathCascade?: boolean }
 ): {
   isOver: boolean;
   winner: 'villagers' | 'werewolves' | 'lovers' | 'tanner' | 'draw' | null;
   reason: string;
 } {
+  if (options?.hasPendingDeathCascade) {
+    return {
+      isOver: false,
+      winner: null,
+      reason: '',
+    };
+  }
+
   if (lastLynchedPlayerId) {
     const lynched = players.find((p) => p.id === lastLynchedPlayerId);
     if (lynched && lynched.roleId === 'tanner') {
