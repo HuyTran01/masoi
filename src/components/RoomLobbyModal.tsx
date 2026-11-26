@@ -24,12 +24,14 @@ import { RoleId, Language } from '../types/game';
 import { CustomTimerConfig, DEFAULT_TIMER_CONFIG } from '../game/autoGM';
 import { UI_TEXT } from '../utils/i18n';
 import { sound } from '../utils/sound';
-import { realtimeClient } from '../utils/realtimeClient';
+import { realtimeClient, type TransportMode } from '../utils/realtimeClient';
 import type {
   OpenRoomSummary,
+  RealtimeChatMessage,
   RealtimeRoomState,
   RealtimeTimerConfig,
 } from '../server/realtimeRooms';
+import type { OnlinePlayerMatchView } from '../server/onlineMatchEngine';
 import type { GMDeckMode, GMRoomSummary } from '../server/gmRooms';
 
 export interface LobbyParticipant {
@@ -57,7 +59,10 @@ interface RoomLobbyModalProps {
     size: number,
     participants: LobbyParticipant[],
     matchRoles?: Record<string, RoleId>,
-    serverTimerConfig?: RealtimeTimerConfig
+    serverTimerConfig?: RealtimeTimerConfig,
+    initialMatchView?: OnlinePlayerMatchView,
+    initialServerNow?: number,
+    initialChatMessages?: RealtimeChatMessage[]
   ) => void;
   onLaunchGMHost: (roomId: string, size: number, deckMode: GMDeckMode) => void;
   onLaunchGMPlayerCard: (roomId: string) => void;
@@ -99,6 +104,9 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
   const [lobbyNotice, setLobbyNotice] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
+  const [transportMode, setTransportMode] = useState<TransportMode>(() =>
+    realtimeClient.getTransportMode()
+  );
   const [liveRoom, setLiveRoom] = useState<RealtimeRoomState | null>(null);
   const [openRooms, setOpenRooms] = useState<OpenRoomSummary[]>([]);
   const [openGMRooms, setOpenGMRooms] = useState<GMRoomSummary[]>([]);
@@ -176,11 +184,40 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     fetchOpenGMRooms();
   }, [initialMode, isOpen, fetchOpenOnlineRooms, fetchOpenGMRooms]);
 
-  // Subscribe to real WebSocket room events while modal is open
+  // Subscribe to real WebSocket/HTTP room events while modal is open
   useEffect(() => {
     if (!isOpen) return;
 
+    const launchRoomMatch = (
+      room: RealtimeRoomState,
+      initialView?: OnlinePlayerMatchView,
+      initialServerNow?: number
+    ) => {
+      if (launchedRef.current) return;
+      clearJoinTimeout();
+      launchedRef.current = true;
+      sound.playNightBell();
+      const mapped: LobbyParticipant[] = room.participants.map((p) => ({
+        id: p.id,
+        name: p.name,
+        avatar: p.avatar,
+        isBot: Boolean(p.isBot),
+        isHost: p.isHost,
+      }));
+      onLaunchOnlineRoom(
+        room.code,
+        Math.max(4, mapped.length),
+        mapped,
+        room.matchRoles,
+        room.timerConfig,
+        initialView,
+        initialServerNow,
+        room.chatMessages
+      );
+    };
+
     const unsubStatus = realtimeClient.subscribeStatus(setWsStatus);
+    const unsubTransport = realtimeClient.subscribeTransport(setTransportMode);
     const unsubEvents = realtimeClient.subscribe((evt) => {
       if (evt.type === 'room:list') {
         setOpenRooms(evt.rooms);
@@ -199,6 +236,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         }
         setConnectTimedOut(false);
         setLiveRoom(evt.room);
+        liveRoomRef.current = evt.room;
         setJoinError('');
         if (evt.room.hostId === currentUser.id) {
           preservedCodesRef.current.online = evt.room.code;
@@ -211,6 +249,13 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
           setModeTab('online');
           setActionTab('create');
         }
+        if (
+          evt.room.status === 'in_match' &&
+          evt.room.participants.some((p) => p.id === currentUser.id) &&
+          !launchedRef.current
+        ) {
+          launchRoomMatch(evt.room);
+        }
       } else if (evt.type === 'room:kicked' && evt.targetId === currentUser.id) {
         clearJoinTimeout();
         isJoinedGuestRoomRef.current = false;
@@ -222,23 +267,14 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
         setLobbyNotice(evt.reason);
         realtimeClient.requestRoomList();
       } else if (evt.type === 'room:match_started' && !launchedRef.current) {
-        clearJoinTimeout();
-        launchedRef.current = true;
-        sound.playNightBell();
-        const mapped: LobbyParticipant[] = evt.room.participants.map((p) => ({
-          id: p.id,
-          name: p.name,
-          avatar: p.avatar,
-          isBot: Boolean(p.isBot),
-          isHost: p.isHost,
-        }));
-        onLaunchOnlineRoom(
-          evt.room.code,
-          Math.max(4, mapped.length),
-          mapped,
-          evt.room.matchRoles,
-          evt.room.timerConfig
-        );
+        launchRoomMatch(evt.room);
+      } else if (
+        evt.type === 'room:match_state' &&
+        !launchedRef.current &&
+        liveRoomRef.current &&
+        liveRoomRef.current.code === evt.code
+      ) {
+        launchRoomMatch(liveRoomRef.current, evt.view, evt.serverNow);
       } else if (evt.type === 'error') {
         clearJoinTimeout();
         if (pendingJoinCodeRef.current) {
@@ -257,6 +293,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
     return () => {
       clearJoinTimeout();
       unsubStatus();
+      unsubTransport();
       unsubEvents();
     };
   }, [isOpen, currentUser.id, onLaunchOnlineRoom, fetchOpenOnlineRooms, fetchOpenGMRooms, clearJoinTimeout]);
@@ -659,12 +696,20 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
 
         {modeTab === 'online' && (
           <div
-            data-testid="online-beta-badge"
-            className="px-3 py-1.5 rounded-xl bg-slate-900/80 border border-slate-800 text-[11px] font-semibold text-slate-300"
+            data-testid="online-sync-badge"
+            className={`px-3 py-1.5 rounded-xl border text-[11px] font-semibold ${
+              transportMode === 'ws'
+                ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200'
+                : 'bg-sky-950/50 border-sky-500/40 text-sky-200'
+            }`}
           >
-            {lang === 'vi'
-              ? 'Beta · Đồng bộ phòng chờ, chat, đạo cụ & phiếu bầu'
-              : 'Beta · Syncs lobby, chat, props & votes'}
+            {transportMode === 'ws'
+              ? lang === 'vi'
+                ? '⚡ Đồng bộ Thời Gian Thực (WebSocket · Server-Authoritative)'
+                : '⚡ Real-Time Sync (WebSocket · Server-Authoritative)'
+              : lang === 'vi'
+              ? '☁️ Đồng bộ Cloud (HTTP Sync · Server-Authoritative)'
+              : '☁️ Cloud Sync (HTTP Sync · Server-Authoritative)'}
           </div>
         )}
 

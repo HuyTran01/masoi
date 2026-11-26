@@ -26,7 +26,9 @@ const ROLE_CARD_TEXT: Record<
     sealTitle: string;
     sealDesc: string;
     revealBtn: string;
-    wakeOrder: (n: number) => string;
+    wakePassive: string;
+    wakeNight1Only: string;
+    wakeEveryNight: string;
     tipsTitle: string;
     hideBtn: string;
     enterBtn: string;
@@ -44,7 +46,9 @@ const ROLE_CARD_TEXT: Record<
     sealTitle: 'Ấn Ký Ma Sói',
     sealDesc: 'Thẻ bài đang được úp bảo mật. Bấm nút bên dưới để lật mở!',
     revealBtn: 'Lật Thẻ Để Xem Vai Trò',
-    wakeOrder: (n) => `Thứ tự thức đêm: #${n}`,
+    wakePassive: 'Ngủ ban đêm (Nội tại)',
+    wakeNight1Only: 'Chỉ thức Đêm 1',
+    wakeEveryNight: 'Thức mỗi đêm',
     tipsTitle: 'Chiến Thuật & Mẹo Chơi:',
     hideBtn: 'Úp Thẻ Bảo Mật',
     enterBtn: 'Vào Trận Ngay',
@@ -61,7 +65,9 @@ const ROLE_CARD_TEXT: Record<
     sealTitle: 'Werewolf Seal',
     sealDesc: 'Your card is face-down for privacy. Press below to reveal!',
     revealBtn: 'Reveal Secret Role',
-    wakeOrder: (n) => `Night wake order: #${n}`,
+    wakePassive: 'Sleeps at night (Passive)',
+    wakeNight1Only: 'Wakes Night 1 only',
+    wakeEveryNight: 'Wakes every night',
     tipsTitle: 'Strategy & Tips:',
     hideBtn: 'Hide Card',
     enterBtn: 'Enter Match',
@@ -78,7 +84,9 @@ const ROLE_CARD_TEXT: Record<
     sealTitle: 'Sceau du Loup-Garou',
     sealDesc: 'Votre carte est cachée. Cliquez ci-dessous pour la révéler !',
     revealBtn: 'Révéler Mon Rôle',
-    wakeOrder: (n) => `Ordre de nuit : #${n}`,
+    wakePassive: 'Dort la nuit (Passif)',
+    wakeNight1Only: 'Se réveille Nuit 1 uniquement',
+    wakeEveryNight: 'Se réveille chaque nuit',
     tipsTitle: 'Stratégie & Conseils :',
     hideBtn: 'Cacher la Carte',
     enterBtn: 'Jouer',
@@ -95,7 +103,9 @@ const ROLE_CARD_TEXT: Record<
     sealTitle: 'Sello del Lobo',
     sealDesc: 'Tu carta está oculta. ¡Pulsa el botón para revelarla!',
     revealBtn: 'Revelar Rol Secreto',
-    wakeOrder: (n) => `Orden nocturno: #${n}`,
+    wakePassive: 'Duerme de noche (Pasivo)',
+    wakeNight1Only: 'Solo despierta Noche 1',
+    wakeEveryNight: 'Despierta cada noche',
     tipsTitle: 'Estrategia y Consejos:',
     hideBtn: 'Ocultar Carta',
     enterBtn: 'Entrar al Juego',
@@ -112,7 +122,9 @@ const ROLE_CARD_TEXT: Record<
     sealTitle: '人狼の封印',
     sealDesc: 'カードは伏せられています。下のボタンで確認してください。',
     revealBtn: '役職カードをめくる',
-    wakeOrder: (n) => `夜の行動順: #${n}`,
+    wakePassive: '夜は眠る（パッシブ）',
+    wakeNight1Only: '1夜目のみ行動',
+    wakeEveryNight: '毎晩行動',
     tipsTitle: '戦略とヒント：',
     hideBtn: 'カードを伏せる',
     enterBtn: '試合へ進む',
@@ -266,11 +278,13 @@ export const RoleCardModal: React.FC<RoleCardModalProps> = ({
                 {factionLabel}
               </div>
 
-              {role.wakeOrder > 0 && (
-                <span className="mt-1 text-[11px] font-mono text-slate-400">
-                  {ct.wakeOrder(role.wakeOrder)}
-                </span>
-              )}
+              <span className="mt-1 text-[11px] font-semibold text-slate-400">
+                {role.wakeOrder === 0
+                  ? ct.wakePassive
+                  : roleId === 'cupid' || roleId === 'doppelganger'
+                  ? ct.wakeNight1Only
+                  : ct.wakeEveryNight}
+              </span>
 
               <p className="mt-3 text-xs text-slate-200 leading-relaxed text-center px-1">
                 {role.description[lang] || role.description.vi}

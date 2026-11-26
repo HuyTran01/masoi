@@ -74,6 +74,12 @@ export interface GMRoomSummary {
   updatedAt: number;
 }
 
+export interface StoredGMRoomSnapshot {
+  room: GMRoomHostState;
+  hostSecret: string;
+  playerTokens: Record<string, string>;
+}
+
 const VALID_ROLE_IDS = new Set<string>(Object.keys(ROLES));
 const SEAT_AVATARS = ['🐺', '🔮', '🛡️', '🧪', '🎯', '💘', '🎭', '👑', '🔥', '🧑‍🌾'];
 
@@ -202,6 +208,27 @@ export class GMRoomManager {
     const code = normalizeRoomCode(rawCode);
     const room = this.rooms.get(code);
     return room ? this.cloneHostState(room) : null;
+  }
+
+  exportSnapshot(rawCode: string): StoredGMRoomSnapshot | null {
+    const code = normalizeRoomCode(rawCode);
+    const room = this.rooms.get(code);
+    const hostSecret = this.hostSecrets.get(code);
+    if (!room || !hostSecret) return null;
+    const tokens = this.playerTokens.get(code);
+    return {
+      room: this.cloneHostState(room),
+      hostSecret,
+      playerTokens: tokens ? Object.fromEntries(tokens.entries()) : {},
+    };
+  }
+
+  importSnapshot(snapshot: StoredGMRoomSnapshot): void {
+    const code = normalizeRoomCode(snapshot.room.code);
+    if (!code) return;
+    this.rooms.set(code, this.cloneHostState(snapshot.room));
+    this.hostSecrets.set(code, snapshot.hostSecret);
+    this.playerTokens.set(code, new Map(Object.entries(snapshot.playerTokens || {})));
   }
 
   /**

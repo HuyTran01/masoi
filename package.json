@@ -10,10 +10,11 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/game/rules.test.ts src/game/fpvCamera.test.ts src/game/agrouMechanics.test.ts src/server/auth.test.ts src/server/gmRooms.test.ts src/server/realtimeRooms.test.ts"
+    "test": "tsx --test src/game/rules.test.ts src/game/fpvCamera.test.ts src/game/agrouMechanics.test.ts src/utils/sound.test.ts src/server/auth.test.ts src/server/gmRooms.test.ts src/server/realtimeRooms.test.ts src/server/onlineMatchEngine.test.ts src/server/netlifyApi.test.ts"
   },
   "dependencies": {
     "@firebase/eslint-plugin-security-rules": "^0.0.2",
+    "@netlify/blobs": "^11.1.11",
     "@tailwindcss/vite": "^4.3.3",
     "@types/canvas-confetti": "^1.9.0",
     "@types/three": "^0.187.0",
@@ -33,12 +34,13 @@
     "ws": "^8.23.0"
   },
   "devDependencies": {
+    "@netlify/functions": "^6.1.2",
+    "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
     "tailwindcss": "^4.3.3",
-    "typescript": "^7.0.2",
-    "@types/express": "^4.17.21"
+    "typescript": "^7.0.2"
   }
 }

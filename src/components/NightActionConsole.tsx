@@ -20,6 +20,9 @@ interface NightActionConsoleProps {
   witchPoisonTargetId: string | null;
   seerInspectResult: string | null;
   cupidLovers: [string, string] | null;
+  isOnlineWaitingConfirm?: boolean;
+  canAdvanceBotStep?: boolean;
+  wolfPackPicks?: Record<string, { primary?: string; secondary?: string }> | null;
   onSelectWitchHealTarget: (victimId: string | null) => void;
   onConfirmSeerInspect?: () => void;
   onConfirmNightAction: () => void;
@@ -42,6 +45,9 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
   witchPoisonTargetId,
   seerInspectResult,
   cupidLovers,
+  isOnlineWaitingConfirm = false,
+  canAdvanceBotStep = true,
+  wolfPackPicks = null,
   onSelectWitchHealTarget,
   onConfirmSeerInspect,
   onConfirmNightAction,
@@ -62,15 +68,21 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
         <span className="truncate font-extrabold text-[#fff8ed]">
           {ROLES[currentNightStep.roleId].name[lang]}
         </span>
-        <button
-          type="button"
-          data-testid="auto-gm-next-step-btn"
-          onClick={onAdvanceBotStep}
-          className="px-2.5 py-0.5 rounded-lg bg-[#b84b10] hover:bg-[#9e3f0c] text-white font-extrabold text-[10px] flex items-center gap-1 cursor-pointer shrink-0"
-        >
-          <CheckCircle2 className="w-3 h-3" />
-          <span>{lang === 'vi' ? 'Tiếp' : 'Next'}</span>
-        </button>
+        {canAdvanceBotStep ? (
+          <button
+            type="button"
+            data-testid="auto-gm-next-step-btn"
+            onClick={onAdvanceBotStep}
+            className="px-2.5 py-0.5 rounded-lg bg-[#b84b10] hover:bg-[#9e3f0c] text-white font-extrabold text-[10px] flex items-center gap-1 cursor-pointer shrink-0"
+          >
+            <CheckCircle2 className="w-3 h-3" />
+            <span>{lang === 'vi' ? 'Tiếp' : 'Next'}</span>
+          </button>
+        ) : (
+          <span className="text-[10px] font-mono font-bold text-[#fde7c3] shrink-0">
+            ⏳ {Math.round(timerSeconds)}s
+          </span>
+        )}
       </div>
     );
   }
@@ -122,6 +134,23 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
   const isHealUnavailable = Boolean(me.hasUsedHeal) || Boolean(me.hasUsedPower);
   const isPoisonUnavailable = Boolean(me.hasUsedPoison) || Boolean(me.hasUsedPower);
 
+  const packmatePickLabels =
+    (me.roleId === 'werewolf' || me.roleId === 'wolf_pup') &&
+    currentNightStep.key === 'werewolf' &&
+    wolfPackPicks
+      ? Object.entries(wolfPackPicks)
+          .filter(([wolfId, pick]) => wolfId !== me.id && (pick.primary || pick.secondary))
+          .map(([wolfId, pick]) => {
+            const wolfName = players.find((p) => p.id === wolfId)?.name || 'Sói';
+            const targets = [pick.primary, pick.secondary]
+              .filter((id): id is string => Boolean(id))
+              .map((id) => players.find((p) => p.id === id)?.name)
+              .filter(Boolean);
+            return targets.length > 0 ? `${wolfName} → ${targets.join(' & ')}` : null;
+          })
+          .filter((s): s is string => Boolean(s))
+      : [];
+
   return (
     <div
       data-testid="active-night-role-console"
@@ -160,12 +189,21 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
           <button
             type="button"
             data-testid="role-console-confirm-btn"
+            disabled={isOnlineWaitingConfirm}
             onClick={onConfirmNightAction}
-            className="px-2.5 py-1 rounded-xl bg-[#2f7d4d] hover:bg-[#38945b] border border-[#86efac]/70 text-white font-extrabold text-[11px] sm:text-xs flex items-center gap-1 cursor-pointer shadow"
+            className={`px-2.5 py-1 rounded-xl border font-extrabold text-[11px] sm:text-xs flex items-center gap-1 shadow ${
+              isOnlineWaitingConfirm
+                ? 'bg-[#1c3621] border-[#6ee7b7]/60 text-[#bbf7d0] cursor-default'
+                : 'bg-[#2f7d4d] hover:bg-[#38945b] border-[#86efac]/70 text-white cursor-pointer'
+            }`}
           >
             <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
             <span>
-              {hasSelectedAction
+              {isOnlineWaitingConfirm
+                ? lang === 'vi'
+                  ? '✓ Đã xác nhận — chờ người khác...'
+                  : '✓ Confirmed — waiting for others...'
+                : hasSelectedAction
                 ? lang === 'vi'
                   ? 'Xác Nhận & Kết Thúc Đêm'
                   : 'Confirm & End Night'
@@ -184,9 +222,24 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
           data-testid="role-console-timeout-cue"
           className="px-2.5 py-1 rounded-lg bg-[#4a2b10] border border-[#f5b82e] text-[#fef3c7] text-[11px] font-extrabold"
         >
-          {lang === 'vi'
+          {isOnlineWaitingConfirm
+            ? lang === 'vi'
+              ? '⏳ Đã xác nhận — đang chờ người chơi khác...'
+              : '⏳ Confirmed — waiting for other players...'
+            : lang === 'vi'
             ? '⏳ Hết giờ — bấm Xác Nhận để tiếp tục'
             : '⏳ Time is up — press Confirm to continue'}
+        </div>
+      )}
+
+      {/* Wolf Packmate Live Picks Indicator (Online Multiplayer) */}
+      {packmatePickLabels.length > 0 && (
+        <div
+          data-testid="role-console-wolf-pack-picks"
+          className="px-2.5 py-1 rounded-lg bg-[#3b1518] border border-rose-500/60 text-rose-200 text-[11px] font-bold"
+        >
+          🐺 {lang === 'vi' ? 'Đồng đội Sói chọn:' : 'Packmates picked:'}{' '}
+          {packmatePickLabels.join(' · ')}
         </div>
       )}
 

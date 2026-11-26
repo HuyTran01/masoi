@@ -103,6 +103,26 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
       ? '背面 [B]'
       : 'Behind [B]';
   const tpvShort = lang === 'vi' ? 'Sau lưng' : '3rd';
+  const compactPhaseLabel =
+    phase === 'night'
+      ? lang === 'vi'
+        ? `Đêm ${round}`
+        : `Night ${round}`
+      : phase === 'day_discussion'
+      ? lang === 'vi'
+        ? `Ngày ${round}`
+        : `Day ${round}`
+      : phase === 'day_voting'
+      ? lang === 'vi'
+        ? `Phiếu ${round}`
+        : `Vote ${round}`
+      : phase === 'game_over'
+      ? lang === 'vi'
+        ? 'Xong'
+        : 'End'
+      : lang === 'vi'
+      ? 'Thợ Săn'
+      : 'Hunter';
 
   return (
     <div className="flex items-center justify-between gap-1.5 sm:gap-2">
@@ -128,18 +148,21 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
 
         <div className="md:pr-2.5 md:border-r md:border-[#634329] min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider text-[#f5b82e] truncate">
-              {phase === 'night'
-                ? t.nightPhaseTitle(round)
-                : phase === 'day_discussion'
-                ? t.dayDiscussTitle(round)
-                : phase === 'day_voting'
-                ? t.dayVoteTitle(round)
-                : phase === 'game_over'
-                ? lang === 'vi'
-                  ? 'KẾT THÚC'
-                  : 'GAME OVER'
-                : t.hunterPhaseTitle}
+            <span className="text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider text-[#f5b82e] whitespace-nowrap sm:truncate">
+              <span className="sm:hidden">{compactPhaseLabel}</span>
+              <span className="hidden sm:inline">
+                {phase === 'night'
+                  ? t.nightPhaseTitle(round)
+                  : phase === 'day_discussion'
+                  ? t.dayDiscussTitle(round)
+                  : phase === 'day_voting'
+                  ? t.dayVoteTitle(round)
+                  : phase === 'game_over'
+                  ? lang === 'vi'
+                    ? 'KẾT THÚC'
+                    : 'GAME OVER'
+                  : t.hunterPhaseTitle}
+              </span>
             </span>
             <span
               data-testid="hud-mobile-alive-pill"
@@ -165,30 +188,34 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
               {Math.round(timerSeconds)}s
             </span>
 
-            <button
-              type="button"
-              data-testid="hud-timer-minus-10"
-              onClick={(e) => {
-                e.currentTarget.blur();
-                onAdjustTimer(-10);
-              }}
-              className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-[#1b120b] hover:bg-[#312115] border border-[#785334] text-[9px] font-mono font-bold text-[#e6d5b8] cursor-pointer"
-              title={lang === 'vi' ? 'Giảm 10 giây' : 'Subtract 10s'}
-            >
-              -10s
-            </button>
-            <button
-              type="button"
-              data-testid="hud-timer-plus-15"
-              onClick={(e) => {
-                e.currentTarget.blur();
-                onAdjustTimer(15);
-              }}
-              className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-[#312115] hover:bg-[#452e1e] border border-[#b58148] text-[9px] font-mono font-bold text-[#fde7c3] cursor-pointer"
-              title={lang === 'vi' ? 'Thêm 15 giây' : 'Add 15s'}
-            >
-              +15s
-            </button>
+            {gameMode !== 'online' && (
+              <>
+                <button
+                  type="button"
+                  data-testid="hud-timer-minus-10"
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    onAdjustTimer(-10);
+                  }}
+                  className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-[#1b120b] hover:bg-[#312115] border border-[#785334] text-[9px] font-mono font-bold text-[#e6d5b8] cursor-pointer"
+                  title={lang === 'vi' ? 'Giảm 10 giây' : 'Subtract 10s'}
+                >
+                  -10s
+                </button>
+                <button
+                  type="button"
+                  data-testid="hud-timer-plus-15"
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    onAdjustTimer(15);
+                  }}
+                  className="hidden sm:inline-flex px-1.5 py-0.5 rounded bg-[#312115] hover:bg-[#452e1e] border border-[#b58148] text-[9px] font-mono font-bold text-[#fde7c3] cursor-pointer"
+                  title={lang === 'vi' ? 'Thêm 15 giây' : 'Add 15s'}
+                >
+                  +15s
+                </button>
+              </>
+            )}
 
             {showFastForwardBtn && (
               <button

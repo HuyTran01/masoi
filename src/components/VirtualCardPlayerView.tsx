@@ -106,7 +106,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
 
   // Physical-card self-input state
   const [isEditingOwnRole, setIsEditingOwnRole] = useState<boolean>(false);
-  const [pickedRoleId, setPickedRoleId] = useState<RoleId>('villager');
+  const [selectedSelfRole, setSelectedSelfRole] = useState<RoleId | null>(null);
   const [isSavingRole, setIsSavingRole] = useState<boolean>(false);
   const [playerToken, setPlayerToken] = useState<string>('');
   const playerTokenRef = useRef<string>('');
@@ -132,11 +132,13 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
       if (matchChanged) {
         setIsRevealed(false);
         if (nextView.mySeat?.roleId) {
-          setPickedRoleId(nextView.mySeat.roleId);
+          setSelectedSelfRole(nextView.mySeat.roleId);
           setIsEditingOwnRole(false);
         } else if (nextView.canSelfInputRole) {
+          setSelectedSelfRole(null);
           setIsEditingOwnRole(true);
         } else {
+          setSelectedSelfRole(null);
           setIsEditingOwnRole(false);
         }
         setStatusNotice(
@@ -245,10 +247,14 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
         setPlayerView(view);
         setIsRevealed(false);
         if (view.mySeat?.roleId) {
-          setPickedRoleId(view.mySeat.roleId);
+          setSelectedSelfRole(view.mySeat.roleId);
           setIsEditingOwnRole(false);
         } else if (view.canSelfInputRole) {
+          setSelectedSelfRole(null);
           setIsEditingOwnRole(true);
+        } else {
+          setSelectedSelfRole(null);
+          setIsEditingOwnRole(false);
         }
         sound.playCardFlip();
       } catch {
@@ -322,7 +328,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
   }, [playerView?.code, playerUid, playerToken, applyIncomingPlayerView]);
 
   const handleSubmitSelfRole = async () => {
-    if (!playerView?.code) return;
+    if (!playerView?.code || !selectedSelfRole) return;
     setIsSavingRole(true);
     setErrorMsg('');
     setStatusNotice('');
@@ -340,7 +346,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
           headers,
           body: JSON.stringify({
             userId: playerUid,
-            roleId: pickedRoleId,
+            roleId: selectedSelfRole,
             ...(token ? { playerToken: token } : {}),
           }),
         }
@@ -421,6 +427,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
     playerTokenRef.current = '';
     setPlayerToken('');
     setPlayerView(null);
+    setSelectedSelfRole(null);
     setIsRevealed(false);
     setIsEditingOwnRole(false);
     setStatusNotice('');
@@ -687,7 +694,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {Object.values(ROLES).map((role) => {
-                  const isSelected = pickedRoleId === role.id;
+                  const isSelected = selectedSelfRole === role.id;
                   return (
                     <button
                       key={role.id}
@@ -695,7 +702,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
                       data-testid={`self-role-option-${role.id}`}
                       onClick={() => {
                         sound.playCardFlip();
-                        setPickedRoleId(role.id);
+                        setSelectedSelfRole(role.id);
                       }}
                       className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-2 ${
                         isSelected
@@ -740,17 +747,21 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
                 <button
                   type="button"
                   data-testid="gm-submit-self-role-btn"
-                  disabled={isSavingRole}
+                  disabled={isSavingRole || !selectedSelfRole}
                   onClick={handleSubmitSelfRole}
-                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs sm:text-sm shadow-lg cursor-pointer"
+                  className="flex-1 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-black text-xs sm:text-sm shadow-lg cursor-pointer"
                 >
                   {isSavingRole
                     ? isVi
                       ? 'Đang gửi...'
                       : 'Saving...'
+                    : !selectedSelfRole
+                    ? isVi
+                      ? 'Chọn lá bài trên tay bạn'
+                      : 'Select the card in your hand'
                     : isVi
-                    ? `Xác Nhận Vai Trò: ${ROLES[pickedRoleId].name.vi}`
-                    : `Confirm My Role: ${ROLES[pickedRoleId].name[lang] || ROLES[pickedRoleId].name.en}`}
+                    ? `Xác Nhận Vai Trò: ${ROLES[selectedSelfRole].name.vi}`
+                    : `Confirm My Role: ${ROLES[selectedSelfRole].name[lang] || ROLES[selectedSelfRole].name.en}`}
                 </button>
               </div>
             </div>
@@ -824,7 +835,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
                           type="button"
                           data-testid="gm-edit-self-role-btn"
                           onClick={() => {
-                            if (mySeat?.roleId) setPickedRoleId(mySeat.roleId);
+                            setSelectedSelfRole(mySeat?.roleId ?? null);
                             setIsEditingOwnRole(true);
                           }}
                           className="w-full py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-300 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer"
@@ -925,7 +936,7 @@ export const VirtualCardPlayerView: React.FC<VirtualCardPlayerViewProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            setPickedRoleId(myRoleDef.id);
+                            setSelectedSelfRole(myRoleDef.id);
                             setIsEditingOwnRole(true);
                           }}
                           className="w-full py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-300 text-[11px] font-bold flex items-center justify-center gap-1.5 cursor-pointer"

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import type { StateStore } from './stateStore.ts';
 
 export interface DatabaseAccountRecord {
   id: string;
@@ -39,12 +40,59 @@ const SCRYPT_KEYLEN = 64;
 const DEFAULT_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
 const EPHEMERAL_FALLBACK_SECRET = crypto.randomBytes(32).toString('hex');
 
+function readAuthEnv(key: string): string | undefined {
+  const netlifyEnv = (
+    globalThis as { Netlify?: { env?: { get?: (k: string) => string | undefined } } }
+  ).Netlify?.env;
+  if (typeof netlifyEnv?.get === 'function') {
+    const val = netlifyEnv.get(key);
+    if (val !== undefined) return val;
+  }
+  return process.env[key];
+}
+
 function getSessionSecret(overrideSecret?: string): string {
   if (overrideSecret && overrideSecret.length >= 16) return overrideSecret;
-  if (process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 16) {
-    return process.env.SESSION_SECRET;
+  const envSecret = readAuthEnv('SESSION_SECRET');
+  if (envSecret && envSecret.length >= 16) {
+    return envSecret;
   }
   return EPHEMERAL_FALLBACK_SECRET;
+}
+
+const clusterSecretCache = new WeakMap<StateStore, string>();
+
+/**
+ * Resolves a stable HMAC session secret across cold-started serverless instances:
+ * uses SESSION_SECRET env var when configured, otherwise persists a shared secret in StateStore.
+ */
+export async function resolveClusterSessionSecret(store: StateStore): Promise<string> {
+  const envSecret = readAuthEnv('SESSION_SECRET');
+  if (envSecret && envSecret.length >= 16) {
+    return envSecret;
+  }
+  const cached = clusterSecretCache.get(store);
+  if (cached) return cached;
+
+  const existing = await store.getJSON<{ secret: string }>('meta/session_secret');
+  if (existing && typeof existing.secret === 'string' && existing.secret.length >= 16) {
+    clusterSecretCache.set(store, existing.secret);
+    return existing.secret;
+  }
+
+  const generated = crypto.randomBytes(32).toString('hex');
+  const created = await store.setJSONIfNew('meta/session_secret', {
+    secret: generated,
+    createdAt: Date.now(),
+  });
+  if (created) {
+    clusterSecretCache.set(store, generated);
+    return generated;
+  }
+  const winner = await store.getJSON<{ secret: string }>('meta/session_secret');
+  const resolved = winner?.secret && winner.secret.length >= 16 ? winner.secret : generated;
+  clusterSecretCache.set(store, resolved);
+  return resolved;
 }
 
 function scryptAsync(password: string, salt: string, keylen: number): Promise<Buffer> {
@@ -215,7 +263,7 @@ export function extractBearerToken(authHeader?: string): string | null {
 }
 
 export function getDefaultSeedAccounts(): DatabaseAccountRecord[] {
-  if (process.env.NODE_ENV === 'production' && process.env.SEED_DEMO_ACCOUNTS !== '1') {
+  if (readAuthEnv('NODE_ENV') === 'production' && readAuthEnv('SEED_DEMO_ACCOUNTS') !== '1') {
     return [];
   }
   const now = Date.now();
@@ -293,4 +341,51 @@ export function toPublicAccount(acc: DatabaseAccountRecord): PublicAccountRecord
     createdAt: acc.createdAt,
     updatedAt: acc.updatedAt,
   };
+}
+
+export async function loadAccountsFromStore(store: StateStore): Promise<DatabaseAccountRecord[]> {
+  const existing = await store.getJSON<DatabaseAccountRecord[]>('accounts/list');
+  if (Array.isArray(existing)) {
+    return existing;
+  }
+  const seeded = getDefaultSeedAccounts();
+  if (seeded.length > 0) {
+    await store.setJSON('accounts/list', seeded);
+  }
+  return seeded;
+}
+
+export async function saveAccountsToStore(
+  store: StateStore,
+  accounts: DatabaseAccountRecord[]
+): Promise<void> {
+  await store.setJSON('accounts/list', accounts);
+}
+
+export async function applyOnlineMatchEloUpdates(
+  store: StateStore,
+  updates: Array<{ userId: string; delta: number; won: boolean }>
+): Promise<void> {
+  const accountUpdates = updates.filter((u) => u.userId.startsWith('acc_'));
+  if (accountUpdates.length === 0) return;
+
+  const accounts = await loadAccountsFromStore(store);
+  const byId = new Map(accountUpdates.map((u) => [u.userId, u]));
+  let mutated = false;
+  const now = Date.now();
+
+  for (const acc of accounts) {
+    const upd = byId.get(acc.id);
+    if (!upd) continue;
+    const clampedDelta = Math.max(-80, Math.min(80, Math.round(upd.delta)));
+    acc.elo = Math.max(0, Math.min(10000, acc.elo + clampedDelta));
+    acc.matchesPlayed += 1;
+    if (upd.won) acc.wins = Math.min(acc.matchesPlayed, acc.wins + 1);
+    acc.updatedAt = now;
+    mutated = true;
+  }
+
+  if (mutated) {
+    await saveAccountsToStore(store, accounts);
+  }
 }

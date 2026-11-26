@@ -5,330 +5,37 @@ import path from 'node:path';
 import dotenv from 'dotenv';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
-  type DatabaseAccountRecord,
-  extractBearerToken,
-  hashPasswordAsync,
-  needsPasswordRehash,
-  readAccountsDb,
-  signSessionToken,
-  toPublicAccount,
-  verifyPasswordAsync,
+  applyOnlineMatchEloUpdates,
+  resolveClusterSessionSecret,
   verifySessionToken,
-  writeAccountsDb,
 } from './src/server/auth.ts';
 import {
   normalizeRoomCode,
   type RealtimeChatMessage,
   type RealtimePropEvent,
-  type RealtimeRoomState,
   RealtimeRoomManager,
 } from './src/server/realtimeRooms.ts';
-import type { RoleId } from './src/types/game.ts';
 import { GMRoomManager } from './src/server/gmRooms.ts';
+import { createLocalNodeStateStore } from './src/server/stateStore.ts';
+import { createApiRouter } from './src/server/apiRouter.ts';
+import type {
+  EloUpdateEntry,
+  OnlineNightActionType,
+} from './src/server/onlineMatchEngine.ts';
 
 dotenv.config();
 
 const app = express();
-app.use(express.json({ limit: '100kb' }));
-
 const PORT = Number(process.env.PORT) || 3000;
 const ACCOUNTS_DB_PATH = path.resolve(process.cwd(), '.accounts_db.json');
 
-const AUTH_RATE_WINDOW_MS = 60_000;
-const AUTH_RATE_LIMIT = 30;
-const authRateMap = new Map<string, { count: number; resetAt: number }>();
-
-function authRateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const now = Date.now();
-  if (authRateMap.size > 1000) {
-    for (const [k, v] of authRateMap.entries()) {
-      if (now >= v.resetAt) authRateMap.delete(k);
-    }
-  }
-  const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const entry = authRateMap.get(ip);
-  if (!entry || now >= entry.resetAt) {
-    authRateMap.set(ip, { count: 1, resetAt: now + AUTH_RATE_WINDOW_MS });
-    next();
-    return;
-  }
-  entry.count += 1;
-  if (entry.count > AUTH_RATE_LIMIT) {
-    res.status(429).json({
-      ok: false,
-      code: 'RATE_LIMITED',
-      error: 'Quá nhiều yêu cầu xác thực. Vui lòng thử lại sau 1 phút.',
-    });
-    return;
-  }
-  next();
-}
-
-function readHeaderToken(value: string | string[] | undefined): string | undefined {
-  if (typeof value === 'string' && value.trim()) return value.trim();
-  if (Array.isArray(value) && typeof value[0] === 'string' && value[0].trim()) return value[0].trim();
-  return undefined;
-}
-
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
-});
-
-/**
- * 1. GET /api/accounts/list
- * Returns registered public player summaries (never password hashes).
- */
-app.get('/api/accounts/list', (_req, res) => {
-  const accounts = readAccountsDb(ACCOUNTS_DB_PATH).map(toPublicAccount);
-  res.json({ ok: true, accounts });
-});
-
-/**
- * 2. GET /api/accounts/me
- * Validates the signed Bearer token and returns the authenticated user's profile.
- */
-app.get('/api/accounts/me', (req, res) => {
-  const token = extractBearerToken(req.headers.authorization);
-  const session = token ? verifySessionToken(token) : null;
-  if (!session) {
-    res.status(401).json({
-      ok: false,
-      code: 'UNAUTHORIZED',
-      error: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.',
-    });
-    return;
-  }
-  const accounts = readAccountsDb(ACCOUNTS_DB_PATH);
-  const found = accounts.find((a) => a.username.toLowerCase() === session.username);
-  if (!found) {
-    res.status(404).json({ ok: false, code: 'ACCOUNT_NOT_FOUND', error: 'Tài khoản không tồn tại.' });
-    return;
-  }
-  res.json({ ok: true, account: toPublicAccount(found) });
-});
-
-/**
- * 3. POST /api/accounts/register
- * Registers a new account with salted scrypt password hashing and returns a signed Bearer token.
- */
-app.post('/api/accounts/register', authRateLimit, async (req, res) => {
-  try {
-    const body = req.body || {};
-    const rawUsername = String(body.username || '').trim().toLowerCase();
-    const password = String(body.password || '');
-    const displayName = String(body.displayName || '').trim();
-    const avatar = String(body.avatar || '🐺').trim().slice(0, 16) || '🐺';
-    const region: 'VN' | 'SEA' | 'GLOBAL' =
-      body.region === 'SEA' ? 'SEA' : body.region === 'GLOBAL' ? 'GLOBAL' : 'VN';
-
-    if (rawUsername.length < 3 || rawUsername.length > 32 || !/^[a-z0-9_.\-@]+$/.test(rawUsername)) {
-      res.status(400).json({
-        ok: false,
-        code: 'INVALID_USERNAME',
-        error: 'Tên đăng nhập phải từ 3–32 ký tự (chữ cái, số, _, ., - hoặc @).',
-      });
-      return;
-    }
-
-    if (password.length < 6) {
-      res.status(400).json({
-        ok: false,
-        code: 'INVALID_PASSWORD',
-        error: 'Mật khẩu phải có tối thiểu 6 ký tự.',
-      });
-      return;
-    }
-
-    if (displayName.length < 2 || displayName.length > 40) {
-      res.status(400).json({
-        ok: false,
-        code: 'INVALID_DISPLAY_NAME',
-        error: 'Tên hiển thị trong Làng 3D phải từ 2–40 ký tự.',
-      });
-      return;
-    }
-
-    const accounts = readAccountsDb(ACCOUNTS_DB_PATH);
-    const exists = accounts.some((a) => a.username.toLowerCase() === rawUsername);
-    if (exists) {
-      res.status(409).json({
-        ok: false,
-        code: 'USERNAME_TAKEN',
-        error: 'Tên tài khoản này đã tồn tại! Vui lòng chọn tên khác hoặc chuyển sang Đăng Nhập.',
-      });
-      return;
-    }
-
-    const now = Date.now();
-    const passwordHash = await hashPasswordAsync(password);
-    const newAccount: DatabaseAccountRecord = {
-      id: `acc_${rawUsername.replace(/[^a-z0-9]/g, '')}_${now.toString(36)}`,
-      username: rawUsername,
-      passwordHash,
-      displayName,
-      avatar,
-      region,
-      elo: 1620,
-      matchesPlayed: 0,
-      wins: 0,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    // Preserve all registered accounts without silent truncation
-    const updated = [newAccount, ...accounts];
-    writeAccountsDb(ACCOUNTS_DB_PATH, updated);
-
-    const token = signSessionToken({ userId: newAccount.id, username: newAccount.username });
-
-    res.json({
-      ok: true,
-      token,
-      account: toPublicAccount(newAccount),
-    });
-  } catch {
-    res.status(500).json({ ok: false, code: 'INTERNAL_ERROR', error: 'Lỗi xử lý đăng ký tài khoản.' });
-  }
-});
-
-/**
- * 4. POST /api/accounts/login
- * Verifies username + password in constant time (no bypasses) and returns a signed Bearer token.
- */
-app.post('/api/accounts/login', authRateLimit, async (req, res) => {
-  try {
-    const body = req.body || {};
-    const rawUsername = String(body.username || '').trim().toLowerCase();
-    const password = String(body.password || '');
-
-    if (!rawUsername || !password) {
-      res.status(400).json({
-        ok: false,
-        code: 'MISSING_CREDENTIALS',
-        error: 'Vui lòng nhập đầy đủ Tên tài khoản và Mật khẩu.',
-      });
-      return;
-    }
-
-    const accounts = readAccountsDb(ACCOUNTS_DB_PATH);
-    const foundIdx = accounts.findIndex((a) => a.username.toLowerCase() === rawUsername);
-    if (foundIdx === -1) {
-      res.status(401).json({
-        ok: false,
-        code: 'INVALID_CREDENTIALS',
-        error: 'Tài khoản hoặc mật khẩu không chính xác.',
-      });
-      return;
-    }
-
-    const account = accounts[foundIdx];
-    if (!(await verifyPasswordAsync(password, account.passwordHash))) {
-      res.status(401).json({
-        ok: false,
-        code: 'INVALID_CREDENTIALS',
-        error: 'Tài khoản hoặc mật khẩu không chính xác.',
-      });
-      return;
-    }
-
-    // Transparently upgrade legacy SHA-256 hashes to per-user salted scrypt on login
-    if (needsPasswordRehash(account.passwordHash)) {
-      account.passwordHash = await hashPasswordAsync(password);
-    }
-    account.updatedAt = Date.now();
-    accounts[foundIdx] = account;
-    writeAccountsDb(ACCOUNTS_DB_PATH, accounts);
-
-    const token = signSessionToken({ userId: account.id, username: account.username });
-
-    res.json({
-      ok: true,
-      token,
-      account: toPublicAccount(account),
-    });
-  } catch {
-    res.status(500).json({ ok: false, code: 'INTERNAL_ERROR', error: 'Lỗi xử lý đăng nhập.' });
-  }
-});
-
-/**
- * 5. POST /api/accounts/update
- * Requires a valid signed Bearer token and strictly enforces account ownership.
- */
-app.post('/api/accounts/update', authRateLimit, (req, res) => {
-  const token = extractBearerToken(req.headers.authorization);
-  const session = token ? verifySessionToken(token) : null;
-  if (!session) {
-    res.status(401).json({
-      ok: false,
-      code: 'UNAUTHORIZED',
-      error: 'Bạn cần đăng nhập để cập nhật hồ sơ.',
-    });
-    return;
-  }
-
-  const body = req.body || {};
-  const rawUsername = String(body.username || session.username).trim().toLowerCase();
-  if (rawUsername !== session.username) {
-    res.status(403).json({
-      ok: false,
-      code: 'FORBIDDEN',
-      error: 'Bạn không có quyền chỉnh sửa tài khoản của người khác.',
-    });
-    return;
-  }
-
-  const accounts = readAccountsDb(ACCOUNTS_DB_PATH);
-  const idx = accounts.findIndex((a) => a.username.toLowerCase() === session.username);
-  if (idx === -1) {
-    res.status(404).json({
-      ok: false,
-      code: 'ACCOUNT_NOT_FOUND',
-      error: 'Không tìm thấy tài khoản cần cập nhật.',
-    });
-    return;
-  }
-
-  const current = accounts[idx];
-  if (typeof body.displayName === 'string' && body.displayName.trim().length >= 2) {
-    current.displayName = body.displayName.trim().slice(0, 40);
-  }
-  if (typeof body.avatar === 'string' && body.avatar.trim().length >= 1) {
-    current.avatar = body.avatar.trim().slice(0, 16);
-  }
-  if (body.region === 'VN' || body.region === 'SEA' || body.region === 'GLOBAL') {
-    current.region = body.region;
-  }
-  if (typeof body.elo === 'number' && !Number.isNaN(body.elo)) {
-    // Clamp ELO change per update to prevent arbitrary inflation
-    const clampedDelta = Math.max(-80, Math.min(80, Math.round(body.elo - current.elo)));
-    current.elo = Math.max(0, Math.min(10000, current.elo + clampedDelta));
-  }
-  if (typeof body.matchesPlayed === 'number' && !Number.isNaN(body.matchesPlayed)) {
-    current.matchesPlayed = Math.max(current.matchesPlayed, Math.min(current.matchesPlayed + 1, Math.round(body.matchesPlayed)));
-  }
-  if (typeof body.wins === 'number' && !Number.isNaN(body.wins)) {
-    current.wins = Math.min(
-      current.matchesPlayed,
-      Math.max(current.wins, Math.min(current.wins + 1, Math.round(body.wins)))
-    );
-  }
-
-  current.updatedAt = Date.now();
-  accounts[idx] = current;
-  writeAccountsDb(ACCOUNTS_DB_PATH, accounts);
-
-  res.json({
-    ok: true,
-    account: toPublicAccount(current),
-  });
-});
+const localStore = createLocalNodeStateStore(ACCOUNTS_DB_PATH);
+const roomManager = new RealtimeRoomManager();
+const gmRoomManager = new GMRoomManager();
 
 // =========================================================================
 // REAL-TIME MULTIPLAYER WEBSOCKET SERVER (/ws)
 // =========================================================================
-const roomManager = new RealtimeRoomManager();
-
 interface SocketMeta {
   roomCode: string | null;
   userId: string | null;
@@ -337,31 +44,27 @@ interface SocketMeta {
 }
 
 const VALID_PROP_TYPES = new Set<RealtimePropEvent['propType']>(['tomato', 'rose', 'egg', 'water']);
+const VALID_NIGHT_ACTIONS = new Set<OnlineNightActionType>([
+  'wolf_bite',
+  'wolf_second_bite',
+  'guard',
+  'seer_inspect',
+  'witch_heal',
+  'witch_poison',
+  'cupid_link',
+  'doppelganger_pick',
+  'confirm_done',
+]);
 
 const socketMeta = new Map<WebSocket, SocketMeta>();
 const roomSockets = new Map<string, Set<WebSocket>>();
+const gmHostSockets = new Map<string, Set<WebSocket>>();
+const gmPlayerSockets = new Map<string, Map<WebSocket, string>>();
 
 function sendJson(ws: WebSocket, payload: Record<string, unknown>) {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
   }
-}
-
-function sanitizeRoomForUser(room: RealtimeRoomState, userId: string | null): RealtimeRoomState {
-  if (!room.matchRoles) return room;
-  const filtered: Record<string, RoleId> = {};
-  if (userId && room.matchRoles[userId]) {
-    const myRole = room.matchRoles[userId];
-    filtered[userId] = myRole;
-    if (myRole === 'werewolf' || myRole === 'wolf_pup') {
-      for (const [pid, role] of Object.entries(room.matchRoles)) {
-        if (role === 'werewolf' || role === 'wolf_pup') {
-          filtered[pid] = role;
-        }
-      }
-    }
-  }
-  return { ...room, matchRoles: filtered };
 }
 
 function broadcastToRoom(code: string, payload: Record<string, unknown>) {
@@ -375,22 +78,77 @@ function broadcastToRoom(code: string, payload: Record<string, unknown>) {
   }
 }
 
+function broadcastChatToRoom(code: string, message: RealtimeChatMessage) {
+  const members = roomSockets.get(code);
+  if (!members) return;
+  const match = roomManager.getMatchState(code);
+  const serialized = JSON.stringify({ type: 'room:chat', code, message });
+  for (const sock of members) {
+    if (sock.readyState !== WebSocket.OPEN) continue;
+    if (message.isGhost && match && match.phase !== 'game_over') {
+      const uid = socketMeta.get(sock)?.userId ?? null;
+      const viewer = uid ? match.players.find((p) => p.id === uid) : undefined;
+      if (!viewer || viewer.isAlive) continue;
+    }
+    sock.send(serialized);
+  }
+}
+
 function broadcastRoomState(
   code: string,
   type: 'room:state' | 'room:match_started',
-  room: RealtimeRoomState
+  includeMatchView = true
 ) {
-  if (!room.matchRoles) {
-    broadcastToRoom(code, { type, room });
-    return;
-  }
   const members = roomSockets.get(code);
   if (!members) return;
+  const now = Date.now();
   for (const sock of members) {
-    if (sock.readyState === WebSocket.OPEN) {
-      const uid = socketMeta.get(sock)?.userId ?? null;
-      sock.send(JSON.stringify({ type, room: sanitizeRoomForUser(room, uid) }));
+    if (sock.readyState !== WebSocket.OPEN) continue;
+    const uid = socketMeta.get(sock)?.userId ?? null;
+    const sanitized = roomManager.getSanitizedRoomForUser(code, uid);
+    if (!sanitized) continue;
+    sock.send(JSON.stringify({ type, room: sanitized }));
+    if (includeMatchView && uid) {
+      const view = roomManager.getMatchViewForUser(code, uid, now);
+      if (view) {
+        sock.send(JSON.stringify({ type: 'room:match_state', code, view, serverNow: now }));
+      }
     }
+  }
+}
+
+function broadcastMatchStateOnly(code: string) {
+  const members = roomSockets.get(code);
+  if (!members) return;
+  const now = Date.now();
+  for (const sock of members) {
+    if (sock.readyState !== WebSocket.OPEN) continue;
+    const uid = socketMeta.get(sock)?.userId ?? null;
+    if (!uid) continue;
+    const view = roomManager.getMatchViewForUser(code, uid, now);
+    if (view) {
+      sock.send(JSON.stringify({ type: 'room:match_state', code, view, serverNow: now }));
+    }
+  }
+}
+
+function applyEloIfNeeded(code: string, eloUpdates?: EloUpdateEntry[]) {
+  const match = roomManager.getMatchState(code);
+  if (!match || match.phase !== 'game_over' || match.eloApplied) return;
+  match.eloApplied = true;
+  const entries =
+    eloUpdates ??
+    match.players
+      .filter((p) => !p.isBot)
+      .map((p) => ({
+        userId: p.id,
+        delta: match.eloDeltasByPlayer?.[p.id] ?? 0,
+        won: (match.eloDeltasByPlayer?.[p.id] ?? 0) > 0,
+      }));
+  if (entries.length > 0) {
+    void applyOnlineMatchEloUpdates(localStore, entries).catch(() => {
+      // ignore local ELO write errors
+    });
   }
 }
 
@@ -420,6 +178,20 @@ function broadcastOpenGMRooms() {
   broadcastToAll({ type: 'gm:room_list', rooms: gmRoomManager.listRooms() });
 }
 
+function detachKickedUserSockets(code: string, kickedId: string) {
+  const set = roomSockets.get(code);
+  if (!set) return;
+  for (const sock of Array.from(set)) {
+    const m = socketMeta.get(sock);
+    if (m && m.userId === kickedId) {
+      set.delete(sock);
+      m.roomCode = null;
+      m.userId = null;
+      m.authUserId = null;
+    }
+  }
+}
+
 function detachSocketFromRoom(ws: WebSocket, options?: { isDisconnect?: boolean }) {
   const meta = socketMeta.get(ws);
   if (!meta || !meta.roomCode) return;
@@ -437,23 +209,18 @@ function detachSocketFromRoom(ws: WebSocket, options?: { isDisconnect?: boolean 
   meta.authUserId = null;
 
   if (prevUserId) {
-    // Only leave room if no other active socket belongs to the same userId in that room
     const stillConnected = Array.from(roomSockets.get(prevCode) || []).some(
       (s) => socketMeta.get(s)?.userId === prevUserId
     );
     if (!stillConnected) {
       const { room } = roomManager.leaveRoom(prevCode, prevUserId, options);
       if (room) {
-        broadcastRoomState(prevCode, 'room:state', room);
+        broadcastRoomState(prevCode, 'room:state', false);
       }
       broadcastOpenRooms();
     }
   }
 }
-
-const gmRoomManager = new GMRoomManager();
-const gmHostSockets = new Map<string, Set<WebSocket>>();
-const gmPlayerSockets = new Map<string, Map<WebSocket, string>>();
 
 function detachSocketFromGMRoom(ws: WebSocket) {
   for (const [code, set] of gmHostSockets.entries()) {
@@ -496,174 +263,99 @@ function broadcastGMRoomUpdates(rawCode: string) {
   }
 }
 
-app.get('/api/rooms', (_req, res) => {
-  res.json({ ok: true, rooms: roomManager.listOpenRooms() });
-});
-
-app.get('/api/gm-rooms', (_req, res) => {
-  res.json({ ok: true, rooms: gmRoomManager.listRooms() });
-});
-
-app.post('/api/gm-rooms/:code/sync', (req, res) => {
-  const code = normalizeRoomCode(req.params.code);
-  const body = req.body || {};
-  const hostId = String(body.hostId || 'gm_host');
-  const hostSecret =
-    readHeaderToken(req.headers['x-gm-host-secret']) ??
-    (typeof body.hostSecret === 'string' && body.hostSecret.trim() ? body.hostSecret.trim() : undefined);
-
-  const alreadyExists = Boolean(gmRoomManager.getHostState(code));
-  if (alreadyExists && !gmRoomManager.verifyHostSecret(code, hostSecret)) {
-    res.status(403).json({
-      ok: false,
-      error: 'Chỉ Quản Trò sở hữu phòng mới có quyền đồng bộ cấu hình phòng này.',
-    });
-    return;
-  }
-
-  const result = gmRoomManager.syncFromHost(
-    code,
-    hostId,
-    {
-      deckMode: body.deckMode,
-      status: body.status,
-      round: typeof body.round === 'number' ? body.round : undefined,
-      phase: body.phase,
-      seats: Array.isArray(body.seats) ? body.seats : undefined,
-      playerCount: typeof body.playerCount === 'number' ? body.playerCount : undefined,
-      resetMatch: Boolean(body.resetMatch),
+// =========================================================================
+// SHARED /api/* ROUTER (identical endpoints on Node Express & Netlify)
+// =========================================================================
+const apiRouter = createApiRouter({
+  store: localStore,
+  isNetlify: false,
+  persistRooms: false,
+  roomManager,
+  gmRoomManager,
+  hooks: {
+    onRoomMutated(code, kind, extra) {
+      if (kind === 'deleted') {
+        broadcastOpenRooms();
+        return;
+      }
+      if (kind === 'kicked' && extra?.kickedId) {
+        broadcastToRoom(code, {
+          type: 'room:kicked',
+          code,
+          targetId: extra.kickedId,
+          reason: 'Chủ phòng đã mời bạn ra khỏi phòng.',
+        });
+        detachKickedUserSockets(code, extra.kickedId);
+        broadcastRoomState(code, 'room:state');
+        broadcastOpenRooms();
+        return;
+      }
+      if (kind === 'chat' && extra?.message) {
+        broadcastChatToRoom(code, extra.message);
+        return;
+      }
+      if (kind === 'prop' && extra?.propEvent) {
+        broadcastToRoom(code, { type: 'room:prop', code, event: extra.propEvent });
+        return;
+      }
+      if (kind === 'votes' && extra?.votes) {
+        broadcastToRoom(code, { type: 'room:votes', code, votes: extra.votes });
+        broadcastMatchStateOnly(code);
+        return;
+      }
+      if (kind === 'match_started') {
+        broadcastRoomState(code, 'room:match_started');
+        broadcastOpenRooms();
+        return;
+      }
+      broadcastRoomState(code, 'room:state');
+      broadcastOpenRooms();
     },
-    alreadyExists ? hostSecret : undefined
-  );
-  if (!result.ok) {
-    res.status(result.error.includes('Chỉ Quản Trò') ? 403 : 400).json(result);
-    return;
-  }
-  broadcastGMRoomUpdates(result.room.code);
-  broadcastOpenGMRooms();
-  res.json(result);
-});
-
-app.get('/api/gm-rooms/:code/exists', (req, res) => {
-  const room = gmRoomManager.getHostState(req.params.code);
-  if (!room) {
-    res.json({ ok: true, exists: false });
-    return;
-  }
-  res.json({
-    ok: true,
-    exists: true,
-    code: room.code,
-    deckMode: room.deckMode,
-    status: room.status,
-  });
-});
-
-app.get('/api/gm-rooms/:code/host', (req, res) => {
-  const code = normalizeRoomCode(req.params.code);
-  const hostSecret = readHeaderToken(req.headers['x-gm-host-secret']);
-  if (!hostSecret) {
-    res.status(403).json({
-      ok: false,
-      error: 'Chỉ Quản Trò sở hữu phòng mới có quyền xem toàn bộ vai trò.',
-    });
-    return;
-  }
-  const room = gmRoomManager.getHostState(code);
-  if (!room) {
-    res.status(404).json({ ok: false, error: 'Không tìm thấy phòng Quản Trò.' });
-    return;
-  }
-  if (!gmRoomManager.verifyHostSecret(code, hostSecret)) {
-    res.status(403).json({
-      ok: false,
-      error: 'Chỉ Quản Trò sở hữu phòng mới có quyền xem toàn bộ vai trò.',
-    });
-    return;
-  }
-  res.json({ ok: true, room });
-});
-
-app.post('/api/gm-rooms/:code/join', (req, res) => {
-  const code = normalizeRoomCode(req.params.code);
-  const body = req.body || {};
-  const user = (body.user || {}) as { id?: string; name?: string; avatar?: string };
-  const result = gmRoomManager.joinAsPlayer(
-    code,
-    {
-      id: String(user.id || ''),
-      name: String(user.name || ''),
-      avatar: typeof user.avatar === 'string' ? user.avatar : undefined,
+    onGMRoomMutated(code) {
+      broadcastGMRoomUpdates(code);
+      broadcastOpenGMRooms();
     },
-    { seatId: typeof body.seatId === 'string' ? body.seatId : undefined }
-  );
-  if (!result.ok) {
-    res.status(400).json(result);
-    return;
-  }
-  broadcastGMRoomUpdates(code);
-  broadcastOpenGMRooms();
-  res.json({ ok: true, view: result.view, playerToken: result.playerToken });
+  },
 });
 
-app.post('/api/gm-rooms/:code/leave', (req, res) => {
-  const code = normalizeRoomCode(req.params.code);
-  const body = req.body || {};
-  const userId = String(body.userId || '').trim().slice(0, 64);
-  const playerToken =
-    readHeaderToken(req.headers['x-gm-player-token']) ??
-    (typeof body.playerToken === 'string' && body.playerToken.trim() ? body.playerToken.trim() : undefined);
-  if (gmRoomManager.hasPlayerToken(code, userId) && !gmRoomManager.verifyPlayerToken(code, userId, playerToken)) {
-    res.status(403).json({ ok: false, error: 'Mã xác thực người chơi không hợp lệ.' });
-    return;
-  }
-  const result = gmRoomManager.leaveAsPlayer(code, userId);
-  if (!result.ok) {
-    res.status(400).json(result);
-    return;
-  }
-  broadcastGMRoomUpdates(code);
-  broadcastOpenGMRooms();
-  res.json({ ok: true });
-});
+app.use('/api', express.raw({ type: '*/*', limit: '100kb' }), async (req, res) => {
+  try {
+    const fullUrl = new URL(req.originalUrl, `http://${req.headers.host || 'localhost'}`);
+    const headers = new Headers();
+    for (const [key, val] of Object.entries(req.headers)) {
+      if (typeof val === 'string') headers.set(key, val);
+      else if (Array.isArray(val)) headers.set(key, val.join(', '));
+    }
+    const method = req.method.toUpperCase();
+    const hasBody = method !== 'GET' && method !== 'HEAD';
+    const rawBody =
+      hasBody && Buffer.isBuffer(req.body) && req.body.length > 0
+        ? new Uint8Array(req.body)
+        : undefined;
 
-app.post('/api/gm-rooms/:code/self-role', (req, res) => {
-  const code = normalizeRoomCode(req.params.code);
-  const body = req.body || {};
-  const userId = String(body.userId || '').trim().slice(0, 64);
-  const playerToken =
-    readHeaderToken(req.headers['x-gm-player-token']) ??
-    (typeof body.playerToken === 'string' && body.playerToken.trim() ? body.playerToken.trim() : undefined);
-  if (gmRoomManager.hasPlayerToken(code, userId) && !gmRoomManager.verifyPlayerToken(code, userId, playerToken)) {
-    res.status(403).json({ ok: false, error: 'Mã xác thực người chơi không hợp lệ.' });
-    return;
-  }
-  const result = gmRoomManager.submitSelfRole(code, userId, body.roleId);
-  if (!result.ok) {
-    res.status(400).json(result);
-    return;
-  }
-  broadcastGMRoomUpdates(code);
-  res.json({ ok: true, view: result.view });
-});
+    const webReq = new Request(fullUrl.toString(), {
+      method,
+      headers,
+      body: rawBody,
+    });
 
-app.get('/api/gm-rooms/:code/player/:userId', (req, res) => {
-  const code = normalizeRoomCode(req.params.code);
-  const userId = String(req.params.userId || '').trim().slice(0, 64);
-  const playerToken = readHeaderToken(req.headers['x-gm-player-token']);
-  if (gmRoomManager.hasPlayerToken(code, userId) && !gmRoomManager.verifyPlayerToken(code, userId, playerToken)) {
-    res.status(403).json({ ok: false, error: 'Mã xác thực người chơi không hợp lệ.' });
-    return;
+    const webRes = await apiRouter.handleRequest(webReq, {
+      clientIp: req.ip || req.socket.remoteAddress || 'unknown',
+    });
+
+    res.status(webRes.status);
+    webRes.headers.forEach((value, key) => {
+      res.setHeader(key, value);
+    });
+    const text = await webRes.text();
+    res.send(text);
+  } catch {
+    res.status(500).json({ ok: false, error: 'Lỗi xử lý API nội bộ.' });
   }
-  const view = gmRoomManager.getPlayerView(code, userId);
-  if (!view) {
-    res.status(404).json({ ok: false, error: 'Không tìm thấy phòng Quản Trò.' });
-    return;
-  }
-  res.json({ ok: true, view });
 });
 
 async function startServer() {
+  const sessionSecret = await resolveClusterSessionSecret(localStore);
   const distPath = path.resolve(process.cwd(), 'dist');
   const hasDistBuild = fs.existsSync(path.join(distPath, 'index.html'));
   const isDevLifecycle = process.env.npm_lifecycle_event === 'dev';
@@ -734,7 +426,7 @@ async function startServer() {
           const rawAuthToken = typeof msg.authToken === 'string' ? msg.authToken.trim() : '';
           let verifiedAccountUserId: string | null = null;
           if (cleanUserId.startsWith('acc_') && rawAuthToken) {
-            const session = verifySessionToken(rawAuthToken);
+            const session = verifySessionToken(rawAuthToken, sessionSecret);
             if (!session || session.userId !== cleanUserId) {
               sendJson(ws, { type: 'error', message: 'Phiên đăng nhập không hợp lệ.' });
               return;
@@ -795,6 +487,8 @@ async function startServer() {
             return;
           }
 
+          roomManager.getOrIssuePlayerSecret(result.room.code, cleanUserId);
+
           if (meta) {
             meta.roomCode = result.room.code;
             meta.userId = cleanUserId;
@@ -807,7 +501,7 @@ async function startServer() {
           }
           set.add(ws);
 
-          broadcastRoomState(result.room.code, 'room:state', result.room);
+          broadcastRoomState(result.room.code, 'room:state');
           broadcastOpenRooms();
           return;
         }
@@ -822,11 +516,7 @@ async function startServer() {
           const code = normalizeRoomCode(String(msg.code || ''));
           const meta = requireBoundSocket(ws, code);
           if (!meta) return;
-          const res = roomManager.kickParticipant(
-            code,
-            meta.userId!,
-            String(msg.targetId || '')
-          );
+          const res = roomManager.kickParticipant(code, meta.userId!, String(msg.targetId || ''));
           if (!res.ok) {
             sendJson(ws, { type: 'error', message: res.error });
             return;
@@ -837,20 +527,8 @@ async function startServer() {
             targetId: res.kickedId,
             reason: 'Chủ phòng đã mời bạn ra khỏi phòng.',
           });
-          // Detach kicked user's socket(s) from this room cleanly
-          const set = roomSockets.get(code);
-          if (set) {
-            for (const sock of Array.from(set)) {
-              const m = socketMeta.get(sock);
-              if (m && m.userId === res.kickedId) {
-                set.delete(sock);
-                m.roomCode = null;
-                m.userId = null;
-                m.authUserId = null;
-              }
-            }
-          }
-          broadcastRoomState(code, 'room:state', res.room);
+          detachKickedUserSockets(code, res.kickedId);
+          broadcastRoomState(code, 'room:state', false);
           broadcastOpenRooms();
           return;
         }
@@ -864,7 +542,7 @@ async function startServer() {
             sendJson(ws, { type: 'error', message: res.error });
             return;
           }
-          broadcastRoomState(code, 'room:state', res.room);
+          broadcastRoomState(code, 'room:state', false);
           broadcastOpenRooms();
           return;
         }
@@ -878,7 +556,7 @@ async function startServer() {
             sendJson(ws, { type: 'error', message: res.error });
             return;
           }
-          broadcastRoomState(code, 'room:state', res.room);
+          broadcastRoomState(code, 'room:state', false);
           broadcastOpenRooms();
           return;
         }
@@ -896,7 +574,7 @@ async function startServer() {
             sendJson(ws, { type: 'error', message: res.error });
             return;
           }
-          broadcastRoomState(code, 'room:state', res.room);
+          broadcastRoomState(code, 'room:state', false);
           broadcastOpenRooms();
           return;
         }
@@ -910,8 +588,86 @@ async function startServer() {
             sendJson(ws, { type: 'error', message: res.error });
             return;
           }
-          broadcastRoomState(code, 'room:match_started', res.room);
+          broadcastRoomState(code, 'room:match_started');
           broadcastOpenRooms();
+          return;
+        }
+
+        if (type === 'room:restart') {
+          const code = normalizeRoomCode(String(msg.code || ''));
+          const meta = requireBoundSocket(ws, code);
+          if (!meta) return;
+          const res = roomManager.restartMatch(code, meta.userId!);
+          if (!res.ok) {
+            sendJson(ws, { type: 'error', message: res.error });
+            return;
+          }
+          broadcastRoomState(code, 'room:match_started');
+          broadcastOpenRooms();
+          return;
+        }
+
+        if (type === 'room:night_action') {
+          const code = normalizeRoomCode(String(msg.code || ''));
+          const meta = requireBoundSocket(ws, code);
+          if (!meta) return;
+          const actionObj = (msg.action && typeof msg.action === 'object'
+            ? msg.action
+            : msg) as Record<string, unknown>;
+          const actionType = String(actionObj.actionType || '') as OnlineNightActionType;
+          if (!VALID_NIGHT_ACTIONS.has(actionType)) {
+            sendJson(ws, { type: 'error', message: 'Loại hành động đêm không hợp lệ.' });
+            return;
+          }
+          const res = roomManager.submitNightAction(code, meta.userId!, {
+            actionType,
+            targetId:
+              actionObj.targetId === null || actionObj.targetId === undefined
+                ? null
+                : String(actionObj.targetId).slice(0, 64),
+            secondTargetId:
+              actionObj.secondTargetId === null || actionObj.secondTargetId === undefined
+                ? null
+                : String(actionObj.secondTargetId).slice(0, 64),
+          });
+          if (!res.ok) {
+            sendJson(ws, { type: 'error', message: res.error });
+            return;
+          }
+          applyEloIfNeeded(code, res.eloUpdates);
+          broadcastRoomState(code, 'room:state');
+          return;
+        }
+
+        if (type === 'room:hunter_shot') {
+          const code = normalizeRoomCode(String(msg.code || ''));
+          const meta = requireBoundSocket(ws, code);
+          if (!meta) return;
+          const targetId =
+            msg.targetId === null || msg.targetId === undefined || msg.targetId === ''
+              ? null
+              : String(msg.targetId).slice(0, 64);
+          const res = roomManager.submitHunterShot(code, meta.userId!, targetId);
+          if (!res.ok) {
+            sendJson(ws, { type: 'error', message: res.error });
+            return;
+          }
+          applyEloIfNeeded(code, res.eloUpdates);
+          broadcastRoomState(code, 'room:state');
+          return;
+        }
+
+        if (type === 'room:advance_phase') {
+          const code = normalizeRoomCode(String(msg.code || ''));
+          const meta = requireBoundSocket(ws, code);
+          if (!meta) return;
+          const res = roomManager.advancePhase(code, meta.userId!);
+          if (!res.ok) {
+            sendJson(ws, { type: 'error', message: res.error });
+            return;
+          }
+          applyEloIfNeeded(code, res.eloUpdates);
+          broadcastRoomState(code, 'room:state');
           return;
         }
 
@@ -935,7 +691,7 @@ async function startServer() {
             sendJson(ws, { type: 'error', message: res.error });
             return;
           }
-          broadcastToRoom(code, { type: 'room:chat', code, message: res.message });
+          broadcastChatToRoom(code, res.message);
           return;
         }
 
@@ -947,17 +703,15 @@ async function startServer() {
           if (!ev || !ev.targetPlayerId || !VALID_PROP_TYPES.has(ev.propType)) {
             return;
           }
-          broadcastToRoom(code, {
-            type: 'room:prop',
-            code,
-            event: {
-              id: String(ev.id || `prop_${Date.now()}`),
-              propType: ev.propType,
-              fromPlayerId: meta.userId!,
-              targetPlayerId: String(ev.targetPlayerId),
-              timestamp: Date.now(),
-            },
-          });
+          const propEvent: RealtimePropEvent = {
+            id: String(ev.id || `prop_${Date.now()}`),
+            propType: ev.propType,
+            fromPlayerId: meta.userId!,
+            targetPlayerId: String(ev.targetPlayerId),
+            timestamp: Date.now(),
+          };
+          roomManager.recordProp(code, propEvent);
+          broadcastToRoom(code, { type: 'room:prop', code, event: propEvent });
           return;
         }
 
@@ -965,14 +719,13 @@ async function startServer() {
           const code = normalizeRoomCode(String(msg.code || ''));
           const meta = requireBoundSocket(ws, code);
           if (!meta) return;
-          const res = roomManager.castVote(
-            code,
-            meta.userId!,
-            String(msg.targetId || '')
-          );
-          if (res.ok) {
-            broadcastToRoom(code, { type: 'room:votes', code, votes: res.votes });
+          const res = roomManager.castVote(code, meta.userId!, String(msg.targetId || ''));
+          if (!res.ok) {
+            sendJson(ws, { type: 'error', message: res.error });
+            return;
           }
+          broadcastToRoom(code, { type: 'room:votes', code, votes: res.votes });
+          broadcastMatchStateOnly(code);
           return;
         }
 
@@ -1044,6 +797,15 @@ async function startServer() {
     });
   });
 
+  // 1-second authoritative server tick for active Online 3D matches
+  const matchTickInterval = setInterval(() => {
+    const changed = roomManager.tickDueRooms(Date.now());
+    for (const item of changed) {
+      applyEloIfNeeded(item.code, item.eloUpdates);
+      broadcastRoomState(item.code, 'room:state');
+    }
+  }, 1000);
+
   // Periodic heartbeat to clean up broken sockets
   const heartbeatInterval = setInterval(() => {
     for (const [sock, meta] of socketMeta.entries()) {
@@ -1063,11 +825,14 @@ async function startServer() {
     }
   }, 30000);
 
-  wss.on('close', () => clearInterval(heartbeatInterval));
+  wss.on('close', () => {
+    clearInterval(matchTickInterval);
+    clearInterval(heartbeatInterval);
+  });
 
   httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(
-      `Werewolf 3D Server + Secure Auth API + Realtime WS (/ws) listening on http://0.0.0.0:${PORT}`
+      `Werewolf 3D Server + Secure Auth API + Online Match Engine + Realtime WS (/ws) listening on http://0.0.0.0:${PORT}`
     );
   });
 }
