@@ -92,20 +92,19 @@ test('selectBestVoiceForLanguage strictly matches language and prioritizes natur
 
   const enOnly = [{ lang: 'en-US', name: 'Samantha' }];
   assert.equal(selectBestVoiceForLanguage(enOnly, 'vi'), null);
-  assert.equal(selectBestVoiceForLanguage(enOnly, 'ja'), null);
   assert.equal(selectBestVoiceForLanguage(enOnly, 'en')?.name, 'Samantha');
 
   const multi = [
     { lang: 'vi_VN', name: 'Linh' },
     { lang: 'vi-VN', name: 'Microsoft HoaiMy Online (Natural)' },
-    { lang: 'fr-FR', name: 'Google français' },
+    { lang: 'en-GB', name: 'Google UK English Female' },
   ];
   assert.equal(selectBestVoiceForLanguage(multi, 'vi')?.name, 'Microsoft HoaiMy Online (Natural)');
-  assert.equal(selectBestVoiceForLanguage(multi, 'fr')?.name, 'Google français');
+  assert.equal(selectBestVoiceForLanguage(multi, 'en')?.name, 'Google UK English Female');
 });
 
 test('ROLE_CALLOUT_LINES and PROP_REACTION_META have full localized copy and refined Hunter tone', () => {
-  const langs: Language[] = ['vi', 'en', 'fr', 'es', 'ja'];
+  const langs: Language[] = ['vi', 'en'];
   const roles = Object.keys(ROLE_CALLOUT_LINES) as RoleId[];
   assert.equal(roles.length, 13);
 

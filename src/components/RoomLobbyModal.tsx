@@ -435,6 +435,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
       timerConfig,
       createIfMissing: true,
       authToken: getStoredAuthToken(),
+      lang,
     });
 
     if (connectTimeoutRef.current !== null) {
@@ -566,6 +567,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
       timerConfig,
       createIfMissing: true,
       authToken: getStoredAuthToken(),
+      lang,
     });
   };
 
@@ -717,6 +719,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
       },
       createIfMissing: false,
       authToken: getStoredAuthToken(),
+      lang,
     });
   };
 

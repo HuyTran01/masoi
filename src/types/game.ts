@@ -178,7 +178,7 @@ export interface LeaderboardUser {
   badges: string[];
 }
 
-export type Language = 'vi' | 'en' | 'fr' | 'es' | 'ja';
+export type Language = 'vi' | 'en';
 
 export type NightSkillCutsceneKind =
   | 'werewolf'

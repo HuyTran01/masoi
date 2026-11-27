@@ -1,6 +1,7 @@
 import type {
   GhostNightSpectatorView,
   HunterShotRecord,
+  Language,
   NightActions,
   NightDeathCinematicState,
   NightResult,
@@ -127,9 +128,12 @@ export interface OnlineMatchState {
   pendingDuskElderPenalty?: boolean;
   pendingDuskHunterShots?: HunterShotRecord[];
   dawnAnnouncement: GMAnnouncementData | null;
+  dawnAnnouncementByLang?: Partial<Record<Language, GMAnnouncementData>>;
   duskAnnouncement: GMAnnouncementData | null;
+  duskAnnouncementByLang?: Partial<Record<Language, GMAnnouncementData>>;
   announcementDismissedAt?: number;
   deathCinematicByPlayer: Record<string, NightDeathCinematicState | null>;
+  deathCinematicByPlayerByLang?: Partial<Record<Language, Record<string, NightDeathCinematicState | null>>>;
   dayVotes: VoteRecord[];
   dayBotVotesComputed?: boolean;
   gameResult: OnlineGameResult | null;
@@ -192,17 +196,18 @@ export interface EloUpdateEntry {
   won: boolean;
 }
 
-const DEFAULT_BOT_STEP_SEC = 4;
-const DEFAULT_HUNTER_SHOT_SEC = 20;
 const ANNOUNCEMENT_GRACE_MS = 8000;
 
 function toCustomTimerConfig(cfg: RealtimeTimerConfig): CustomTimerConfig {
+  const nightActionSec = Math.max(
+    15,
+    Math.min(180, cfg.nightActionSec || DEFAULT_TIMER_CONFIG.nightActionSec)
+  );
   return {
-    nightActionSec: Math.max(15, Math.min(180, cfg.nightActionSec || DEFAULT_TIMER_CONFIG.nightActionSec)),
-    botStepSec: DEFAULT_BOT_STEP_SEC,
+    nightActionSec,
+    botStepSec: nightActionSec,
     dayDiscussSec: Math.max(20, Math.min(600, cfg.dayDiscussSec || DEFAULT_TIMER_CONFIG.dayDiscussSec)),
     dayVoteSec: Math.max(15, Math.min(300, cfg.dayVoteSec || DEFAULT_TIMER_CONFIG.dayVoteSec)),
-    hunterShotSec: DEFAULT_HUNTER_SHOT_SEC,
   };
 }
 
@@ -409,12 +414,25 @@ function computeWolfConsensus(
       if (!target) continue;
       counts.set(targetId, (counts.get(targetId) || 0) + 1);
     }
+    const seatIndexById = new Map<string, number>();
+    match.players.forEach((p, idx) => seatIndexById.set(p.id, idx));
+
     let bestId: string | null = null;
     let bestCount = 0;
     for (const [id, count] of counts.entries()) {
-      if (count > bestCount || (count === bestCount && tieBreaker && id === tieBreaker)) {
+      if (count > bestCount) {
         bestCount = count;
         bestId = id;
+      } else if (count === bestCount && bestId !== null) {
+        if (tieBreaker && id === tieBreaker) {
+          bestId = id;
+        } else if (!tieBreaker || bestId !== tieBreaker) {
+          const curIdx = seatIndexById.get(id) ?? Number.MAX_SAFE_INTEGER;
+          const bestIdx = seatIndexById.get(bestId) ?? Number.MAX_SAFE_INTEGER;
+          if (curIdx < bestIdx) {
+            bestId = id;
+          }
+        }
       }
     }
     return bestId;
@@ -501,7 +519,8 @@ function setupCurrentNightStep(
 
   const timers = toCustomTimerConfig(ctx.timerConfig);
   const livingHumans = getLivingHumanActorsForStep(match, step);
-  const durationSec = livingHumans.length > 0 ? timers.nightActionSec : timers.botStepSec;
+  // Uniform night step duration regardless of whether role is human/bot or alive/dead (anti-leak).
+  const durationSec = timers.nightActionSec;
 
   match.phaseStartedAt = now;
   match.phaseEndsAt = now + durationSec * 1000 + graceMs;
@@ -532,10 +551,13 @@ export function beginNewNight(
   match.dayVotes = [];
   match.dayBotVotesComputed = false;
   match.dawnAnnouncement = null;
+  match.dawnAnnouncementByLang = undefined;
   if (!options?.keepDuskAnnouncement) {
     match.duskAnnouncement = null;
+    match.duskAnnouncementByLang = undefined;
   }
   match.deathCinematicByPlayer = {};
+  match.deathCinematicByPlayerByLang = undefined;
   syncVotesMap(match, ctx);
 
   setupCurrentNightStep(match, ctx, now, options?.keepDuskAnnouncement ? ANNOUNCEMENT_GRACE_MS : 0);
@@ -708,34 +730,50 @@ function finalizeDawn(
 
   updateMayorAfterDeaths(match, ctx, 'dawn', now);
 
-  // Build base public Dawn announcement (privateNotice is always recomputed per-viewer in projection)
-  const dawnAnn = buildDawnGMAnnouncement({
-    round: match.round,
-    beforePlayers,
-    afterPlayers: match.players,
-    nightKilledIds,
-    hunterShots,
-    humanPlayerId: '__PUBLIC__',
-    lang: 'vi',
-  });
-  dawnAnn.privateNotice = null;
-  dawnAnn.isHumanDead = false;
+  // Build base public Dawn announcements for both vi & en (privateNotice is recomputed per-viewer in projection)
+  const buildBaseDawn = (lang: Language): GMAnnouncementData => {
+    const ann = buildDawnGMAnnouncement({
+      round: match.round,
+      beforePlayers,
+      afterPlayers: match.players,
+      nightKilledIds,
+      hunterShots,
+      humanPlayerId: '__PUBLIC__',
+      lang,
+    });
+    ann.privateNotice = null;
+    ann.isHumanDead = false;
+    return ann;
+  };
+  const dawnAnn = buildBaseDawn('vi');
+  const dawnAnnEn = buildBaseDawn('en');
   match.dawnAnnouncement = dawnAnn;
+  match.dawnAnnouncementByLang = { vi: dawnAnn, en: dawnAnnEn };
   match.duskAnnouncement = null;
+  match.duskAnnouncementByLang = undefined;
 
-  // Compute zero-leak end-of-night cinematic individually per human participant
-  const cinematics: Record<string, NightDeathCinematicState | null> = {};
+  // Compute zero-leak end-of-night cinematic individually per human participant in both vi & en
+  const cinematicsVi: Record<string, NightDeathCinematicState | null> = {};
+  const cinematicsEn: Record<string, NightDeathCinematicState | null> = {};
   for (const bp of beforePlayers) {
     if (bp.isBot) continue;
-    cinematics[bp.id] = determineEndOfNightCinematic({
+    cinematicsVi[bp.id] = determineEndOfNightCinematic({
       beforeHuman: bp,
       beforePlayers,
       afterPlayers: match.players,
       nightResult,
       lang: 'vi',
     });
+    cinematicsEn[bp.id] = determineEndOfNightCinematic({
+      beforeHuman: bp,
+      beforePlayers,
+      afterPlayers: match.players,
+      nightResult,
+      lang: 'en',
+    });
   }
-  match.deathCinematicByPlayer = cinematics;
+  match.deathCinematicByPlayer = cinematicsVi;
+  match.deathCinematicByPlayerByLang = { vi: cinematicsVi, en: cinematicsEn };
 
   // Single authoritative Dawn system chat line
   ctx.appendChat({
@@ -778,9 +816,10 @@ function finalizeDawn(
   });
 
   const timers = toCustomTimerConfig(ctx.timerConfig);
+  const dawnGraceMs = ANNOUNCEMENT_GRACE_MS + (dawnAnn.victims.length > 0 ? 5000 : 0);
   match.phase = 'day_discussion';
   match.phaseStartedAt = now;
-  match.phaseEndsAt = now + timers.dayDiscussSec * 1000 + ANNOUNCEMENT_GRACE_MS;
+  match.phaseEndsAt = now + timers.dayDiscussSec * 1000 + dawnGraceMs;
   match.dayVotes = [];
   match.dayBotVotesComputed = false;
   syncVotesMap(match, ctx);
@@ -805,53 +844,59 @@ function finalizeDusk(
 
   updateMayorAfterDeaths(match, ctx, 'dusk', now);
 
-  const duskAnn = buildDuskGMAnnouncement({
-    round: match.round,
-    beforePlayers,
-    afterPlayers: match.players,
-    lynchedVictim,
-    voteCounts: match.pendingDuskVoteCounts || {},
-    votes: playerTargetVotes,
-    isTie: Boolean(match.pendingDuskIsTie),
-    elderLynchedPenalty: Boolean(match.pendingDuskElderPenalty),
-    hunterShots: match.pendingDuskHunterShots ?? [],
-    humanPlayerId: '__PUBLIC__',
-    lang: 'vi',
-  });
-  // Align Dusk voteBreakdown with Mayor x2 weighting & preserve Campfire Abstain row (BUG-08 Online Parity)
-  const weightedBreakdown = buildVoteTallyEntries(beforePlayers, playerTargetVotes).map((entry) => ({
-    ...entry,
-    votes: duskTally.counts[entry.playerId] ?? entry.votes,
-  }));
-  if (duskTally.abstainCount > 0) {
-    const abstainVoters = duskTally.abstainerIds
-      .map((id) => {
-        const idx = beforePlayers.findIndex((p) => p.id === id);
-        if (idx < 0) return null;
-        return {
-          id: beforePlayers[idx].id,
-          name: beforePlayers[idx].name,
-          avatar: beforePlayers[idx].avatar,
-          seatNumber: idx + 1,
-        };
-      })
-      .filter(
-        (v): v is { id: string; name: string; avatar: string; seatNumber: number } => Boolean(v)
-      );
-    weightedBreakdown.push({
-      playerId: CAMPFIRE_ABSTAIN_ID,
-      name: 'Lửa Trại (Phiếu Trắng)',
-      avatar: '🔥',
-      seatNumber: 0,
-      votes: duskTally.abstainCount,
-      voters: abstainVoters,
+  const buildBaseDusk = (lang: Language): GMAnnouncementData => {
+    const ann = buildDuskGMAnnouncement({
+      round: match.round,
+      beforePlayers,
+      afterPlayers: match.players,
+      lynchedVictim,
+      voteCounts: match.pendingDuskVoteCounts || {},
+      votes: playerTargetVotes,
+      isTie: Boolean(match.pendingDuskIsTie),
+      elderLynchedPenalty: Boolean(match.pendingDuskElderPenalty),
+      hunterShots: [],
+      humanPlayerId: '__PUBLIC__',
+      lang,
     });
-  }
-  weightedBreakdown.sort((a, b) => b.votes - a.votes || a.seatNumber - b.seatNumber);
-  duskAnn.voteBreakdown = weightedBreakdown;
-  duskAnn.privateNotice = null;
-  duskAnn.isHumanDead = false;
+    // Align Dusk voteBreakdown with Mayor x2 weighting & preserve Campfire Abstain row (BUG-08 Online Parity)
+    const weightedBreakdown = buildVoteTallyEntries(beforePlayers, playerTargetVotes).map((entry) => ({
+      ...entry,
+      votes: duskTally.counts[entry.playerId] ?? entry.votes,
+    }));
+    if (duskTally.abstainCount > 0) {
+      const abstainVoters = duskTally.abstainerIds
+        .map((id) => {
+          const idx = beforePlayers.findIndex((p) => p.id === id);
+          if (idx < 0) return null;
+          return {
+            id: beforePlayers[idx].id,
+            name: beforePlayers[idx].name,
+            avatar: beforePlayers[idx].avatar,
+            seatNumber: idx + 1,
+          };
+        })
+        .filter(
+          (v): v is { id: string; name: string; avatar: string; seatNumber: number } => Boolean(v)
+        );
+      weightedBreakdown.push({
+        playerId: CAMPFIRE_ABSTAIN_ID,
+        name: lang === 'vi' ? 'Lửa Trại (Phiếu Trắng)' : 'Campfire (Abstain)',
+        avatar: '🔥',
+        seatNumber: 0,
+        votes: duskTally.abstainCount,
+        voters: abstainVoters,
+      });
+    }
+    weightedBreakdown.sort((a, b) => b.votes - a.votes || a.seatNumber - b.seatNumber);
+    ann.voteBreakdown = weightedBreakdown;
+    ann.privateNotice = null;
+    ann.isHumanDead = false;
+    return ann;
+  };
+  const duskAnn = buildBaseDusk('vi');
+  const duskAnnEn = buildBaseDusk('en');
   match.duskAnnouncement = duskAnn;
+  match.duskAnnouncementByLang = { vi: duskAnn, en: duskAnnEn };
 
   ctx.appendChat({
     id: `sys_dusk_${match.matchId}_${match.round}`,
@@ -877,11 +922,22 @@ function advanceNightStepOrResolveDawn(
   ctx: MatchRoomBridge,
   now: number
 ): EloUpdateEntry[] | undefined {
+  const finishingStep = match.nightSchedule[match.nightStepIndex] ?? null;
+
+  // If a human Hunter's step finishes without receiving hunter_mark, set explicit null ("Không ghim")
+  if (
+    finishingStep?.key === 'hunter' &&
+    getLivingHumanActorsForStep(match, finishingStep).length > 0 &&
+    match.nightActions.hunterTargetId === undefined
+  ) {
+    match.nightActions.hunterTargetId = null;
+  }
+
   // Ensure any living bot wolf fills missing prey if human wolves timed out without picking
   runBotActionsForCurrentNightStep(match, ctx, { wolfTimeoutFallbackOnly: true });
 
   // Record finalized visual skill cutscenes for the finishing step (never alters resolveNightActions!)
-  recordStepSkillCutscenes(match, match.nightSchedule[match.nightStepIndex] ?? null);
+  recordStepSkillCutscenes(match, finishingStep);
 
   if (match.nightStepIndex + 1 < match.nightSchedule.length) {
     match.nightStepIndex += 1;
@@ -926,7 +982,9 @@ function transitionToDayVoting(
   match.phaseStartedAt = now;
   match.phaseEndsAt = now + timers.dayVoteSec * 1000;
   match.dawnAnnouncement = null;
+  match.dawnAnnouncementByLang = undefined;
   match.deathCinematicByPlayer = {};
+  match.deathCinematicByPlayerByLang = undefined;
 
   if (!match.dayBotVotesComputed) {
     const chatSignals = extractChatVoteSignals(ctx.chatMessages, match.players);
@@ -978,7 +1036,6 @@ function resolveDayVotingToDusk(
   match.pendingDuskHunterShots = [];
 
   if (tally.targetId) {
-    const targetBefore = beforePlayers.find((p) => p.id === tally.targetId);
     const lynchRes = applyDayLynch(match.players, tally.targetId, {
       elderSealActive: match.elderSealActive,
     });
@@ -989,10 +1046,6 @@ function resolveDayVotingToDusk(
     }
     if (lynchRes.wolfPupTriggeredNextNight) {
       match.wolfPupFrenzy = true;
-    }
-    // Tanner wins immediately on lynch without waiting on unrelated cascades
-    if (targetBefore?.roleId !== 'tanner' && lynchRes.hunterShots.length > 0) {
-      match.pendingDuskHunterShots = [...lynchRes.hunterShots];
     }
   }
 
@@ -1315,20 +1368,27 @@ export function applyHostAdvancePhase(
 function buildPersonalizedAnnouncement(
   match: OnlineMatchState,
   viewerId: string,
-  viewer: Player | undefined
+  viewer: Player | undefined,
+  viewerLang: Language = 'vi'
 ): GMAnnouncementData | null {
+  const lang: Language = viewerLang === 'en' ? 'en' : 'vi';
   const isViewerDead = Boolean(viewer && !viewer.isAlive);
 
-  if (match.phase === 'day_discussion' && match.dawnAnnouncement) {
+  const baseDawn = match.dawnAnnouncementByLang?.[lang] ?? match.dawnAnnouncement;
+  if (match.phase === 'day_discussion' && baseDawn) {
     let privateNotice: string | null = null;
     if (match.pendingDawnBeforePlayers && viewer) {
       const beforeMe = match.pendingDawnBeforePlayers.find((p) => p.id === viewerId);
       const diedTonight = Boolean(beforeMe?.isAlive && !viewer.isAlive);
       if (diedTonight) {
-        const cin = match.deathCinematicByPlayer[viewerId];
+        const cin =
+          match.deathCinematicByPlayerByLang?.[lang]?.[viewerId] ??
+          match.deathCinematicByPlayer[viewerId];
         privateNotice = [
           cin?.reasonText || null,
-          '👻 Bạn đã thành Hồn Ma — toàn bộ vai trò trong làng đã được mở khóa để bạn theo dõi (Chat chính bị khóa, chỉ nhắn ở Kênh Hồn Ma).',
+          lang === 'vi'
+            ? '👻 Bạn đã thành Hồn Ma — toàn bộ vai trò trong làng đã được mở khóa để bạn theo dõi (Chat chính bị khóa, chỉ nhắn ở Kênh Hồn Ma).'
+            : '👻 You are now a Ghost — all village roles are unlocked for spectating (Main chat locked, use Ghost Chat only).',
         ]
           .filter(Boolean)
           .join('\n');
@@ -1338,40 +1398,46 @@ function buildPersonalizedAnnouncement(
           afterPlayers: match.players,
           humanPlayerId: viewerId,
           round: match.round,
-          lang: 'vi',
+          lang,
         });
       }
     }
     return {
-      ...match.dawnAnnouncement,
-      victims: match.dawnAnnouncement.victims.map((v) => ({ ...v })),
-      publicEvents: [...match.dawnAnnouncement.publicEvents],
+      ...baseDawn,
+      victims: baseDawn.victims.map((v) => ({ ...v })),
+      publicEvents: [...baseDawn.publicEvents],
       privateNotice,
       isHumanDead: isViewerDead,
     };
   }
 
-  if (match.phase === 'night' && match.round > 1 && match.duskAnnouncement) {
+  const baseDusk = match.duskAnnouncementByLang?.[lang] ?? match.duskAnnouncement;
+  if (match.phase === 'night' && match.round > 1 && baseDusk) {
     let privateNotice: string | null = null;
     if (match.pendingDuskBeforePlayers && viewer) {
       const beforeMe = match.pendingDuskBeforePlayers.find((p) => p.id === viewerId);
       if (beforeMe?.isAlive && !viewer.isAlive) {
         privateNotice =
-          '👻 Bạn đã bị loại tại pháp trường! Từ giờ bạn là Hồn Ma — hãy giữ im lặng ở kênh chung và quan sát cuộc chơi.';
+          lang === 'vi'
+            ? '👻 Bạn đã bị loại tại pháp trường! Từ giờ bạn là Hồn Ma — hãy giữ im lặng ở kênh chung và quan sát cuộc chơi.'
+            : '👻 You were executed at the gallows! You are now a Ghost Soul — stay silent in public chat and spectate the match.';
       } else if (
         beforeMe?.roleId === 'doppelganger' &&
         viewer.roleId !== 'doppelganger' &&
         viewer.isAlive
       ) {
-        const newRoleName = ROLES[viewer.roleId].name.vi;
-        privateNotice = `🪞 Mật báo Quản Trò: Hình mẫu của bạn vừa bị treo cổ — bạn chính thức kế thừa thân phận ${newRoleName}!`;
+        const newRoleName = ROLES[viewer.roleId].name[lang] || ROLES[viewer.roleId].name.en;
+        privateNotice =
+          lang === 'vi'
+            ? `🪞 Mật báo Quản Trò: Hình mẫu của bạn vừa bị treo cổ — bạn chính thức kế thừa thân phận ${newRoleName}!`
+            : `🪞 Secret GM Tap: Your role model was just executed — you have inherited the ${newRoleName} role!`;
       }
     }
     return {
-      ...match.duskAnnouncement,
-      victims: match.duskAnnouncement.victims.map((v) => ({ ...v })),
-      publicEvents: [...match.duskAnnouncement.publicEvents],
-      voteBreakdown: match.duskAnnouncement.voteBreakdown?.map((e) => ({
+      ...baseDusk,
+      victims: baseDusk.victims.map((v) => ({ ...v })),
+      publicEvents: [...baseDusk.publicEvents],
+      voteBreakdown: baseDusk.voteBreakdown?.map((e) => ({
         ...e,
         voters: e.voters?.map((v) => ({ ...v })),
       })),
@@ -1464,8 +1530,10 @@ function buildGhostNightSpectatorView(
 export function buildPlayerMatchView(
   match: OnlineMatchState,
   viewerId: string,
-  serverNow: number = Date.now()
+  serverNow: number = Date.now(),
+  viewerLang: Language = 'vi'
 ): OnlinePlayerMatchView {
+  const lang: Language = viewerLang === 'en' ? 'en' : 'vi';
   const viewer = match.players.find((p) => p.id === viewerId);
   const canSeeAll = match.phase === 'game_over' || Boolean(viewer && !viewer.isAlive);
   const viewerIsWolf = Boolean(viewer && isWolfRole(viewer.roleId));
@@ -1597,9 +1665,13 @@ export function buildPlayerMatchView(
       }
     : null;
 
-  const announcement = buildPersonalizedAnnouncement(match, viewerId, viewer);
+  const announcement = buildPersonalizedAnnouncement(match, viewerId, viewer, lang);
   const deathCinematic =
-    match.phase === 'day_discussion' ? (match.deathCinematicByPlayer[viewerId] ?? null) : null;
+    match.phase === 'day_discussion'
+      ? (match.deathCinematicByPlayerByLang?.[lang]?.[viewerId] ??
+          match.deathCinematicByPlayer[viewerId] ??
+          null)
+      : null;
 
   // STRICT ZERO-LEAK GATE: only verified dead Ghosts see night omniscience
   const ghostNightState: GhostNightSpectatorView | null =

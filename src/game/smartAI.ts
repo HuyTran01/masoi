@@ -31,16 +31,10 @@ export const STORYLINE_CATALOG: Record<StorylineId, StorylineMeta> = {
     label: {
       vi: '🎲 Ngẫu Nhiên Kịch Tính',
       en: '🎲 Dramatic Random',
-      fr: '🎲 Aléatoire Dramatique',
-      es: '🎲 Aleatorio Dramático',
-      ja: '🎲 ドラマチックおまかせ',
     },
     description: {
       vi: 'Bí mật chọn 1 kịch bản kịch tính khớp với đội hình hiện tại mỗi ván đấu.',
       en: 'Secretly picks a compatible high-drama storyline for every match.',
-      fr: 'Choisit secrètement un scénario dramatique compatible à chaque partie.',
-      es: 'Elige en secreto una trama dramática compatible en cada partida.',
-      ja: '試合ごとに配役に合ったドラマチックな展開を秘密裏に選択します。',
     },
   },
   classic_deduction: {
@@ -49,16 +43,10 @@ export const STORYLINE_CATALOG: Record<StorylineId, StorylineMeta> = {
     label: {
       vi: '⚖️ Đấu Trí Cổ Điển',
       en: '⚖️ Classic Deduction',
-      fr: '⚖️ Déduction Classique',
-      es: '⚖️ Deducción Clásica',
-      ja: '⚖️ 王道推理戦',
     },
     description: {
       vi: 'Suy luận thuần túy qua lịch sử bỏ phiếu, phản ứng bình minh và tranh luận.',
       en: 'Pure social deduction driven by voting trails, dawn reads, and debates.',
-      fr: 'Déduction pure basée sur les votes, les réactions à l’aube et les débats.',
-      es: 'Deducción social pura guiada por votos, pistas al amanecer y debate.',
-      ja: '投票履歴・朝の反応・議論から人狼を追い詰める王道の推理戦。',
     },
   },
   twin_seers: {
@@ -67,16 +55,10 @@ export const STORYLINE_CATALOG: Record<StorylineId, StorylineMeta> = {
     label: {
       vi: '🔮 Song Sinh Tiên Tri — Thật Giả Đối Đầu',
       en: '🔮 Twin Seers — Real vs Fake Clash',
-      fr: '🔮 Doubles Voyantes — Vraie vs Fausse',
-      es: '🔮 Videntes Gemelas — Real vs Falsa',
-      ja: '🔮 双子の占い師 — 真贋対決',
     },
     description: {
       vi: 'Ma Sói táo bạo giả danh Tiên Tri đối chất trực diện với Tiên Tri thật!',
       en: 'A bold Werewolf counter-claims Seer head-to-head against the real Seer!',
-      fr: 'Un Loup-Garou audacieux se prétend Voyante face à la vraie Voyante !',
-      es: '¡Un Lobo audaz finge ser Vidente frente a frente contra la real!',
-      ja: '人狼が大胆に占い師を騙り、本物の占い師と真っ向対決します！',
     },
     requiredRoles: ['seer'],
   },
@@ -86,16 +68,10 @@ export const STORYLINE_CATALOG: Record<StorylineId, StorylineMeta> = {
     label: {
       vi: '💘 Tình Nhân Nghịch Cảnh — Sói & Dân',
       en: '💘 Forbidden Lovers — Wolf & Villager',
-      fr: '💘 Amants Interdits — Loup & Villageois',
-      es: '💘 Amantes Prohibidos — Lobo y Aldeano',
-      ja: '💘 禁断の恋人 — 人狼と村人',
     },
     description: {
       vi: 'Cupid se duyên 1 Ma Sói + 1 Dân Làng tạo nên phe thứ 3 đầy kịch tính.',
       en: 'Cupid binds 1 Werewolf + 1 Villager into a razor-edge 3rd-faction romance.',
-      fr: 'Cupidon lie 1 Loup et 1 Villageois en un 3e camp électrique.',
-      es: 'Cupido une a 1 Lobo y 1 Aldeano en una intensa tercera facción.',
-      ja: 'キューピッドが人狼と村人を結び、スリル満点の第三勢力が誕生！',
     },
     requiredRoles: ['cupid'],
   },
@@ -105,16 +81,10 @@ export const STORYLINE_CATALOG: Record<StorylineId, StorylineMeta> = {
     label: {
       vi: '🐺 Nội Chiến Đàn Sói — Thí Tốt Cuồng Nộ',
       en: '🐺 Wolf Civil War — Frenzy Gambit',
-      fr: '🐺 Guerre Civile des Loups — Sacrifice Fureur',
-      es: '🐺 Guerra Civil de Lobos — Sacrificio Feroz',
-      ja: '🐺 人狼内戦 — 狂乱の捨て駒',
     },
     description: {
       vi: 'Đàn Sói sẵn sàng thí Sói Con lấy lòng tin dân làng để mở khóa cú cắn kép!',
       en: 'Wolves bus their own Wolf Pup for town credit to unleash double-kill frenzy!',
-      fr: 'Les Loups sacrifient le Louveteau pour gagner confiance et double morsure !',
-      es: 'Los Lobos sacrifican al Cachorro para ganarse al pueblo y atacar doble.',
-      ja: '子狼を売って村の信頼を勝ち取り、翌夜の2人襲撃を狙う策謀戦！',
     },
     requiredRoles: ['wolf_pup'],
   },
@@ -124,16 +94,10 @@ export const STORYLINE_CATALOG: Record<StorylineId, StorylineMeta> = {
     label: {
       vi: '🎭 Bẫy Kẻ Chán Đời — Đòn Tâm Lý',
       en: '🎭 Jester Mindgame — Psychological Trap',
-      fr: '🎭 Piège du Fou — Jeu Psychologique',
-      es: '🎭 Trampa del Bufón — Juego Mental',
-      ja: '🎭 道化師の罠 — 心理戦',
     },
     description: {
       vi: 'Kẻ Chán Đời tung mồi nhử tinh vi khiến cả làng phân vân Sói thật hay bẫy treo cổ.',
       en: 'The Tanner plants subtle bait so the village doubts every easy lynch.',
-      fr: 'Le Tanneur tend des pièges subtils faisant douter chaque vote facile.',
-      es: 'El Curtidor lanza cebos sutiles que hacen dudar de cada linchamiento.',
-      ja: '吊人が巧妙な罠を張り、村人たちの処刑判断を揺さぶります。',
     },
     requiredRoles: ['tanner'],
   },
@@ -143,16 +107,10 @@ export const STORYLINE_CATALOG: Record<StorylineId, StorylineMeta> = {
     label: {
       vi: '🧪 Đêm Bình Yên & Bình Độc Nửa Đêm',
       en: '🧪 Silent Night & Midnight Poison',
-      fr: '🧪 Nuit Silencieuse & Poison de Minuit',
-      es: '🧪 Noche Silenciosa y Veneno Nocturno',
-      ja: '🧪 静寂の夜と真夜中の毒薬',
     },
     description: {
       vi: 'Bảo Vệ và Phù Thủy tung chiêu cứu người lẫn bình độc tạo áp lực nghẹt thở.',
       en: 'Bodyguard shields and Witch elixirs trigger tense peaceful nights and counter-poisons.',
-      fr: 'Boucliers du Salvateur et potions de la Sorcière créent une paranoïa intense.',
-      es: 'Escudos y pociones provocan noches sin bajas seguidas de venenos letales.',
-      ja: '騎士の護衛と魔女の秘薬が交錯し、静かな夜の裏で疑心暗鬼が深まる。',
     },
     requiredRoles: ['bodyguard', 'witch'],
   },
@@ -162,16 +120,10 @@ export const STORYLINE_CATALOG: Record<StorylineId, StorylineMeta> = {
     label: {
       vi: '👑 Đảo Chính Thị Trưởng — Quyền Lực x2',
       en: '👑 Mayor Coup — Double Vote Power',
-      fr: '👑 Coup du Maire — Pouvoir Double',
-      es: '👑 Golpe del Alcalde — Poder x2',
-      ja: '👑 村長クーデター — 2票の権力',
     },
     description: {
       vi: 'Mọi toan tính xoay quanh chiếc vương miện Thị Trưởng và lá phiếu quyền lực x2.',
       en: 'Every alliance and ambush revolves around the Mayor’s double-weight vote.',
-      fr: 'Toutes les manœuvres tournent autour du double vote du Maire.',
-      es: 'Todas las alianzas y emboscadas giran en torno al voto doble del Alcalde.',
-      ja: '2票の権限を持つ村長の座と継承をめぐり、激しい権力闘争が勃発！',
     },
   },
 };
@@ -214,6 +166,60 @@ export interface AIMatchBrain {
   witchPoisonedByBot: Record<string, string | null>;
   wolfBluffPlan: WolfBluffPlan;
   cupidBiasApplied: boolean;
+
+  // Wave 2: Conversational memory & anti-repetition
+  usedChatLinesByRound: Record<number, string[]>;
+  recentChatHistory: Array<{ senderId: string; senderName: string; text: string; round: number }>;
+  statedVoteTargetByBot: Record<string, { round: number; targetId: string }>;
+}
+
+export interface AiChatServerPayload {
+  lang: Language;
+  round: number;
+  humanMessage: string;
+  humanName: string;
+  humanSeat: number;
+  bot: {
+    id: string;
+    name: string;
+    seat: number;
+    persona: BotPersonaId;
+    roleId: RoleId;
+    roleName: string;
+    faction: string;
+    privateMemory: {
+      wolfPackmates?: Array<{ seat: number; name: string }>;
+      seerChecks?: Array<{ seat: number; name: string; result: 'wolf' | 'good' }>;
+      witchHealed?: Array<{ seat: number; name: string }>;
+      witchPoisoned?: { seat: number; name: string } | null;
+      lover?: { seat: number; name: string } | null;
+      statedSuspect?: { seat: number; name: string } | null;
+    };
+  };
+  publicState: {
+    players: Array<{
+      seat: number;
+      name: string;
+      isAlive: boolean;
+      isMayor: boolean;
+      revealedRole?: RoleId;
+    }>;
+    lastDawnDeaths: Array<{ seat: number; name: string }>;
+    recentChatHistory: Array<{ senderName: string; text: string; round: number }>;
+    publicClaims: Array<{
+      speakerName: string;
+      claimedRole: RoleId;
+      targetName?: string;
+      checkResult?: 'wolf' | 'good';
+      round: number;
+    }>;
+    recentVoteSummary: Array<{
+      round: number;
+      lynchedName: string | null;
+      lynchedRole?: RoleId | null;
+      votes: Array<{ voterName: string; targetName: string }>;
+    }>;
+  };
 }
 
 export interface ScheduledBotBeat {
@@ -516,6 +522,164 @@ export function createAIMatchBrain(
       hasClaimed: false,
     },
     cupidBiasApplied: false,
+    usedChatLinesByRound: {},
+    recentChatHistory: [],
+    statedVoteTargetByBot: {},
+  };
+}
+
+export function recordPublicChatMessage(
+  brain: AIMatchBrain,
+  entry: { senderId: string; senderName: string; text: string; round: number }
+): void {
+  const cleanText = String(entry.text || '').trim();
+  if (!cleanText) return;
+  if (!Array.isArray(brain.recentChatHistory)) brain.recentChatHistory = [];
+  brain.recentChatHistory.push({
+    senderId: entry.senderId,
+    senderName: entry.senderName,
+    text: cleanText.slice(0, 280),
+    round: entry.round,
+  });
+  if (brain.recentChatHistory.length > 8) {
+    brain.recentChatHistory = brain.recentChatHistory.slice(-8);
+  }
+}
+
+function normalizeChatLineKey(text: string): string {
+  return text.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function claimUniqueRoundLine(
+  brain: AIMatchBrain,
+  round: number,
+  candidates: string[],
+  lang: Language,
+  rng: () => number
+): string {
+  if (!brain.usedChatLinesByRound) brain.usedChatLinesByRound = {};
+  const used = brain.usedChatLinesByRound[round] ?? [];
+  const usedSet = new Set(used.map(normalizeChatLineKey));
+  const fresh = candidates.filter((c) => !usedSet.has(normalizeChatLineKey(c)));
+  let chosen = fresh.length > 0 ? pickFrom(fresh, rng) : pickFrom(candidates, rng);
+  if (usedSet.has(normalizeChatLineKey(chosen))) {
+    const suffix =
+      lang === 'vi'
+        ? ` (Ngày ${round}, lượt ${used.length + 1})`
+        : ` (Day ${round}, note #${used.length + 1})`;
+    chosen = `${chosen}${suffix}`;
+  }
+  brain.usedChatLinesByRound[round] = [...used, chosen];
+  return chosen;
+}
+
+/**
+ * Strictly zero-leak payload builder for optional server-side Gemini chat (/api/ai-chat).
+ * NEVER includes the human player's role or any other living bot's secret role.
+ */
+export function buildAiChatServerPayload(
+  brain: AIMatchBrain,
+  replyingBot: Player,
+  players: Player[],
+  round: number,
+  lang: Language,
+  humanMessage: string
+): AiChatServerPayload {
+  const seatMap = new Map<string, { seat: number; name: string }>();
+  players.forEach((p, idx) => seatMap.set(p.id, { seat: idx + 1, name: p.name }));
+
+  const humanPlayer = players.find((p) => p.id === brain.humanId);
+  const humanInfo = seatMap.get(brain.humanId) || {
+    seat: 1,
+    name: humanPlayer?.name || (lang === 'vi' ? 'Bạn' : 'You'),
+  };
+  const botInfo = seatMap.get(replyingBot.id) || { seat: 1, name: replyingBot.name };
+
+  const privateMemory: AiChatServerPayload['bot']['privateMemory'] = {};
+  if (isBitingWolf(replyingBot.roleId)) {
+    privateMemory.wolfPackmates = players
+      .filter((p) => p.id !== replyingBot.id && isBitingWolf(p.roleId))
+      .map((p) => seatMap.get(p.id)!)
+      .filter(Boolean);
+  }
+  if (replyingBot.roleId === 'seer') {
+    const checks = brain.seerChecksByBot[replyingBot.id] || {};
+    privateMemory.seerChecks = Object.entries(checks)
+      .map(([tid, result]) => {
+        const info = seatMap.get(tid);
+        return info ? { seat: info.seat, name: info.name, result } : null;
+      })
+      .filter((x): x is { seat: number; name: string; result: 'wolf' | 'good' } => Boolean(x));
+  }
+  if (replyingBot.roleId === 'witch') {
+    privateMemory.witchHealed = (brain.witchHealedByBot[replyingBot.id] || [])
+      .map((tid) => seatMap.get(tid))
+      .filter((x): x is { seat: number; name: string } => Boolean(x));
+    const poisonedId = brain.witchPoisonedByBot[replyingBot.id];
+    privateMemory.witchPoisoned = poisonedId ? seatMap.get(poisonedId) ?? null : null;
+  }
+  if (replyingBot.loverId) {
+    privateMemory.lover = seatMap.get(replyingBot.loverId) ?? null;
+  }
+  const stated = brain.statedVoteTargetByBot?.[replyingBot.id];
+  if (stated && stated.round === round) {
+    privateMemory.statedSuspect = seatMap.get(stated.targetId) ?? null;
+  }
+
+  const latestDawn = brain.dawnDeathHistory[brain.dawnDeathHistory.length - 1];
+  const lastDawnDeaths = (latestDawn?.victimIds || [])
+    .map((id) => seatMap.get(id))
+    .filter((x): x is { seat: number; name: string } => Boolean(x));
+
+  const roleDef = ROLES[replyingBot.roleId];
+
+  return {
+    lang,
+    round,
+    humanMessage: String(humanMessage || '').trim().slice(0, 280),
+    humanName: humanInfo.name,
+    humanSeat: humanInfo.seat,
+    bot: {
+      id: replyingBot.id,
+      name: botInfo.name,
+      seat: botInfo.seat,
+      persona: brain.personas[replyingBot.id] || 'observer',
+      roleId: replyingBot.roleId,
+      roleName: roleDef.name[lang] || roleDef.name.en,
+      faction: roleDef.faction,
+      privateMemory,
+    },
+    publicState: {
+      players: players.map((p, idx) => ({
+        seat: idx + 1,
+        name: p.name,
+        isAlive: p.isAlive,
+        isMayor: Boolean(p.isMayor),
+        ...(brain.revealedRoles[p.id] ? { revealedRole: brain.revealedRoles[p.id] } : {}),
+      })),
+      lastDawnDeaths,
+      recentChatHistory: (brain.recentChatHistory || []).slice(-8).map((m) => ({
+        senderName: m.senderName,
+        text: m.text,
+        round: m.round,
+      })),
+      publicClaims: brain.publicClaims.slice(-10).map((c) => ({
+        speakerName: seatMap.get(c.speakerId)?.name || c.speakerId,
+        claimedRole: c.claimedRole,
+        ...(c.targetId ? { targetName: seatMap.get(c.targetId)?.name || c.targetId } : {}),
+        ...(c.checkResult ? { checkResult: c.checkResult } : {}),
+        round: c.round,
+      })),
+      recentVoteSummary: brain.voteHistory.slice(-2).map((snap) => ({
+        round: snap.round,
+        lynchedName: snap.lynchedId ? seatMap.get(snap.lynchedId)?.name ?? null : null,
+        lynchedRole: snap.lynchedRoleId ?? null,
+        votes: snap.votes.slice(0, 20).map((v) => ({
+          voterName: seatMap.get(v.voterId)?.name || v.voterId,
+          targetName: seatMap.get(v.targetId)?.name || v.targetId,
+        })),
+      })),
+    },
   };
 }
 
@@ -1164,6 +1328,16 @@ export function computeSmartBotVotes(
 
     const myAllies = new Set(options.chatSignals?.alliesByVoter[bot.id] || []);
     const mySuspects = new Set(options.chatSignals?.suspectsByVoter[bot.id] || []);
+    const statedTarget = brain.statedVoteTargetByBot?.[bot.id];
+    if (
+      statedTarget &&
+      (options.round === undefined || statedTarget.round === options.round) &&
+      aliveIds.has(statedTarget.targetId) &&
+      statedTarget.targetId !== bot.id &&
+      statedTarget.targetId !== bot.loverId
+    ) {
+      mySuspects.add(statedTarget.targetId);
+    }
     const lover = bot.loverId ? alive.find((p) => p.id === bot.loverId) : null;
     const isCrossFactionLover = Boolean(
       lover && ROLES[bot.roleId].faction !== ROLES[lover.roleId].faction
@@ -1453,96 +1627,60 @@ function personaTagline(
       {
         vi: `Xâu chuỗi các dữ kiện từ đầu đến giờ, biểu hiện của ${targetName} có điểm vênh rất rõ — mọi người nên kiểm tra kỹ.`,
         en: `Connecting the clues so far, ${targetName}’s story doesn’t quite add up — let’s press them.`,
-        fr: `En recoupant les indices depuis le début, l’histoire de ${targetName} ne tient pas vraiment — mettons la pression à ${targetName}.`,
-        es: `Juntando las pistas hasta ahora, la historia de ${targetName} no termina de cuadrar — vamos a presionar a ${targetName}.`,
-        ja: `ここまでの手がかりをつなぐと、${targetName}の話はどうも辻褄が合わないね — 突っ込んでみよう。`,
       },
       {
         vi: `Mình ghi chép lại nhịp bàn luận và thấy ${targetName} đang né trả lời trực diện.`,
         en: `Tracking the timeline carefully, ${targetName} has been dodging direct questions.`,
-        fr: `En suivant bien la chronologie, ${targetName} esquive toutes les questions directes.`,
-        es: `Siguiendo bien la cronología, ${targetName} lleva rato esquivando las preguntas directas.`,
-        ja: `流れを追っていくと、${targetName}は直接の質問をずっとかわしてるよ。`,
       },
     ],
     prosecutor: [
       {
         vi: `Tôi nói thẳng luôn: ${targetName} đáng nghi nhất bàn lúc này, đừng chần chừ kẻo lỡ nhịp treo Sói!`,
         en: `Let’s be direct: ${targetName} looks like our top Wolf suspect right now — explain yourself!`,
-        fr: `Soyons directs : ${targetName} est notre suspect n°1 pour le Loup-Garou en ce moment — explique-toi !`,
-        es: `Vamos al grano: ${targetName} es el principal sospechoso de ser Lobo ahora mismo — ¡explícate!`,
-        ja: `ハッキリ言うよ：今いちばん人狼っぽいのは${targetName}だ — ちゃんと説明して！`,
       },
       {
         vi: `Không cần vòng vo — tôi đang nghi ${targetName} là Sói và muốn nghe họ giải trình ngay!`,
         en: `No stalling — I suspect ${targetName} is a Werewolf and want answers before votes lock.`,
-        fr: `Pas de détour — je soupçonne ${targetName} d’être un Loup-Garou et je veux des réponses avant la clôture des votes.`,
-        es: `Sin rodeos: sospecho que ${targetName} es un Hombre Lobo y quiero respuestas antes de que se cierren los votos.`,
-        ja: `回りくどいのはなし — ${targetName}は人狼だと思う。投票が締まる前に答えが聞きたい！`,
       },
     ],
     observer: [
       {
         vi: `Mình ngồi quan sát từ nãy giờ thấy thái độ của ${targetName} hơi khác thường, mọi người để ý thử xem.`,
         en: `Watching closely around the fire, ${targetName}’s reactions felt off to me.`,
-        fr: `En observant bien autour du feu, les réactions de ${targetName} m’ont paru bizarres.`,
-        es: `Mirando con atención alrededor de la hoguera, las reacciones de ${targetName} me parecieron raras.`,
-        ja: `焚き火のまわりをよく見てたけど、${targetName}の反応はちょっと変だったな。`,
       },
       {
         vi: `Chưa vội kết luận, nhưng ${targetName} cần nói rõ góc nhìn hơn trước khi chốt phiếu.`,
         en: `I’m not rushing, but we need a clear read from ${targetName} before voting.`,
-        fr: `Je ne m’emballe pas, mais on a besoin d’un avis clair de ${targetName} avant de voter.`,
-        es: `No tengo prisa, pero necesitamos una opinión clara de ${targetName} antes de votar.`,
-        ja: `焦るつもりはないけど、投票の前に${targetName}の考えをはっきり聞きたいな。`,
       },
     ],
     manipulator: [
       {
         vi: `Mọi người cẩn thận kẻo bị dắt mũi nhé — tôi thấy ${targetName} mới là người đáng nghi nhất ở đây.`,
         en: `Careful not to fall for distractions — ${targetName} is the one acting shady here.`,
-        fr: `Attention à ne pas tomber dans le panneau — c’est ${targetName} qui a un comportement louche ici.`,
-        es: `Ojo con las distracciones — el que actúa raro aquí es ${targetName}.`,
-        ja: `惑わされないで — ここで怪しい動きをしてるのは${targetName}だよ。`,
       },
       {
         vi: `Đừng nhìn sai hướng! Nếu phân tích kỹ thì ${targetName} có động cơ rất lạ.`,
         en: `Everyone’s looking the wrong way; ${targetName}’s angle makes zero sense.`,
-        fr: `Tout le monde regarde du mauvais côté ; la version de ${targetName} n’a aucun sens.`,
-        es: `Todos están mirando hacia el lado equivocado; el planteamiento de ${targetName} no tiene ningún sentido.`,
-        ja: `みんな見る方向が違うよ。${targetName}の言い分は筋が通ってない。`,
       },
     ],
     protector: [
       {
         vi: `Chúng ta phải bảo vệ phe Dân trước đã — ${targetName}, bạn giải thích rõ để cả làng khỏi vote nhầm đi.`,
         en: `We need to keep the village unified — ${targetName}, help clear your name so we don’t mislynch.`,
-        fr: `Il faut garder le village uni — ${targetName}, aide-nous à te disculper pour qu’on ne pende pas un innocent.`,
-        es: `Hay que mantener unido al pueblo — ${targetName}, ayúdanos a limpiar tu nombre para no linchar a un inocente.`,
-        ja: `村はまとまっておかないと — ${targetName}、冤罪で吊らないように疑いを晴らしてほしい。`,
       },
       {
         vi: `Đừng vội xé lẻ phiếu, nhưng tôi cần ${targetName} chứng minh mình thuộc phe Dân.`,
         en: `Let’s stay disciplined and hear ${targetName}’s defense clearly.`,
-        fr: `Restons disciplinés et écoutons bien la défense de ${targetName}.`,
-        es: `Mantengamos la disciplina y escuchemos bien la defensa de ${targetName}.`,
-        ja: `落ち着いて、${targetName}の弁明をちゃんと聞こう。`,
       },
     ],
     wildcard: [
       {
         vi: `Trực giác quanh lửa trại mách bảo tôi phải để mắt tới ${targetName} hôm nay — cảm giác lạ lắm!`,
         en: `My campfire gut says keep a close eye on ${targetName} today — something feels wild.`,
-        fr: `Mon instinct de feu de camp me dit de surveiller ${targetName} aujourd’hui — il y a un truc bizarre.`,
-        es: `Mi instinto de hoguera dice que vigilemos a ${targetName} hoy — algo huele raro.`,
-        ja: `焚き火の勘が言ってる、今日は${targetName}から目を離すなって — なんか妙な感じ！`,
       },
       {
         vi: `Bàn này căng thật đấy! Tôi đặt dấu hỏi lớn lên ${targetName} xem phản ứng ra sao.`,
         en: `Plot twist energy today — I’m testing ${targetName} to see how they react!`,
-        fr: `Ambiance rebondissement aujourd’hui — je teste ${targetName} pour voir sa réaction !`,
-        es: `Hoy hay energía de giro de guion — ¡voy a probar a ${targetName} a ver cómo reacciona!`,
-        ja: `今日は大どんでん返しの予感 — ${targetName}を試して、どう反応するか見てみるよ！`,
       },
     ],
   };
@@ -1591,8 +1729,15 @@ export function generateScheduledDiscussionBeats(
     text: string,
     extra?: { claimedRole?: RoleId; targetId?: string; checkResult?: 'wolf' | 'good' }
   ) => {
+    const uniqueText = claimUniqueRoundLine(brain, round, [text], lang, rng);
     usedSpeakers.add(speaker.id);
     brain.spokenCounts[speaker.id] = (brain.spokenCounts[speaker.id] ?? 0) + 1;
+    recordPublicChatMessage(brain, {
+      senderId: speaker.id,
+      senderName: speaker.name,
+      text: uniqueText,
+      round,
+    });
     if (extra?.claimedRole) {
       addPublicClaim(brain, {
         speakerId: speaker.id,
@@ -1607,7 +1752,7 @@ export function generateScheduledDiscussionBeats(
       speakerId: speaker.id,
       speakerName: speaker.name,
       persona: brain.personas[speaker.id],
-      text,
+      text: uniqueText,
       ...extra,
     });
   };
@@ -1651,25 +1796,16 @@ export function generateScheduledDiscussionBeats(
       const crown = tr(lang, {
         vi: `👑 Vương miện Thị Trưởng đã chuyển sang ${context.mayorTransferredToName} (phiếu x2)!`,
         en: `👑 The Mayor’s crown passed to ${context.mayorTransferredToName} (2x vote)!`,
-        fr: `👑 La couronne de Maire est passée à ${context.mayorTransferredToName} (vote x2) !`,
-        es: `👑 ¡La corona de Alcalde pasó a ${context.mayorTransferredToName} (voto x2)!`,
-        ja: `👑 村長の王冠が${context.mayorTransferredToName}に移った（2票分）！`,
       });
       const night =
         killedNames.length > 0
           ? tr(lang, {
             vi: `Đêm qua mất ${killedNames.join(', ')} — cả làng phải tỉnh táo kẻo quyền lực x2 rơi vào tay Sói!`,
             en: `We lost ${killedNames.join(', ')} overnight — stay sharp so double vote power doesn’t swing to the Wolves!`,
-            fr: `On a perdu ${killedNames.join(', ')} cette nuit — restons vigilants pour que le vote double ne tombe pas aux mains des Loups !`,
-            es: `Perdimos a ${killedNames.join(', ')} esta noche — ¡atentos para que el voto doble no acabe en manos de los Lobos!`,
-            ja: `昨夜は${killedNames.join(', ')}を失った — 2倍の票の力が人狼に渡らないよう気を引き締めよう！`,
           })
           : tr(lang, {
             vi: 'Đêm qua bình yên, nhưng quyền lực Thị Trưởng sẽ quyết định bàn cân hôm nay!',
             en: 'A peaceful night, yet that 2x vote will shape today’s lynch!',
-            fr: 'Nuit paisible, mais ce vote x2 va peser lourd dans le lynchage d’aujourd’hui !',
-            es: 'Noche tranquila, ¡pero ese voto x2 decidirá el linchamiento de hoy!',
-            ja: '静かな夜だったけど、その2票分が今日の処刑を左右するよ！',
           });
       dawnText = `${crown} ${night}`;
     } else if (killedNames.length === 0) {
@@ -1678,32 +1814,20 @@ export function generateScheduledDiscussionBeats(
           ? tr(lang, {
             vi: 'Đêm qua hoàn toàn bình yên! Không biết Bảo Vệ đã đỡ chuẩn, Phù Thủy cứu người, hay Sói vừa cắn trúng Bán Sói / Già Làng nữa...',
             en: 'A completely silent night! Either the Bodyguard nailed the shield, the Witch healed, or the Wolves hit the Elder or Cursed...',
-            fr: 'Nuit totalement calme ! Soit le Salvateur a bien protégé, soit la Sorcière a soigné, soit les Loups ont mordu l’Ancien ou le Maudit...',
-            es: '¡Noche completamente tranquila! O el Guardaespaldas acertó con el escudo, o la Bruja curó, o los Lobos mordieron al Anciano o al Maldito...',
-            ja: '完全に静かな夜！騎士が見事に守ったか、魔女が治したか、人狼が長老か呪われし者を噛んだか…',
           })
           : tr(lang, {
             vi: 'Đêm qua không ai tử trận! Một pha cứu người quá xuất sắc, nhưng đừng chủ quan vì đàn Sói vẫn đang ngồi ngay quanh lửa trại.',
             en: 'Zero casualties overnight! Great save for the village, though the Wolves are still sitting right beside us.',
-            fr: 'Aucune victime cette nuit ! Beau sauvetage pour le village, mais les Loups sont toujours assis juste à côté de nous.',
-            es: '¡Ninguna baja esta noche! Gran salvada para el pueblo, aunque los Lobos siguen sentados justo a nuestro lado.',
-            ja: '昨夜は犠牲者ゼロ！村にとってはナイスな救出だけど、人狼はまだすぐそばに座ってるよ。',
           });
     } else if (killedNames.length >= 2) {
       dawnText = tr(lang, {
         vi: `Trời ơi, một đêm đẫm máu — mất tới ${killedNames.length} người (${killedNames.join(', ')})! Chắc chắn có liên kết Tình Nhân, Bình Độc Phù Thủy, hoặc Sói Con cuồng nộ rồi!`,
         en: `A brutal night — we lost ${killedNames.length} villagers (${killedNames.join(', ')})! Lovers, Witch Poison, or Wolf Pup frenzy is definitely in play!`,
-        fr: `Quelle nuit sanglante — on a perdu ${killedNames.length} villageois (${killedNames.join(', ')}) ! Les Amoureux, le poison de la Sorcière ou la rage du Chiot Loup sont forcément en jeu !`,
-        es: `¡Qué noche tan brutal! Perdimos a ${killedNames.length} aldeanos (${killedNames.join(', ')}). ¡Seguro que hay Enamorados, veneno de la Bruja o frenesí del Cachorro de Lobo de por medio!`,
-        ja: `なんて血まみれの夜 — ${killedNames.length}人も失った（${killedNames.join(', ')}）！恋人の連鎖か、魔女の毒か、子狼の暴走が絡んでるに違いない！`,
       });
     } else {
       dawnText = tr(lang, {
         vi: `Đêm qua ${killedNames[0]} đã ngã xuống rồi... Mọi người bình tĩnh chia sẻ thông tin trước khi dồn phiếu nhé.`,
         en: `We lost ${killedNames[0]} last night... Let’s share reads calmly before locking votes.`,
-        fr: `On a perdu ${killedNames[0]} cette nuit... Partageons calmement nos impressions avant de verrouiller les votes.`,
-        es: `Perdimos a ${killedNames[0]} anoche... Compartamos nuestras sospechas con calma antes de cerrar los votos.`,
-        ja: `昨夜は${killedNames[0]}が倒れた... 投票を確定する前に、落ち着いて情報を共有しよう。`,
       });
     }
     pushBeat(dawnSpeaker, dawnText);
@@ -1730,9 +1854,6 @@ export function generateScheduledDiscussionBeats(
       const text = tr(lang, {
         vi: `Tôi lên vai luôn: tôi là Tiên Tri thật! Đêm qua tôi đã soi ${target.name} và kết quả là MA SÓI — đề nghị cả làng treo cổ ${target.name} ngay hôm nay!`,
         en: `Stepping forward now: I am the real Seer! I inspected ${target.name} and saw WEREWOLF — we must vote ${target.name} out today!`,
-        fr: `Je me dévoile : je suis la vraie Voyante ! J’ai sondé ${target.name} et c’est LOUP-GAROU — on doit voter ${target.name} dehors dès aujourd’hui !`,
-        es: `Doy un paso al frente: ¡soy la verdadera Vidente! Inspeccioné a ${target.name} y salió HOMBRE LOBO — ¡hay que votar a ${target.name} hoy mismo!`,
-        ja: `名乗り出るよ：私が本物の占い師だ！${target.name}を占ったら人狼だった — 今日は${target.name}を吊るべき！`,
       });
       pushBeat(botSeer, text, {
         claimedRole: 'seer',
@@ -1748,9 +1869,6 @@ export function generateScheduledDiscussionBeats(
         const text = tr(lang, {
           vi: `Tôi nhận vai Tiên Tri để dẫn bàn: tôi đã soi ${target.name} thuộc phe Dân Làng (người tốt). Nếu có ai khác nhận Tiên Tri thì chắc chắn là Sói giả!`,
           en: `Claiming Seer to anchor town: I checked ${target.name} as GOOD (Villager side). Anyone counter-claiming Seer is a lying Wolf!`,
-          fr: `Je me déclare Voyante pour guider le village : j’ai sondé ${target.name}, c’est un BON (côté Villageois). Quiconque se déclare Voyante après moi est un Loup qui ment !`,
-          es: `Me declaro Vidente para guiar al pueblo: comprobé a ${target.name} y es BUENO (bando Aldeano). ¡Quien se declare Vidente después de mí es un Lobo mentiroso!`,
-          ja: `村をまとめるために占い師を名乗るよ：${target.name}を占ったら善良（村人側）だった。対抗で占い師を名乗る人は嘘つきの人狼だ！`,
         });
         pushBeat(botSeer, text, {
           claimedRole: 'seer',
@@ -1763,9 +1881,6 @@ export function generateScheduledDiscussionBeats(
         const text = tr(lang, {
           vi: `Cảm giác của mình vòng này là ${target.name} khá đáng tin và thuộc phe Dân, mọi người khoan nhắm vào họ.`,
           en: `My early read is that ${target.name} seems clean and trustworthy — let’s look elsewhere first.`,
-          fr: `Mon premier ressenti, c’est que ${target.name} a l’air clean et digne de confiance — regardons ailleurs d’abord.`,
-          es: `Mi primera impresión es que ${target.name} parece limpio y de fiar — mejor miremos primero a otro lado.`,
-          ja: `最初の印象だと${target.name}は白っぽくて信用できそう — まずは他を見てみよう。`,
         });
         pushBeat(botSeer, text);
       }
@@ -1808,16 +1923,10 @@ export function generateScheduledDiscussionBeats(
         ? tr(lang, {
           vi: `Khoan đã! Đừng tin lời giả mạo — TÔI mới là Tiên Tri thật! Đêm qua tôi soi chính ${frameTarget.name} ra MA SÓI, họ đang cố đóng kịch để lừa cả làng!`,
           en: `Hold everything! Don’t buy that bluff — I am the REAL Seer! I checked ${frameTarget.name} as WEREWOLF; they’re panicking and faking a claim!`,
-          fr: `Stop ! N’avalez pas ce bluff — c’est MOI la VRAIE Voyante ! J’ai sondé ${frameTarget.name} : LOUP-GAROU ; ça panique et ça invente une révélation !`,
-          es: `¡Un momento! No caigan en ese farol — ¡la VERDADERA Vidente soy YO! Comprobé a ${frameTarget.name} como HOMBRE LOBO; está en pánico e inventando una revelación!`,
-          ja: `ちょっと待って！そのハッタリに騙されないで — 本物の占い師は私だ！${frameTarget.name}を占ったら人狼だった。向こうは焦って偽の告白をしてるんだ！`,
         })
         : tr(lang, {
           vi: `Tôi lên nhận Tiên Tri luôn cho rõ ràng: đêm qua tôi soi ${frameTarget.name} và thấy dấu hiệu MA SÓI! Mọi người đừng để họ dẫn dắt!`,
           en: `Stepping up as Seer: I inspected ${frameTarget.name} last night and got WEREWOLF! Don’t let them control the table!`,
-          fr: `Je me déclare Voyante : j’ai sondé ${frameTarget.name} cette nuit et c’est LOUP-GAROU ! Ne les laissez pas mener la table !`,
-          es: `Me declaro Vidente: anoche inspeccioné a ${frameTarget.name} ¡y salió HOMBRE LOBO! ¡No dejen que controlen la mesa!`,
-          ja: `占い師として名乗り出るよ：昨夜${frameTarget.name}を占ったら人狼だった！あの人に場を支配させないで！`,
         });
       pushBeat(bluffWolf, text, {
         claimedRole: 'seer',
@@ -1837,9 +1946,6 @@ export function generateScheduledDiscussionBeats(
         const text = tr(lang, {
           vi: `Mọi người khoan vội tin ${claimedSeerObj.name}! Lên nhận Tiên Tri vội như vậy rất dễ là Sói giả để đổ oan cho ${accusedObj.name} đấy!`,
           en: `Hold on — don’t blindly trust ${claimedSeerObj.name}! Rushing a Seer claim to frame ${accusedObj.name} screams Wolf bait!`,
-          fr: `Minute — ne faites pas confiance aveuglément à ${claimedSeerObj.name} ! Se précipiter pour se déclarer Voyante et accuser ${accusedObj.name}, ça sent le Loup à plein nez !`,
-          es: `¡Un momento, no confíen a ciegas en ${claimedSeerObj.name}! Apresurarse a declararse Vidente para inculpar a ${accusedObj.name} ¡huele a Lobo a kilómetros!`,
-          ja: `ちょっと待って、${claimedSeerObj.name}を鵜呑みにしないで！慌てて占い師を名乗って${accusedObj.name}を陥れようなんて、人狼の罠そのものだよ！`,
         });
         pushBeat(botTraitor, text);
       }
@@ -1855,9 +1961,6 @@ export function generateScheduledDiscussionBeats(
         const text = tr(lang, {
           vi: `Nói thật lòng, tôi thấy biểu hiện của ${pup.name} vòng này cực kỳ bất ổn — nếu cả làng nghi thì tôi cũng sẵn sàng vote ${pup.name}!`,
           en: `Honestly, ${pup.name}’s reads feel super sketchy this round — if town wants to test ${pup.name}, I’m willing to vote them!`,
-          fr: `Franchement, le comportement de ${pup.name} est super louche ce tour — si le village veut tester ${pup.name}, je suis prêt à voter contre !`,
-          es: `Sinceramente, las lecturas de ${pup.name} me parecen muy turbias esta ronda — si el pueblo quiere probar a ${pup.name}, ¡estoy dispuesto a votar por ${pup.name}!`,
-          ja: `正直、今ラウンドの${pup.name}の動きはかなり怪しい — 村が${pup.name}を試したいなら、私も投票するよ！`,
         });
         pushBeat(alpha, text);
       }
@@ -1902,16 +2005,10 @@ export function generateScheduledDiscussionBeats(
         : tr(lang, {
           vi: 'mục tiêu lệch nhịp',
           en: 'an off-wagon target',
-          fr: 'une cible à contre-courant',
-          es: 'un objetivo a contracorriente',
-          ja: '流れに逆らう相手',
         });
       const voteText = tr(lang, {
         vi: `Lật lại lịch sử phiếu Ngày ${prevSnapshot.round}: ${prevVoteTarget.name} đã bỏ phiếu cho ${votedName} — hành động đó rất đáng nghi!`,
         en: `Checking Day ${prevSnapshot.round}’s vote log: ${prevVoteTarget.name} voted for ${votedName} — that vote trail looks very suspicious!`,
-        fr: `Je repasse le journal des votes du Jour ${prevSnapshot.round} : ${prevVoteTarget.name} a voté pour ${votedName} — cette piste de vote est très suspecte !`,
-        es: `Revisando el registro de votos del Día ${prevSnapshot.round}: ${prevVoteTarget.name} votó por ${votedName} — ¡ese rastro de votos es muy sospechoso!`,
-        ja: `${prevSnapshot.round}日目の投票記録を見直すと、${prevVoteTarget.name}は${votedName}に投票してる — この投票の流れはすごく怪しい！`,
       });
       crossText =
         lang === 'vi'
@@ -1934,9 +2031,6 @@ export function generateScheduledDiscussionBeats(
           crossText = tr(lang, {
             vi: `Vòng 1 còn ít manh mối — ${target.name}, góc nhìn của bạn quanh lửa trại lúc này nghiêng về ai nhất?`,
             en: `Day 1 clues are still fresh — ${target.name}, who’s giving you the strangest read around the fire?`,
-            fr: `Les indices du Jour 1 sont encore frais — ${target.name}, qui te paraît le plus étrange autour du feu ?`,
-            es: `Las pistas del Día 1 son todavía recientes — ${target.name}, ¿quién te da la sensación más extraña junto a la hoguera?`,
-            ja: `1日目はまだ手がかりが少ないね — ${target.name}、焚き火のまわりで一番変だと思う人は誰？`,
           });
         } else {
           adjustPublicSuspicion(brain, target.id, 12);
@@ -1944,9 +2038,6 @@ export function generateScheduledDiscussionBeats(
             ? tr(lang, {
               vi: `Từ đầu đến giờ ${target.name} chưa lên tiếng phân tích gì — sự im lặng đó khiến tôi bắt đầu nghi ngờ.`,
               en: `${target.name} hasn’t spoken up yet today — staying that quiet makes me suspicious.`,
-              fr: `${target.name} n’a encore rien dit aujourd’hui — rester aussi silencieux commence à me paraître suspect.`,
-              es: `${target.name} todavía no ha dicho nada hoy — tanto silencio me empieza a parecer sospechoso.`,
-              ja: `${target.name}は今日まだ一言も発言してない — そんなに静かだと怪しく思えてくるよ。`,
             })
             : personaTagline(
                 brain.personas[crossExaminer.id] || 'detective',
@@ -1984,16 +2075,10 @@ export function generateScheduledDiscussionBeats(
       {
         vi: 'Ơ hay, sao tự dưng mấy ánh mắt cứ liếc sang tôi thế? Tôi chẳng biết đêm qua có chuyện gì đâu, ai thích thì cứ thử vote tôi đi!',
         en: 'Wait, why are people glancing at me? I slept through the whole night — go ahead and vote me if you dare!',
-        fr: 'Attends, pourquoi tout le monde me regarde ? J’ai dormi toute la nuit — votez pour moi si vous osez !',
-        es: 'Un momento, ¿por qué me miran todos? Me dormí toda la noche — ¡voten por mí si se atreven!',
-        ja: 'え、なんでみんなこっちをチラチラ見てるの？昨夜はずっと寝てたよ — やれるものなら投票してみなよ！',
       },
       {
         vi: 'Bàn này suy luận rối rắm quá... Tôi chán giải thích rồi, các người muốn nghi tôi là Sói thì cứ tự nhiên!',
         en: 'This debate is exhausting... I’m done defending myself, suspect me if you want!',
-        fr: 'Ce débat est épuisant... J’en ai marre de me défendre, soupçonnez-moi si ça vous chante !',
-        es: 'Este debate es agotador... Ya me cansé de defenderme, ¡sospechen de mí si quieren!',
-        ja: 'この議論、疲れる… もう弁解するのは飽きた、疑いたいなら好きに疑って！',
       },
     ], rng));
     pushBeat(botTanner, tannerText);
@@ -2002,9 +2087,6 @@ export function generateScheduledDiscussionBeats(
     const witchText = tr(lang, {
       vi: `Tôi có lý do rất chắc chắn để tin ${witchHealedLiving.name} là người tốt — hôm nay tuyệt đối đừng treo nhầm ${witchHealedLiving.name}!`,
       en: `I have solid reason to trust ${witchHealedLiving.name} is clean — let’s definitely not lynch ${witchHealedLiving.name} today!`,
-      fr: `J’ai de solides raisons de croire que ${witchHealedLiving.name} est clean — on ne pend surtout pas ${witchHealedLiving.name} aujourd’hui !`,
-      es: `Tengo buenas razones para confiar en que ${witchHealedLiving.name} está limpio — ¡hoy desde luego no linchemos a ${witchHealedLiving.name}!`,
-      ja: `${witchHealedLiving.name}が白だと信じる確かな理由があるんだ — 今日は絶対に${witchHealedLiving.name}を吊らないで！`,
     });
     pushBeat(botWitch, witchText);
   } else if (brain.activeStoryline === 'mayor_coup' && context.mayorId) {
@@ -2014,9 +2096,6 @@ export function generateScheduledDiscussionBeats(
       const text = tr(lang, {
         vi: `Thị Trưởng ${mayorObj.name} đang cầm lá phiếu x2 quyền lực nhất bàn! ${mayorObj.name} định dẫn phiếu về phía ai để cả làng theo dõi?`,
         en: `Mayor ${mayorObj.name} holds the decisive 2x vote! Where are you leading today’s vote, ${mayorObj.name}?`,
-        fr: `Le Maire ${mayorObj.name} détient le vote x2 décisif ! Vers qui diriges-tu le vote d’aujourd’hui, ${mayorObj.name} ?`,
-        es: `¡El Alcalde ${mayorObj.name} tiene el voto x2 decisivo! ¿Hacia quién vas a llevar el voto de hoy, ${mayorObj.name}?`,
-        ja: `村長の${mayorObj.name}が決定的な2票分を握ってる！今日の投票はどこへ導くの、${mayorObj.name}？`,
       });
       pushBeat(speaker, text);
     }
@@ -2058,9 +2137,6 @@ export function generateScheduledDiscussionBeats(
       const text = tr(lang, {
         vi: `Căng thẳng tột độ rồi: ${names} cùng nhận Tiên Tri! Chắc chắn 1 trong 2 là Ma Sói giả danh — hôm nay phải soi cực kỹ!`,
         en: `Huge clash: ${names} are BOTH claiming Seer! One of them is 100% a lying Wolf — focus the vote right here!`,
-        fr: `Gros clash : ${names} se déclarent TOUS LES DEUX Voyante ! L’un des deux est à 100 % un Loup menteur — concentrons le vote ici !`,
-        es: `Choque enorme: ¡${names} se declaran AMBOS Vidente! Uno de los dos es 100 % un Lobo mentiroso — ¡centremos el voto aquí!`,
-        ja: `大衝突だ：${names}が両方とも占い師を名乗ってる！どちらかは100％嘘つきの人狼 — 投票はここに集中しよう！`,
       });
       pushBeat(reactor, text);
     }
@@ -2130,9 +2206,6 @@ export function generateGallowsDefenseBeat(
     text = tr(lang, {
       vi: 'Được thôi, cứ dồn phiếu treo cổ tôi đi! Các người sai lầm rồi, nhưng tôi chẳng thèm van xin đâu!',
       en: 'Fine, go ahead and hang me! You’re all making a huge mistake, and I’m not begging!',
-      fr: 'Très bien, pendez-moi ! Vous faites tous une énorme erreur, et je ne vais pas supplier !',
-      es: '¡Está bien, cuélguenme! Todos están cometiendo un error enorme, ¡y no pienso suplicar!',
-      ja: 'いいよ、吊るしたければ吊るせば！みんな大きな間違いをしてるけど、私は命乞いなんてしないからね！',
     });
   } else if (leader.roleId === 'hunter') {
     claimedRole = 'hunter';
@@ -2141,25 +2214,16 @@ export function generateGallowsDefenseBeat(
       : tr(lang, {
         vi: 'kẻ đẩy phiếu mạnh nhất',
         en: 'whoever pushed this wagon',
-        fr: 'celui qui a lancé ce vote',
-        es: 'quien haya empujado este voto',
-        ja: 'この投票を扇動した人',
       });
     text = tr(lang, {
       vi: `Khoan đã! Tôi là Thợ Săn — nếu bị treo cổ hôm nay, phát súng cuối cùng của tôi sẽ bắn thẳng vào ${pusher}! Đừng để Sói cười thầm!`,
       en: `Wait! I’m the Hunter — if you lynch me today, my dying bullet goes straight into ${pusher}!`,
-      fr: `Attendez ! Je suis le Chasseur — si vous me pendez aujourd’hui, ma dernière balle ira droit dans ${pusher} !`,
-      es: `¡Esperen! Soy el Cazador — si me linchan hoy, ¡mi última bala va directa a ${pusher}!`,
-      ja: `待って！私はハンターだ — 今日吊るされたら、最期の一発は${pusher}に撃ち込むよ！`,
     });
   } else if (leader.roleId === 'elder') {
     claimedRole = 'elder';
     text = tr(lang, {
       vi: 'Dừng tay ngay cả làng! Tôi chính là Già Làng — treo cổ nhầm tôi thì toàn bộ Tiên Tri, Bảo Vệ và Phù Thủy sẽ bị phong ấn mất hết kỹ năng đấy!',
       en: 'Stop the vote! I am the Elder — lynching me will seal ALL Villager special powers for the rest of the match!',
-      fr: 'Arrêtez le vote ! Je suis l’Ancien — me pendre scellera TOUS les pouvoirs spéciaux des Villageois jusqu’à la fin de la partie !',
-      es: '¡Paren la votación! Soy el Anciano — si me linchan se sellarán TODOS los poderes especiales de los Aldeanos el resto de la partida!',
-      ja: '投票をやめて！私は長老だ — 私を吊ると、残りの試合中、村人の特殊能力がすべて封印されるよ！',
     });
   } else if (leader.roleId === 'seer') {
     claimedRole = 'seer';
@@ -2169,24 +2233,15 @@ export function generateGallowsDefenseBeat(
         return `${name}=${res === 'wolf' ? tr(lang, {
             vi: 'Sói',
             en: 'Wolf',
-            fr: 'Loup',
-            es: 'Lobo',
-            ja: '人狼',
           }) : tr(lang, {
             vi: 'Dân',
             en: 'Good',
-            fr: 'Villageois',
-            es: 'Aldeano',
-            ja: '村人',
           })}`;
       })
       .join(', ');
     text = tr(lang, {
       vi: `Đừng treo tôi — tôi là Tiên Tri thật!${checks ? ` Lịch sử soi của tôi: ${checks}.` : ''} Chuyển phiếu sang kẻ đang gài bẫy tôi ngay!`,
       en: `Don’t lynch your real Seer!${checks ? ` My checks: ${checks}.` : ''} Flip the vote onto the real wolves!`,
-      fr: `Ne pendez pas votre vraie Voyante !${checks ? ` Mes sondages : ${checks}.` : ''} Reportez le vote sur les vrais loups !`,
-      es: `¡No linchen a su verdadera Vidente!${checks ? ` Mis comprobaciones: ${checks}.` : ''} ¡Pasen el voto a los verdaderos lobos!`,
-      ja: `本物の占い師を吊らないで！${checks ? ` 私の占い結果：${checks}。` : ''} 本物の人狼に票を移して！`,
     });
   } else if (leader.roleId === 'bodyguard' || leader.roleId === 'witch') {
     claimedRole = leader.roleId;
@@ -2194,9 +2249,6 @@ export function generateGallowsDefenseBeat(
     text = tr(lang, {
       vi: `Bình tĩnh đã! Tôi là ${roleLabel} đang âm thầm giữ mạng cho làng — mất tôi đêm nay bầy Sói sẽ làm loạn mất!`,
       en: `Hold on! I’m the ${roleLabel} keeping this village alive — losing me tonight hands the game to the Wolves!`,
-      fr: `Doucement ! Mon rôle, c’est ${roleLabel} : je garde ce village en vie — me perdre ce soir livre la partie aux Loups !`,
-      es: `¡Un momento! Soy ${roleLabel} y mantengo vivo a este pueblo — ¡perderme esta noche le regala la partida a los Lobos!`,
-      ja: `待って！私は${roleLabel}で、この村を生かし続けてるんだ — 今夜私を失ったら人狼に勝ちを渡すことになるよ！`,
     });
   } else if (isBitingWolf(leader.roleId) || leader.roleId === 'traitor') {
     const counter =
@@ -2208,39 +2260,24 @@ export function generateGallowsDefenseBeat(
       ? tr(lang, {
         vi: `${counter.name} mới là kẻ vội vàng đẩy phiếu đáng nghi nhất`,
         en: `${counter.name} is rushing this vote way too eagerly`,
-        fr: `${counter.name} précipite ce vote beaucoup trop avidement`,
-        es: `${counter.name} está apurando este voto con demasiado entusiasmo`,
-        ja: `${counter.name}がやけに急いでこの投票を進めてる`,
       })
       : tr(lang, {
         vi: 'Đàn Sói đang lợi dụng để đẩy một Dân Làng',
         en: 'The real Wolves are steering this mislynch',
-        fr: 'Les vrais Loups manipulent ce vote pour faire pendre un innocent',
-        es: 'Los verdaderos Lobos están dirigiendo este linchamiento erróneo',
-        ja: '本物の人狼がこの誤った処刑を誘導してる',
       });
     text = tr(lang, {
       vi: `Cả làng đang bị dắt mũi rồi! ${blame} — xin hãy suy nghĩ lại trước khi hết giờ!`,
       en: `You’re all being played! ${blame} — reconsider before time runs out!`,
-      fr: `Vous vous faites tous manipuler ! ${blame} — reconsidérez avant la fin du temps imparti !`,
-      es: `¡Los están manipulando a todos! ${blame} — ¡reconsideren antes de que se acabe el tiempo!`,
-      ja: `みんな踊らされてるよ！${blame} — 時間切れになる前に考え直して！`,
     });
   } else {
     text = tr(lang, pickFrom([
       {
         vi: `Tôi chỉ là Dân Làng vô tội! Hãy nhìn kỹ ai đang hùa theo đẩy phiếu cho tôi${accuser ? ` — ${accuser.name}, bạn giải thích đi!` : '!'}`,
         en: `I’m an innocent Villager! Watch closely who piled onto this wagon${accuser ? ` — ${accuser.name}, why the rush?` : '!'}`,
-        fr: `Je suis un simple Villageois innocent ! Regardez bien qui a rejoint ce vote${accuser ? ` — ${accuser.name}, pourquoi cette précipitation ?` : ' !'}`,
-        es: `¡Soy un Aldeano inocente! Fíjense bien en quién se sumó a este voto${accuser ? ` — ${accuser.name}, ¿por qué tanta prisa?` : '.'}`,
-        ja: `私は無実の村人だよ！誰がこの投票に乗っかってるのかよく見て${accuser ? ` — ${accuser.name}、なんでそんなに急ぐの？` : '！'}`,
       },
       {
         vi: 'Treo nhầm tôi là mất thêm một lá phiếu phe Dân đấy! Còn thời gian, mọi người kiểm tra lại nghi phạm thật đi!',
         en: 'Mislynching me only hands numbers to the Wolves! Check the real suspects before locking!',
-        fr: 'Me pendre à tort ne fait qu’avantager les Loups ! Vérifiez les vrais suspects avant de verrouiller !',
-        es: '¡Linchar a un inocente como yo solo le da ventaja a los Lobos! ¡Revisen a los verdaderos sospechosos antes de cerrar!',
-        ja: '私を誤って吊っても人狼を有利にするだけだよ！確定する前に本当の容疑者を確認して！',
       },
     ], rng));
   }
@@ -2279,27 +2316,35 @@ function findMentionedLivingPlayers(
 ): Player[] {
   const lower = message.toLowerCase();
   const folded = foldVietnamese(message);
-  const found: Player[] = [];
+  const foundWithPos: Array<{ player: Player; pos: number }> = [];
   const seen = new Set<string>();
 
   players.forEach((p, idx) => {
     if (!p.isAlive || p.id === excludeId) return;
+    const seatNum = idx + 1;
     const nameLower = p.name.toLowerCase();
     const nameFolded = foldVietnamese(p.name);
-    const seatMatch = new RegExp(`(?:#|số\\s*|so\\s*)${idx + 1}\\b`, 'i').test(lower);
-    if (
-      (nameLower.length >= 2 && lower.includes(nameLower)) ||
-      (nameFolded.length >= 2 && folded.includes(nameFolded)) ||
-      seatMatch
-    ) {
-      if (!seen.has(p.id)) {
-        seen.add(p.id);
-        found.push(p);
-      }
+    const seatRx = new RegExp(`(?:#|số\\s*|so\\s*|seat\\s*|bạn\\s+số\\s*|ban\\s+so\\s*|người\\s+số\\s*|nguoi\\s+so\\s*)${seatNum}(?!\\d)`, 'i');
+    const seatMatch = seatRx.exec(folded) || seatRx.exec(lower);
+    const namePos = nameLower.length >= 2 ? lower.indexOf(nameLower) : -1;
+    const foldedPos = nameFolded.length >= 2 ? folded.indexOf(nameFolded) : -1;
+    const bestPos = [
+      seatMatch ? seatMatch.index : Infinity,
+      namePos >= 0 ? namePos : Infinity,
+      foldedPos >= 0 ? foldedPos : Infinity,
+    ].reduce((a, b) => Math.min(a, b), Infinity);
+
+    if (bestPos < Infinity && !seen.has(p.id)) {
+      seen.add(p.id);
+      foundWithPos.push({ player: p, pos: bestPos });
     }
   });
 
-  // If no full-name match, allow unambiguous last-word match (e.g. "Hoàng" if unique)
+  // Sort by order of appearance so "#2 thấy #6 thế nào" yields [#2, #6]!
+  foundWithPos.sort((a, b) => a.pos - b.pos);
+  const found = foundWithPos.map((x) => x.player);
+
+  // If no full-name/seat match, allow unambiguous last-word match (e.g. "Hoàng" if unique)
   if (found.length === 0) {
     const aliveOthers = players.filter((p) => p.isAlive && p.id !== excludeId);
     const lastWordCounts = new Map<string, number>();
@@ -2340,9 +2385,88 @@ function detectHumanRoleClaim(message: string): RoleId | null {
   return null;
 }
 
+function formatSeatTag(players: Player[], player: Player): string {
+  const idx = players.findIndex((p) => p.id === player.id);
+  return idx >= 0 ? `${player.name} (#${idx + 1})` : player.name;
+}
+
+function pickBotTopSuspectForChat(
+  brain: AIMatchBrain,
+  bot: Player,
+  players: Player[],
+  rng: () => number
+): Player | null {
+  const isWolfBot = isBitingWolf(bot.roleId);
+  const candidates = players.filter(
+    (p) =>
+      p.isAlive &&
+      p.id !== bot.id &&
+      p.id !== bot.loverId &&
+      (!isWolfBot || !isBitingWolf(p.roleId))
+  );
+  if (candidates.length === 0) return null;
+
+  const ownSeerChecks = bot.roleId === 'seer' ? brain.seerChecksByBot[bot.id] || {} : {};
+  const scored = candidates.map((p) => {
+    let score = brain.publicSuspicion[p.id] ?? 0;
+    if (ownSeerChecks[p.id] === 'wolf') score += 120;
+    if (ownSeerChecks[p.id] === 'good') score -= 90;
+    if ((brain.spokenCounts[p.id] ?? 0) === 0) score += 10;
+    return { item: p, score };
+  });
+  return pickWeightedTop(scored, rng, 6);
+}
+
+function buildPublicEvidenceReason(
+  brain: AIMatchBrain,
+  subject: Player,
+  players: Player[],
+  lang: Language
+): string {
+  const seatLabel = formatSeatTag(players, subject);
+  // 1. Check previous round vote trail
+  const prevVoteSnap = [...brain.voteHistory].reverse().find((s) =>
+    s.votes.some((v) => v.voterId === subject.id)
+  );
+  if (prevVoteSnap) {
+    const rec = prevVoteSnap.votes.find((v) => v.voterId === subject.id);
+    const votedTarget = rec ? players.find((p) => p.id === rec.targetId) : null;
+    if (votedTarget) {
+      return lang === 'vi'
+        ? `Ngày ${prevVoteSnap.round} ${seatLabel} từng bỏ phiếu cho ${formatSeatTag(players, votedTarget)} khá lệch nhịp nên tôi cần kiểm chứng kỹ.`
+        : `On Day ${prevVoteSnap.round}, ${seatLabel} voted for ${formatSeatTag(players, votedTarget)} off-tempo, which raised a red flag for me.`;
+    }
+  }
+  // 2. Check rival/contested public claims
+  const subjectClaim = brain.publicClaims.find((c) => c.speakerId === subject.id);
+  if (subjectClaim) {
+    const roleLabel = ROLES[subjectClaim.claimedRole].name[lang] || ROLES[subjectClaim.claimedRole].name.en;
+    return lang === 'vi'
+      ? `${seatLabel} vừa nhận vai ${roleLabel} nhưng dữ kiện quanh lửa trại vẫn chưa đủ khớp để tôi tin hoàn toàn.`
+      : `${seatLabel} claimed ${roleLabel}, but the campfire timeline still doesn’t fully back that claim yet.`;
+  }
+  // 3. Check silence / low activity
+  if ((brain.spokenCounts[subject.id] ?? 0) <= 1) {
+    return lang === 'vi'
+      ? `Từ đầu đến giờ ${seatLabel} nói quá ít và né đưa ra lập trường rõ ràng, kiểu im hơi đó rất hay là Sói ẩn mình.`
+      : `${seatLabel} has barely spoken or taken a clear stance yet — staying that quiet is classic Wolf camouflage.`;
+  }
+  // 4. General public suspicion / reaction read
+  const susp = brain.publicSuspicion[subject.id] ?? 0;
+  if (susp >= 15) {
+    return lang === 'vi'
+      ? `Nhịp phản ứng của ${seatLabel} hơi vội và có nhiều điểm vênh với các lượt phát biểu trước nên tôi đang đặt dấu hỏi lớn.`
+      : `${seatLabel}’s push felt rushed and clashed with earlier reads, so I’m keeping pressure on them.`;
+  }
+  return lang === 'vi'
+    ? `Chưa có bằng chứng tuyệt đối, nhưng ${seatLabel} là một trong những ghế đáng kiểm tra phản ứng nhất lúc này.`
+    : `No smoking gun yet, but ${seatLabel} is one of the best pressure tests we have right now.`;
+}
+
 /**
- * Lightweight VI/EN human chat intent parser & targeted bot responder.
- * Updates `brain.publicClaims` & `brain.publicSuspicion` and returns 1-2 paced bot replies (1400..2400ms).
+ * Lightweight VI/EN human chat intent parser & targeted bot responder (Wave 2 Tier 1).
+ * Handles seat targeting, reason queries, game-state/suspect questions, role claims,
+ * accusations, vouches, and short conversational lines with anti-repetition & vote-chat sync.
  */
 export function generateHumanChatResponses(
   brain: AIMatchBrain,
@@ -2356,22 +2480,56 @@ export function generateHumanChatResponses(
   if (!trimmed) return [];
 
   const folded = foldVietnamese(trimmed);
-  const aliveBots = players.filter((p) => p.isAlive && p.isBot);
+  const alive = players.filter((p) => p.isAlive);
+  const aliveBots = alive.filter((p) => p.isBot);
   if (aliveBots.length === 0) return [];
 
+  const humanPlayer = players.find((p) => p.id === brain.humanId);
   brain.spokenCounts[brain.humanId] = (brain.spokenCounts[brain.humanId] ?? 0) + 1;
+  recordPublicChatMessage(brain, {
+    senderId: brain.humanId,
+    senderName: humanPlayer?.name || (lang === 'vi' ? 'Bạn' : 'You'),
+    text: trimmed,
+    round,
+  });
 
   const claimedRole = detectHumanRoleClaim(trimmed);
   const mentioned = findMentionedLivingPlayers(trimmed, players, brain.humanId);
   const primaryMentioned = mentioned[0] || null;
+  const secondaryMentioned = mentioned[1] || null;
 
   const isNegatedTrust = /(khong tin|ko tin|chua tin|don't trust|dont trust|not clean|gia dan)/i.test(folded);
-  const isAccuse =
-    /(nghi|soi\b|ma soi|treo|vote|dang ngo|ke xau|wolf|werewolf|\bsus\b|suspicious|lynch|guilty|fake)/i.test(
+  const isReasonQuery =
+    /(tai sao|vi sao|sao vote|sao lai vote|sao nghi|bang chung|ly do|co so gi|why vote|why sus|why me|why do you|evidence|proof|reason)/i.test(
       folded
-    ) || isNegatedTrust;
+    );
+  const isWhoDiedQuery =
+    /(dem qua ai chet|ai chet|ai bi can|ai moi chet|who died|who got killed|last night)/i.test(
+      folded
+    );
+  const isWolfCountQuery =
+    /(con may soi|bao nhieu soi|may con soi|how many wolves|wolves left)/i.test(folded);
+  const isOpinionQuery =
+    /(thay .* the nao|nghi sao ve|nghi gi ve|ai la soi|nghi ai|vote ai|treo ai|nen vote ai|who is wolf|who should we vote|who to vote|what do you think|your read on|read on)/i.test(
+      folded
+    );
+  const isSkipPrompt = /\b(skip|bo phieu trang|khong treo|ko treo|hoa phieu|abstain|pass)\b/i.test(folded);
+  const isGreetingOrSilenceCheck =
+    /\b(hello|hi|chao|hey|alo|im vay|im the|sao im|noi gi di|anyone|quiet|helloo)\b/i.test(folded);
+
+  const isAccuse =
+    !isReasonQuery &&
+    !isOpinionQuery &&
+    !isWhoDiedQuery &&
+    !isWolfCountQuery &&
+    (/(nghi|soi\b|ma soi|treo|vote|dang ngo|ke xau|wolf|werewolf|\bsus\b|suspicious|lynch|guilty|fake)/i.test(
+      folded
+    ) ||
+      isNegatedTrust);
   const isVouch =
     !isNegatedTrust &&
+    !isReasonQuery &&
+    !isOpinionQuery &&
     /(tin\b|tin tuong|dan lang|nguoi tot|benh\b|vo toi|trust|clean|innocent|vouch|\bgood\b|\bsafe\b)/i.test(
       folded
     );
@@ -2379,13 +2537,44 @@ export function generateHumanChatResponses(
   const replies: ScheduledBotBeat[] = [];
   const used = new Set<string>();
 
-  // 1. Record Human Role Claim
+  const pushReply = (
+    bot: Player,
+    candidates: string[],
+    delayMs: number,
+    extra?: { claimedRole?: RoleId; targetId?: string; checkResult?: 'wolf' | 'good'; statedSuspectId?: string }
+  ) => {
+    const text = claimUniqueRoundLine(brain, round, candidates, lang, rng);
+    used.add(bot.id);
+    brain.spokenCounts[bot.id] = (brain.spokenCounts[bot.id] ?? 0) + 1;
+    recordPublicChatMessage(brain, {
+      senderId: bot.id,
+      senderName: bot.name,
+      text,
+      round,
+    });
+    if (extra?.statedSuspectId) {
+      if (!brain.statedVoteTargetByBot) brain.statedVoteTargetByBot = {};
+      brain.statedVoteTargetByBot[bot.id] = { round, targetId: extra.statedSuspectId };
+    }
+    replies.push({
+      delayMs,
+      speakerId: bot.id,
+      speakerName: bot.name,
+      persona: brain.personas[bot.id],
+      text,
+      ...(extra?.claimedRole ? { claimedRole: extra.claimedRole } : {}),
+      ...(extra?.targetId ? { targetId: extra.targetId } : {}),
+      ...(extra?.checkResult ? { checkResult: extra.checkResult } : {}),
+    });
+  };
+
+  // 1. Record Human Role Claim & Counter-Claim Pushback
   if (claimedRole) {
     const checkResult: 'wolf' | 'good' | undefined =
       claimedRole === 'seer' && primaryMentioned
-        ? isAccuse
+        ? isAccuse || /(la soi|is wolf|werewolf)/i.test(folded)
           ? 'wolf'
-          : isVouch
+          : isVouch || /(la dan|nguoi tot|good|clean)/i.test(folded)
           ? 'good'
           : undefined
         : undefined;
@@ -2407,148 +2596,350 @@ export function generateHumanChatResponses(
       adjustPublicSuspicion(brain, primaryMentioned.id, -24);
     }
 
-    // Real bot Seer immediately challenges a human fake Seer claim!
-    const realBotSeer =
-      claimedRole === 'seer'
-        ? aliveBots.find((b) => b.roleId === 'seer' && !b.hasUsedPower)
-        : null;
+    // Real bot holding that unique power role immediately pushes back!
+    const uniqueClaimableRoles: RoleId[] = ['seer', 'bodyguard', 'witch', 'hunter', 'elder', 'cupid'];
+    const realRoleHolder = uniqueClaimableRoles.includes(claimedRole)
+      ? aliveBots.find((b) => b.roleId === claimedRole && !(claimedRole === 'seer' && b.hasUsedPower))
+      : null;
 
-    if (realBotSeer) {
-      used.add(realBotSeer.id);
-      brain.spokenCounts[realBotSeer.id] = (brain.spokenCounts[realBotSeer.id] ?? 0) + 1;
+    if (realRoleHolder) {
+      const roleLabel = ROLES[claimedRole].name[lang] || ROLES[claimedRole].name.en;
       addPublicClaim(brain, {
-        speakerId: realBotSeer.id,
-        claimedRole: 'seer',
+        speakerId: realRoleHolder.id,
+        claimedRole,
         round,
       });
       adjustPublicSuspicion(brain, brain.humanId, 38);
-      replies.push({
-        delayMs: 1450,
-        speakerId: realBotSeer.id,
-        speakerName: realBotSeer.name,
-        persona: brain.personas[realBotSeer.id],
-        claimedRole: 'seer',
-        text: tr(lang, {
-          vi: 'Khoan đã! Bạn đang nói dối — TÔI mới là Tiên Tri thật! Cả làng cẩn thận, đừng để Sói cướp vai!',
-          en: 'Hold on! You’re lying — I am the real Seer! Village, don’t fall for a Wolf counter-claim!',
-          fr: 'Minute ! Tu mens — la vraie Voyante, c’est MOI ! Village, ne vous laissez pas avoir par la contre-déclaration d’un Loup !',
-          es: '¡Un momento! Estás mintiendo — ¡la verdadera Vidente soy YO! Pueblo, ¡no se dejen engañar por la contradeclaración de un Lobo!',
-          ja: 'ちょっと待って！あなたは嘘をついてる — 本物の占い師は私だ！みんな、人狼の対抗告白に騙されないで！',
-        }),
-      });
+      pushReply(
+        realRoleHolder,
+        claimedRole === 'seer'
+          ? [
+              tr(lang, {
+                vi: 'Khoan đã! Bạn đang nói dối — TÔI mới là Tiên Tri thật! Cả làng cẩn thận, đừng để Sói cướp vai!',
+                en: 'Hold on! You’re lying — I am the real Seer! Village, don’t fall for a Wolf counter-claim!',
+              }),
+              tr(lang, {
+                vi: 'Đừng tin! Tôi mới là Tiên Tri thật của làng này — ai cướp vai tôi thì chắc chắn là Sói!',
+                en: 'Don’t buy that! I’m the actual Seer — anyone stealing my claim is a Wolf!',
+              }),
+            ]
+          : [
+              tr(lang, {
+                vi: `Khoan đã! Bạn nhận ${roleLabel} là sao? TÔI mới là ${roleLabel} thật — cả làng kiểm tra kỹ người vừa cướp vai đi!`,
+                en: `Wait a second! How are you claiming ${roleLabel} when I’m the real ${roleLabel}? Everyone watch this fake claim!`,
+              }),
+            ],
+        1450,
+        { claimedRole, statedSuspectId: brain.humanId }
+      );
     } else {
       const challenger =
         aliveBots.find(
           (b) =>
             !used.has(b.id) &&
-            (brain.personas[b.id] === 'detective' || brain.personas[b.id] === 'manipulator')
+            (isBitingWolf(b.roleId) ||
+              brain.personas[b.id] === 'detective' ||
+              brain.personas[b.id] === 'manipulator')
         ) || aliveBots[0];
       if (challenger) {
-        used.add(challenger.id);
-        brain.spokenCounts[challenger.id] = (brain.spokenCounts[challenger.id] ?? 0) + 1;
-        const roleLabel = ROLES[claimedRole].name[lang] || ROLES[claimedRole].name.vi;
-        replies.push({
-          delayMs: 1550,
-          speakerId: challenger.id,
-          speakerName: challenger.name,
-          persona: brain.personas[challenger.id],
-          text:
-            claimedRole === 'seer'
-              ? tr(lang, {
-                vi: `Bạn nhận ${roleLabel} à? Vậy đêm qua bạn soi ai và có manh mối cụ thể nào để cả làng kiểm chứng không?`,
-                en: `Claiming ${roleLabel}? Name who you inspected and why we should trust your claim!`,
-                fr: `Tu te déclares ${roleLabel} ? Dis-nous qui tu as sondé et pourquoi on devrait te croire !`,
-                es: `¿Dices ser ${roleLabel}? ¡Di a quién inspeccionaste y por qué deberíamos creerte!`,
-                ja: `${roleLabel}を名乗るの？誰を占ったのか、なぜ信じていいのか教えて！`,
-              })
-              : tr(lang, {
-                vi: `Ghi nhận bạn nhận vai ${roleLabel}! Nếu là thật thì nhớ giữ lập trường rõ ràng để phe Dân phối hợp nhé.`,
-                en: `Noted on your ${roleLabel} claim — let’s see if the night results back you up.`,
-                fr: `Noté pour ta déclaration de ${roleLabel} — voyons si les résultats de la nuit te donnent raison.`,
-                es: `Anotado lo de tu declaración de ${roleLabel} — veamos si los resultados de la noche te respaldan.`,
-                ja: `${roleLabel}の名乗り、了解 — 夜の結果が裏付けてくれるか見てみよう。`,
-              }),
-        });
+        const roleLabel = ROLES[claimedRole].name[lang] || ROLES[claimedRole].name.en;
+        const isWolfChallenger = isBitingWolf(challenger.roleId);
+        pushReply(
+          challenger,
+          claimedRole === 'seer'
+            ? [
+                tr(lang, {
+                  vi: isWolfChallenger
+                    ? `Bạn nhận ${roleLabel} vội quá đấy — có gì đảm bảo bạn không phải Sói đóng kịch để dẫn phiếu?`
+                    : `Bạn nhận ${roleLabel} à? Vậy đêm qua bạn soi ai và có manh mối cụ thể nào để cả làng kiểm chứng không?`,
+                  en: isWolfChallenger
+                    ? `That ${roleLabel} claim came out fast — how do we know you aren’t a Wolf steering the vote?`
+                    : `Claiming ${roleLabel}? Name who you inspected and why we should trust your claim!`,
+                }),
+              ]
+            : [
+                tr(lang, {
+                  vi: `Ghi nhận bạn nhận vai ${roleLabel}! Nếu là thật thì giữ lập trường rõ để phe Dân phối hợp nhé.`,
+                  en: `Noted on your ${roleLabel} claim — let’s see if the night results back you up.`,
+                }),
+              ],
+          1550
+        );
       }
     }
   }
 
-  // 2. Process Human Accusation against a named player
+  // 2. Game-State Queries: Who died last night?
+  if (replies.length === 0 && isWhoDiedQuery) {
+    const responder =
+      (primaryMentioned && primaryMentioned.isBot ? primaryMentioned : null) ||
+      aliveBots.find((b) => brain.personas[b.id] === 'observer' || brain.personas[b.id] === 'detective') ||
+      aliveBots[0];
+    const latestDawn = brain.dawnDeathHistory[brain.dawnDeathHistory.length - 1];
+    const victims = (latestDawn?.victimIds || [])
+      .map((id) => players.find((p) => p.id === id))
+      .filter((p): p is Player => Boolean(p));
+
+    if (responder) {
+      if (victims.length === 0) {
+        pushReply(
+          responder,
+          [
+            tr(lang, {
+              vi: 'Đêm qua không ai chết cả! Bảo Vệ đỡ chuẩn, Phù Thủy cứu kịp, hoặc Sói cắn hụt rồi.',
+              en: 'Nobody died last night! Either a clean save happened or the Wolves missed.',
+            }),
+            tr(lang, {
+              vi: 'Sáng nay làng bình yên nguyên vẹn, đêm qua không có nạn nhân nào ngã xuống.',
+              en: 'Peaceful dawn — zero casualties overnight.',
+            }),
+          ],
+          1450
+        );
+      } else {
+        const list = victims.map((v) => formatSeatTag(players, v)).join(', ');
+        pushReply(
+          responder,
+          [
+            tr(lang, {
+              vi: `Đêm qua mất ${list} rồi. Mọi người xem ai đang né nhắc tới vụ này nhé.`,
+              en: `We lost ${list} last night. Pay attention to who’s dodging the discussion.`,
+            }),
+            tr(lang, {
+              vi: `Sáng nay ${list} đã thiệt mạng — mình cần xâu chuỗi xem ai hưởng lợi nhất.`,
+              en: `${list} fell overnight — let’s trace who benefits most from that kill.`,
+            }),
+          ],
+          1450
+        );
+      }
+    }
+  }
+
+  // 3. Game-State Queries: How many wolves left? (Strictly zero-leak public estimate!)
+  if (replies.length === 0 && isWolfCountQuery) {
+    const responder =
+      (primaryMentioned && primaryMentioned.isBot ? primaryMentioned : null) ||
+      aliveBots.find((b) => brain.personas[b.id] === 'detective') ||
+      aliveBots[0];
+    if (responder) {
+      const totalPlayers = players.length;
+      const expectedStartWolves =
+        totalPlayers <= 5 ? 1 : totalPlayers <= 10 ? 2 : totalPlayers <= 15 ? 3 : 4;
+      const revealedDeadWolves = Object.values(brain.revealedRoles).filter((r) =>
+        isBitingWolf(r)
+      ).length;
+      const maxRemaining = Math.max(1, expectedStartWolves - revealedDeadWolves);
+      pushReply(
+        responder,
+        [
+          tr(lang, {
+            vi: `Bàn ${totalPlayers} người thường có tầm ${expectedStartWolves} Sói ban đầu, đã lộ treo ${revealedDeadWolves} Sói — nên vẫn còn khoảng tối đa ${maxRemaining} Sói đang ẩn mình (chưa tính người chết ban đêm không lộ vai).`,
+            en: `A ${totalPlayers}-player village typically starts with ~${expectedStartWolves} Wolves and we’ve confirmed ${revealedDeadWolves} lynched — so up to ${maxRemaining} could still be hiding among us.`,
+          }),
+        ],
+        1500
+      );
+    }
+  }
+
+  // 4. Vote / Suspicion Reason Queries ("sao vote tao", "vì sao nghi #4", "bằng chứng đâu")
+  if (replies.length === 0 && isReasonQuery) {
+    const mentionsSelf = /(tao|toi|minh|me\b|my\b)/i.test(folded);
+    const subject =
+      mentionsSelf || !primaryMentioned
+        ? humanPlayer || alive[0]
+        : secondaryMentioned || primaryMentioned;
+    const responder =
+      (primaryMentioned && primaryMentioned.isBot && primaryMentioned.id !== subject.id
+        ? primaryMentioned
+        : null) ||
+      aliveBots.find((b) => {
+        const lastSnap = brain.voteHistory[brain.voteHistory.length - 1];
+        return Boolean(lastSnap?.votes.some((v) => v.voterId === b.id && v.targetId === subject.id));
+      }) ||
+      aliveBots.find((b) => brain.personas[b.id] === 'prosecutor' || brain.personas[b.id] === 'detective') ||
+      aliveBots[0];
+
+    if (responder && subject) {
+      const evidence = buildPublicEvidenceReason(brain, subject, players, lang);
+      pushReply(
+        responder,
+        [evidence],
+        1500,
+        subject.id !== responder.id && subject.isAlive ? { statedSuspectId: subject.id } : undefined
+      );
+    }
+  }
+
+  // 5. Targeted Opinion / Suspect Query ("#2 thấy #6 thế nào", "ai là sói", "vote ai")
+  if (replies.length === 0 && isOpinionQuery) {
+    const addressedBot =
+      primaryMentioned && primaryMentioned.isBot ? primaryMentioned : null;
+    const subject = secondaryMentioned || (!addressedBot ? primaryMentioned : null);
+    const responder =
+      addressedBot ||
+      aliveBots.find(
+        (b) => brain.personas[b.id] === 'detective' || brain.personas[b.id] === 'prosecutor'
+      ) ||
+      aliveBots[0];
+
+    if (responder) {
+      if (subject && subject.id !== responder.id) {
+        const seatLabel = formatSeatTag(players, subject);
+        const ownCheck =
+          responder.roleId === 'seer' ? brain.seerChecksByBot[responder.id]?.[subject.id] : undefined;
+        const isPackmate = isBitingWolf(responder.roleId) && isBitingWolf(subject.roleId);
+        const susp = brain.publicSuspicion[subject.id] ?? 0;
+
+        if (ownCheck === 'wolf') {
+          pushReply(
+            responder,
+            [
+              tr(lang, {
+                vi: `Nói thẳng nhé: tôi nghi ${seatLabel} cực kỳ nặng, đề nghị cả làng dồn phiếu vào ${seatLabel} hôm nay!`,
+                en: `Straight up: ${seatLabel} is my #1 Wolf suspect — let’s put our votes on ${seatLabel} today!`,
+              }),
+            ],
+            1500,
+            { statedSuspectId: subject.id }
+          );
+        } else if (ownCheck === 'good' || isPackmate || responder.loverId === subject.id) {
+          pushReply(
+            responder,
+            [
+              tr(lang, {
+                vi: `Theo quan sát của tôi thì ${seatLabel} khá ổn định và chưa lộ sơ hở gì — tạm thời đừng phí phiếu lên họ.`,
+                en: `From my read, ${seatLabel} seems steady so far — I wouldn’t waste today’s vote there.`,
+              }),
+              tr(lang, {
+                vi: `Tôi thấy ${seatLabel} có vẻ nghiêng về phe Dân hơn, nên soi mấy ghế im lặng khác trước.`,
+                en: `${seatLabel} reads town-leaning to me; let’s pressure quieter seats first.`,
+              }),
+            ],
+            1500
+          );
+        } else if (susp >= 18) {
+          const reason = buildPublicEvidenceReason(brain, subject, players, lang);
+          pushReply(
+            responder,
+            [
+              tr(lang, {
+                vi: `Tôi cũng đang đặt dấu hỏi lên ${seatLabel}. ${reason}`,
+                en: `I’m suspicious of ${seatLabel} too. ${reason}`,
+              }),
+            ],
+            1500,
+            { statedSuspectId: subject.id }
+          );
+        } else {
+          pushReply(
+            responder,
+            [
+              tr(lang, {
+                vi: `Với ${seatLabel} tôi đang ở mức 50/50 — muốn nghe họ nêu tên nghi phạm rõ hơn rồi mới chốt phiếu.`,
+                en: `I’m 50/50 on ${seatLabel} right now — want to hear a clear suspect from them before voting.`,
+              }),
+              tr(lang, {
+                vi: `${seatLabel} chưa lộ bằng chứng rõ ràng, nhưng tôi vẫn đang để mắt tới cách họ bỏ phiếu vòng này.`,
+                en: `No hard read on ${seatLabel} yet, though I’m watching closely how they vote today.`,
+              }),
+            ],
+            1500
+          );
+        }
+      } else {
+        // General "ai là sói / vote ai" -> name current top suspect and sync with Day voting!
+        const topSuspect = pickBotTopSuspectForChat(brain, responder, players, rng);
+        if (topSuspect) {
+          const suspectTag = formatSeatTag(players, topSuspect);
+          const reason = buildPublicEvidenceReason(brain, topSuspect, players, lang);
+          pushReply(
+            responder,
+            [
+              tr(lang, {
+                vi: `Hiện tại tôi nghiêng về vote ${suspectTag}. ${reason}`,
+                en: `Right now I’m leaning toward voting ${suspectTag}. ${reason}`,
+              }),
+              tr(lang, {
+                vi: `Nếu phải chốt phiếu lúc này, tôi chọn ${suspectTag} — mọi người thấy hợp lý không?`,
+                en: `If we lock votes now, I’m going with ${suspectTag} — what does everyone else think?`,
+              }),
+            ],
+            1500,
+            { statedSuspectId: topSuspect.id }
+          );
+        }
+      }
+    }
+  }
+
+  // 6. Process Human Accusation against a named/seated player
   if (isAccuse && primaryMentioned) {
     adjustPublicSuspicion(brain, primaryMentioned.id, 22);
 
     if (primaryMentioned.isBot && !used.has(primaryMentioned.id)) {
-      used.add(primaryMentioned.id);
-      brain.spokenCounts[primaryMentioned.id] =
-        (brain.spokenCounts[primaryMentioned.id] ?? 0) + 1;
-
-      let defenseText = '';
+      let candidates: string[] = [];
       if (primaryMentioned.roleId === 'tanner') {
         adjustPublicSuspicion(brain, primaryMentioned.id, 10);
-        defenseText = tr(lang, {
-          vi: 'Ồ, nghi tôi nhanh thế? Nếu bạn tự tin vậy thì cứ bỏ phiếu treo cổ tôi đi, xem ai mới hối hận!',
-          en: 'Oh, pointing at me already? Go ahead and vote me out if you’re so sure — don’t regret it!',
-          fr: 'Oh, tu me pointes déjà du doigt ? Si t’es si sûr de toi, vote contre moi — mais ne viens pas pleurer après !',
-          es: 'Oh, ¿ya me estás señalando? Si estás tan seguro, vótame — ¡luego no te arrepientas!',
-          ja: 'おや、もう私を指さすの？そんなに自信があるなら投票すれば — 後悔しても知らないよ！',
-        });
+        candidates = [
+          tr(lang, {
+            vi: 'Ồ, nghi tôi nhanh thế? Nếu bạn tự tin vậy thì cứ bỏ phiếu treo cổ tôi đi, xem ai mới hối hận!',
+            en: 'Oh, pointing at me already? Go ahead and vote me out if you’re so sure — don’t regret it!',
+          }),
+          tr(lang, {
+            vi: 'Cứ thoải mái dồn phiếu cho tôi đi, tôi chán thanh minh rồi đấy!',
+            en: 'Feel free to pile votes on me — I’m tired of defending myself anyway!',
+          }),
+        ];
       } else if (isBitingWolf(primaryMentioned.roleId)) {
-        // A fake Seer must stay consistent with its public claim instead of "I'm just a Villager".
         const claimsSeer = brain.publicClaims.some(
           (c) => c.speakerId === primaryMentioned.id && c.claimedRole === 'seer'
         );
-        defenseText = claimsSeer
-          ? tr(lang, {
-            vi: 'Tôi là Tiên Tri, soi được gì tôi đã báo cả làng rồi! Đổ tội cho tôi lúc này chỉ có lợi cho Sói thôi!',
-            en: 'I’m the Seer and I already shared my results! Pushing on me now only helps the Wolves!',
-            fr: 'Je suis la Voyante et j’ai déjà partagé mes résultats ! Me charger maintenant n’avantage que les Loups !',
-            es: '¡Soy la Vidente y ya compartí mis resultados! ¡Presionarme ahora solo ayuda a los Lobos!',
-            ja: '私は占い師で、結果はもう共有したよ！今私を責めても人狼が得するだけ！',
-          })
-          : tr(lang, pickFrom([
-            {
-              vi: 'Nghi vô cớ thế bạn? Tôi chỉ là Dân Làng thôi — bạn vội đổ tội cho tôi như vậy có khi mới đáng nghi đấy!',
-              en: 'Baseless accusation! I’m a regular Villager — pushing on me this fast makes you look pretty sus yourself!',
-              fr: 'Accusation sans fondement ! Je suis un simple Villageois — me charger aussi vite, ça te rend plutôt suspect toi-même !',
-              es: '¡Acusación sin fundamento! Soy un Aldeano normal — ¡presionarme tan rápido te hace parecer bastante sospechoso a ti también!',
-              ja: '根拠のない言いがかりだよ！私はただの村人 — こんなに急いで私を責めるなんて、あなたのほうが怪しいんじゃない？',
-            },
-            {
-              vi: 'Tôi là Dân Làng đàng hoàng! Bạn có bằng chứng gì không hay chỉ đang đẩy phiếu cho nhanh?',
-              en: 'I’m just a Villager! Got any evidence, or are you only rushing the vote?',
-              fr: 'Je ne suis qu’un Villageois ! T’as des preuves, ou tu cherches juste à précipiter le vote ?',
-              es: '¡Solo soy un Aldeano! ¿Tienes pruebas, o solo tienes prisa por votar?',
-              ja: '私はただの村人だよ！証拠はあるの？それとも投票を急ぎたいだけ？',
-            },
-          ], rng));
+        candidates = claimsSeer
+          ? [
+              tr(lang, {
+                vi: 'Tôi là Tiên Tri, soi được gì tôi đã báo cả làng rồi! Đổ tội cho tôi lúc này chỉ có lợi cho Sói thôi!',
+                en: 'I’m the Seer and I already shared my results! Pushing on me now only helps the Wolves!',
+              }),
+            ]
+          : [
+              tr(lang, {
+                vi: 'Nghi vô cớ thế bạn? Tôi chỉ là Dân Làng thôi — bạn vội đổ tội cho tôi như vậy có khi mới đáng nghi đấy!',
+                en: 'Baseless accusation! I’m a regular Villager — pushing on me this fast makes you look pretty sus yourself!',
+              }),
+              tr(lang, {
+                vi: 'Tôi là Dân Làng đàng hoàng! Bạn có bằng chứng gì không hay chỉ đang đẩy phiếu cho nhanh?',
+                en: 'I’m just a Villager! Got any evidence, or are you only rushing the vote?',
+              }),
+            ];
       } else if (primaryMentioned.roleId === 'seer') {
-        defenseText = tr(lang, {
-          vi: 'Bình tĩnh đi bạn, bạn đang nhắm sai người rồi! Tôi có thông tin rất quan trọng cho phe Dân đấy!',
-          en: 'Slow down — you’re aiming at the wrong person! I have crucial info for the village!',
-          fr: 'Doucement — tu vises la mauvaise personne ! J’ai des infos cruciales pour le village !',
-          es: '¡Calma — estás apuntando a la persona equivocada! ¡Tengo información crucial para el pueblo!',
-          ja: 'ちょっと落ち着いて — 狙う相手を間違ってるよ！私は村にとって大事な情報を持ってるんだ！',
-        });
+        candidates = [
+          tr(lang, {
+            vi: 'Bình tĩnh đi bạn, bạn đang nhắm sai người rồi! Tôi có thông tin rất quan trọng cho phe Dân đấy!',
+            en: 'Slow down — you’re aiming at the wrong person! I have crucial info for the village!',
+          }),
+          tr(lang, {
+            vi: 'Đừng dồn phiếu nhầm tôi — để tôi theo dõi thêm một đêm nữa sẽ giúp làng lọc Sói rõ hơn nhiều!',
+            en: 'Don’t mislynch me — my reads are way too valuable for town right now!',
+          }),
+        ];
       } else {
-        defenseText = tr(lang, {
-          vi: 'Khoan đã! Bạn dựa vào bằng chứng nào mà nghi tôi là Sói? Tôi phe Dân đàng hoàng, đừng để Sói thật cười thầm!',
-          en: 'Wait a second! What evidence do you have against me? I’m town — don’t let the real Wolves hide behind this!',
-          fr: 'Une seconde ! Quelles preuves as-tu contre moi ? Je suis du village — ne laisse pas les vrais Loups se cacher derrière ça !',
-          es: '¡Un segundo! ¿Qué pruebas tienes contra mí? Soy del pueblo — ¡no dejes que los verdaderos Lobos se escondan detrás de esto!',
-          ja: 'ちょっと待って！私にどんな証拠があるの？私は村側だよ — 本物の人狼にここへ隠れさせないで！',
-        });
+        candidates = [
+          tr(lang, {
+            vi: 'Khoan đã! Bạn dựa vào bằng chứng nào mà nghi tôi là Sói? Tôi phe Dân đàng hoàng, đừng để Sói thật cười thầm!',
+            en: 'Wait a second! What evidence do you have against me? I’m town — don’t let the real Wolves hide behind this!',
+          }),
+          tr(lang, {
+            vi: 'Bạn nhìn nhầm người rồi! Tôi phe Dân — đừng vội đẩy phiếu khi chưa kiểm tra mấy ghế khác.',
+            en: 'You’ve got the wrong read! I’m Villager-aligned — let’s check the quieter seats too.',
+          }),
+        ];
       }
 
-      replies.push({
-        delayMs: replies.length === 0 ? 1450 : 2250,
-        speakerId: primaryMentioned.id,
-        speakerName: primaryMentioned.name,
-        persona: brain.personas[primaryMentioned.id],
-        text: defenseText,
-      });
+      pushReply(primaryMentioned, candidates, replies.length === 0 ? 1450 : 2250);
     }
 
-    // Optional 2nd bot chimes in to weigh the accusation
     if (replies.length < 2) {
       const analyst =
         aliveBots.find(
@@ -2559,54 +2950,50 @@ export function generateHumanChatResponses(
               brain.personas[b.id] === 'prosecutor')
         ) || aliveBots.find((b) => !used.has(b.id));
       if (analyst) {
-        used.add(analyst.id);
-        brain.spokenCounts[analyst.id] = (brain.spokenCounts[analyst.id] ?? 0) + 1;
         const isDefendingLover = analyst.loverId === primaryMentioned.id;
-        const text = isDefendingLover
-          ? tr(lang, {
-            vi: `Tôi thấy ${primaryMentioned.name} chưa có gì đáng nghi cả — khoan vội hùa theo nhé mọi người!`,
-            en: `I don’t buy the case on ${primaryMentioned.name} at all — let’s not rush a bad vote!`,
-            fr: `Je n’achète pas du tout l’accusation contre ${primaryMentioned.name} — ne précipitons pas un mauvais vote !`,
-            es: `No me creo nada el caso contra ${primaryMentioned.name} — ¡no nos apresuremos con un mal voto!`,
-            ja: `${primaryMentioned.name}への疑いは全然ピンとこないな — 間違った投票を急がないようにしよう！`,
-          })
-          : tr(lang, {
-            vi: `Góc nhìn thú vị đấy — để tôi quan sát kỹ phản ứng của ${primaryMentioned.name} trước khi bỏ phiếu.`,
-            en: `Interesting push — let’s watch how ${primaryMentioned.name} responds before voting.`,
-            fr: `Intéressante accusation — voyons comment ${primaryMentioned.name} réagit avant de voter.`,
-            es: `Interesante acusación — veamos cómo responde ${primaryMentioned.name} antes de votar.`,
-            ja: `面白い指摘だね — 投票の前に${primaryMentioned.name}がどう反応するか見てみよう。`,
-          });
-        replies.push({
-          delayMs: 2250 + Math.round(rng() * 150),
-          speakerId: analyst.id,
-          speakerName: analyst.name,
-          persona: brain.personas[analyst.id],
-          text,
-        });
+        const targetTag = formatSeatTag(players, primaryMentioned);
+        pushReply(
+          analyst,
+          isDefendingLover
+            ? [
+                tr(lang, {
+                  vi: `Tôi thấy ${targetTag} chưa có gì đáng nghi cả — khoan vội hùa theo nhé mọi người!`,
+                  en: `I don’t buy the case on ${targetTag} at all — let’s not rush a bad vote!`,
+                }),
+              ]
+            : [
+                tr(lang, {
+                  vi: `Góc nhìn thú vị đấy — để tôi quan sát kỹ phản ứng của ${targetTag} trước khi bỏ phiếu.`,
+                  en: `Interesting push — let’s watch how ${targetTag} responds before voting.`,
+                }),
+                tr(lang, {
+                  vi: `Nếu bạn chắc tay về ${targetTag} thì nêu rõ thêm một chi tiết nữa để cả làng dễ theo phiếu nhé.`,
+                  en: `If you’re confident on ${targetTag}, drop one more clue so the village can align.`,
+                }),
+              ],
+          2250 + Math.round(rng() * 150)
+        );
       }
     }
   } else if (isVouch && primaryMentioned && !isAccuse) {
-    // 3. Process Human Vouch / Trust
+    // 7. Process Human Vouch / Trust
     adjustPublicSuspicion(brain, primaryMentioned.id, -18);
 
     if (replies.length < 2 && primaryMentioned.isBot && !used.has(primaryMentioned.id)) {
-      used.add(primaryMentioned.id);
-      brain.spokenCounts[primaryMentioned.id] =
-        (brain.spokenCounts[primaryMentioned.id] ?? 0) + 1;
-      replies.push({
-        delayMs: replies.length === 0 ? 1500 : 2300,
-        speakerId: primaryMentioned.id,
-        speakerName: primaryMentioned.name,
-        persona: brain.personas[primaryMentioned.id],
-        text: tr(lang, {
-          vi: 'Cảm ơn bạn đã tin tưởng! Cùng nhau lọc ra Sói thật quanh lửa trại nhé.',
-          en: 'Appreciate the trust! Let’s focus together on finding the real Wolves.',
-          fr: 'Merci de ta confiance ! Concentrons-nous ensemble pour trouver les vrais Loups.',
-          es: '¡Gracias por la confianza! Concentrémonos juntos en encontrar a los verdaderos Lobos.',
-          ja: '信じてくれてありがとう！みんなで本物の人狼を見つけ出そう。',
-        }),
-      });
+      pushReply(
+        primaryMentioned,
+        [
+          tr(lang, {
+            vi: 'Cảm ơn bạn đã tin tưởng! Cùng nhau lọc ra Sói thật quanh lửa trại nhé.',
+            en: 'Appreciate the trust! Let’s focus together on finding the real Wolves.',
+          }),
+          tr(lang, {
+            vi: 'Cảm ơn bạn — mình cũng đang cố giữ nhịp cho phe Dân, giờ tập trung tìm ghế lệch nhịp thôi.',
+            en: 'Thanks for backing me — now let’s narrow down whoever’s actually hiding.',
+          }),
+        ],
+        replies.length === 0 ? 1500 : 2300
+      );
     }
 
     if (replies.length < 2) {
@@ -2616,23 +3003,126 @@ export function generateHumanChatResponses(
           (brain.personas[b.id] === 'prosecutor' || brain.personas[b.id] === 'manipulator')
       );
       if (skeptic) {
-        used.add(skeptic.id);
-        brain.spokenCounts[skeptic.id] = (brain.spokenCounts[skeptic.id] ?? 0) + 1;
-        replies.push({
-          delayMs: 2300,
-          speakerId: skeptic.id,
-          speakerName: skeptic.name,
-          persona: brain.personas[skeptic.id],
-          text: tr(lang, {
-            vi: `Sao bạn chắc chắn ${primaryMentioned.name} là Dân thế? Cẩn thận kẻo bênh nhầm Sói đấy!`,
-            en: `Why are you so sure ${primaryMentioned.name} is clean? Careful not to vouch for a Wolf!`,
-            fr: `Pourquoi es-tu si sûr que ${primaryMentioned.name} est clean ? Attention à ne pas défendre un Loup !`,
-            es: `¿Por qué estás tan seguro de que ${primaryMentioned.name} está limpio? ¡Cuidado, no vayas a respaldar a un Lobo!`,
-            ja: `なんで${primaryMentioned.name}が白だってそんなに言い切れるの？人狼をかばわないよう気をつけて！`,
-          }),
-        });
+        const targetTag = formatSeatTag(players, primaryMentioned);
+        pushReply(
+          skeptic,
+          [
+            tr(lang, {
+              vi: `Sao bạn chắc chắn ${targetTag} là Dân thế? Cẩn thận kẻo bênh nhầm Sói đấy!`,
+              en: `Why are you so sure ${targetTag} is clean? Careful not to vouch for a Wolf!`,
+            }),
+            tr(lang, {
+              vi: `Bênh ${targetTag} sớm quá có khi tự biến hai người thành cặp đôi bị nghi đấy nhé.`,
+              en: `Vouching for ${targetTag} this early might make both of you look linked.`,
+            }),
+          ],
+          2300
+        );
       }
     }
+  }
+
+  // 8. Short Conversational Lines: Skip / Greetings / Direct seat ping / General fallback
+  if (replies.length === 0 && isSkipPrompt) {
+    const responder =
+      (primaryMentioned && primaryMentioned.isBot ? primaryMentioned : null) ||
+      aliveBots.find((b) => brain.personas[b.id] === 'protector' || brain.personas[b.id] === 'prosecutor') ||
+      aliveBots[0];
+    if (responder) {
+      pushReply(
+        responder,
+        [
+          tr(lang, {
+            vi:
+              round <= 1
+                ? 'Vòng 1 ít dữ kiện thì bỏ phiếu trắng (Skip) cũng an toàn, nhưng ai nghi ai cứ nói trước để mai còn đối chiếu.'
+                : 'Nếu cứ skip mãi là mất nhịp vào tay Sói đấy! Ít nhất hôm nay nên kiểm tra 1 ghế đáng nghi.',
+            en:
+              round <= 1
+                ? 'Skipping Day 1 is fair with thin clues, as long as everyone leaves a read for tomorrow.'
+                : 'Skipping again just hands tempo to the Wolves — we should test at least one suspect today!',
+          }),
+          tr(lang, {
+            vi: 'Tôi đồng ý chưa nên treo bừa, nhưng nếu có manh mối rõ trước khi hết giờ thì vẫn nên chốt phiếu.',
+            en: 'Agreed on not mislynching blindly, though if a solid lead pops up we shouldn’t waste the day.',
+          }),
+        ],
+        1450
+      );
+    }
+  }
+
+  if (replies.length === 0 && isGreetingOrSilenceCheck) {
+    const responder =
+      (primaryMentioned && primaryMentioned.isBot ? primaryMentioned : null) ||
+      aliveBots.find((b) => !used.has(b.id)) ||
+      aliveBots[0];
+    if (responder) {
+      pushReply(
+        responder,
+        [
+          tr(lang, {
+            vi: 'Có mặt đây! Mình đang nghe kỹ từng người nói để xem ai trả lời vòng vo nhất.',
+            en: 'Right here! Just listening closely to see whose story slips first.',
+          }),
+          tr(lang, {
+            vi: 'Chào bạn! Vòng này bạn đang để mắt tới ghế nào nhất quanh lửa trại?',
+            en: 'Hey! Which seat around the campfire is giving you the weirdest vibe right now?',
+          }),
+          tr(lang, {
+            vi: 'Mình vẫn đang theo dõi sát đây — chưa vội kết luận nhưng có vài ghế làm mình hơi cấn.',
+            en: 'Still watching closely — not rushing, though a couple of seats already feel off.',
+          }),
+        ],
+        1450
+      );
+    }
+  }
+
+  if (replies.length === 0 && primaryMentioned && primaryMentioned.isBot) {
+    const topSuspect = pickBotTopSuspectForChat(brain, primaryMentioned, players, rng);
+    const suspectHint = topSuspect ? formatSeatTag(players, topSuspect) : null;
+    pushReply(
+      primaryMentioned,
+      [
+        tr(lang, {
+          vi: suspectHint
+            ? `Gọi mình à? Hiện tại mình đang hơi để mắt tới ${suspectHint}, còn bạn nghĩ sao?`
+            : 'Gọi mình có chuyện gì thế? Bạn đang nghi ghế nào nói rõ để cả làng bàn nhé.',
+          en: suspectHint
+            ? `Calling on me? I’ve got my eye on ${suspectHint} right now — what’s your read?`
+            : 'Need my take? Tell me who you’re eyeing and we’ll compare notes.',
+        }),
+        tr(lang, {
+          vi: 'Mình nghe đây! Bạn muốn kiểm tra thông tin gì cứ hỏi thẳng nhé.',
+          en: 'I’m listening — ask me directly if you want my read on someone.',
+        }),
+      ],
+      1450
+    );
+  }
+
+  if (replies.length === 0) {
+    const responder = pickFrom(aliveBots, rng);
+    const topSuspect = pickBotTopSuspectForChat(brain, responder, players, rng);
+    pushReply(
+      responder,
+      [
+        tr(lang, {
+          vi: topSuspect
+            ? `Nghe hợp lý đấy. Tiện đây mọi người thấy ${formatSeatTag(players, topSuspect)} vòng này thế nào?`
+            : 'Ghi nhận góc nhìn của bạn — mọi người góp thêm thông tin trước khi vào bỏ phiếu nhé.',
+          en: topSuspect
+            ? `Fair point. Speaking of reads, how is everyone feeling about ${formatSeatTag(players, topSuspect)}?`
+            : 'Good point — let’s get a couple more reads before voting locks.',
+        }),
+        tr(lang, {
+          vi: 'Mình đang theo dõi kỹ cuộc nói chuyện đây, ai có manh mối rõ thì lên tiếng ngay nhé.',
+          en: 'Tracking the table closely — if anyone has a concrete lead, now’s the time.',
+        }),
+      ],
+      1500
+    );
   }
 
   return replies.slice(0, 2);

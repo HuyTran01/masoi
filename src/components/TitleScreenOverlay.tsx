@@ -358,9 +358,6 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
           >
             <option value="vi">🇻🇳 Tiếng Việt</option>
             <option value="en">🇬🇧 English</option>
-            <option value="fr">🇫🇷 Français</option>
-            <option value="es">🇪🇸 Español</option>
-            <option value="ja">🇯🇵 日本語</option>
           </select>
         </div>
       </div>
@@ -634,7 +631,6 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                           botStepSec: 3,
                           dayDiscussSec: 20,
                           dayVoteSec: 15,
-                          hunterShotSec: 15,
                         })
                       }
                       className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer ${
@@ -666,7 +662,6 @@ export const TitleScreenOverlay: React.FC<TitleScreenOverlayProps> = ({
                           botStepSec: 6,
                           dayDiscussSec: 75,
                           dayVoteSec: 45,
-                          hunterShotSec: 30,
                         })
                       }
                       className={`px-2 py-0.5 rounded text-[10px] font-bold border cursor-pointer ${

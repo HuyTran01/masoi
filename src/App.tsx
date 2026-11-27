@@ -140,6 +140,7 @@ import {
   prepareNightStartForHuman,
   buildNightSkillCutsceneForStep,
   shouldAutoAdvanceOnTimerZero,
+  resolveHunterTimeoutTarget,
   buildDawnGMAnnouncement,
   buildDuskGMAnnouncement,
   determineEndOfNightCinematic,
@@ -158,6 +159,7 @@ import {
   generateScheduledDiscussionBeats,
   generateGallowsDefenseBeat,
   generateHumanChatResponses,
+  buildAiChatServerPayload,
 } from './game/smartAI';
 import { UI_TEXT } from './utils/i18n';
 import { sound } from './utils/sound';
@@ -358,8 +360,17 @@ export default function App() {
   const [gmDeckMode, setGmDeckMode] = useState<GMDeckMode>('virtual_deck');
   const [lang, setLang] = useState<Language>(() => {
     try {
-      const saved = localStorage.getItem('werewolf_lang') as Language | null;
-      if (saved && ['vi', 'en', 'fr', 'es', 'ja'].includes(saved)) return saved;
+      const saved = localStorage.getItem('werewolf_lang');
+      if (saved === 'vi') return 'vi';
+      if (saved === 'en') return 'en';
+      if (saved) {
+        try {
+          localStorage.setItem('werewolf_lang', 'en');
+        } catch {
+          // ignore
+        }
+        return 'en';
+      }
     } catch {
       // ignore
     }
@@ -576,7 +587,6 @@ export default function App() {
             botStepSec: Math.max(2, Math.min(20, Number(parsed.botStepSec) || 4)),
             dayDiscussSec: Math.max(10, Math.min(300, Number(parsed.dayDiscussSec) || 35)),
             dayVoteSec: Math.max(10, Math.min(180, Number(parsed.dayVoteSec) || 25)),
-            hunterShotSec: Math.max(5, Math.min(90, Number(parsed.hunterShotSec) || 20)),
           };
         }
       }
@@ -612,6 +622,7 @@ export default function App() {
     serverNow: number;
   } | null>(null);
   const lastOnlineMatchIdRef = useRef<number>(0);
+  const lastRoleCardMatchIdRef = useRef<number>(0);
   const lastOnlinePhaseRef = useRef<Phase | null>(null);
   const lastOnlineStepKeyRef = useRef<string>('');
   const lastSeenAnnouncementKeyRef = useRef<string>('');
@@ -959,6 +970,9 @@ export default function App() {
       } catch {
         // ignore
       }
+      if (gameMode === 'online' && roomId) {
+        realtimeClient.setLanguage(roomId, nextLang);
+      }
       const nextT = UI_TEXT[nextLang];
       const roleDef = ROLES[me.roleId];
       if (phase === 'night') {
@@ -983,7 +997,7 @@ export default function App() {
         prev.map((m) => (m.id === 'msg_0' ? { ...m, text: nextT.bottomControlHint } : m))
       );
     },
-    [me, currentNightStep, phase, round]
+    [me, currentNightStep, phase, round, gameMode, roomId]
   );
 
   // Determine whether the human player is allowed to open their eyes and roam/act right now at night
@@ -1611,16 +1625,67 @@ export default function App() {
       ) {
         return;
       }
-      const replies = generateHumanChatResponses(
-        aiBrainRef.current,
-        text,
-        playersRef.current,
-        round,
-        lang
-      );
-      if (replies.length > 0) {
-        scheduleBotBeats(replies, ['day_discussion', 'day_voting'], matchInstanceIdRef.current);
+      const brain = aiBrainRef.current;
+      const snapshotPlayers = playersRef.current;
+      const replies = generateHumanChatResponses(brain, text, snapshotPlayers, round, lang);
+      if (replies.length === 0) return;
+
+      const matchInst = matchInstanceIdRef.current;
+      const primaryReply = replies[0];
+      const primaryBot = snapshotPlayers.find((p) => p.id === primaryReply.speakerId && p.isAlive);
+      if (!primaryBot) {
+        scheduleBotBeats(replies, ['day_discussion', 'day_voting'], matchInst);
+        return;
       }
+
+      const payload = buildAiChatServerPayload(
+        brain,
+        primaryBot,
+        snapshotPlayers,
+        round,
+        lang,
+        text
+      );
+      const startedAt = Date.now();
+
+      void (async () => {
+        const controller = new AbortController();
+        const abortTimer = window.setTimeout(() => controller.abort(), 2600);
+        let enhancedText: string | null = null;
+        try {
+          const resp = await fetch('/api/ai-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          });
+          if (resp.ok) {
+            const data = (await resp.json()) as { ok?: boolean; text?: string };
+            if (data?.ok && typeof data.text === 'string' && data.text.trim().length > 0) {
+              enhancedText = data.text.trim();
+            }
+          }
+        } catch {
+          // Silent fallback to Tier 1 reply
+        } finally {
+          window.clearTimeout(abortTimer);
+        }
+
+        if (
+          matchInstanceIdRef.current !== matchInst ||
+          (phaseRef.current !== 'day_discussion' && phaseRef.current !== 'day_voting')
+        ) {
+          return;
+        }
+
+        const elapsed = Date.now() - startedAt;
+        const finalReplies: ScheduledBotBeat[] = replies.map((beat, idx) => ({
+          ...beat,
+          text: idx === 0 && enhancedText ? enhancedText : beat.text,
+          delayMs: Math.max(idx === 0 ? 350 : 1200, beat.delayMs - elapsed),
+        }));
+        scheduleBotBeats(finalReplies, ['day_discussion', 'day_voting'], matchInst);
+      })();
     },
     [gameMode, me.isAlive, round, lang, scheduleBotBeats]
   );
@@ -1749,6 +1814,18 @@ export default function App() {
       );
       setPlayers(syncedPlayers);
       const viewer = syncedPlayers.find((p) => p.id === myId) || syncedPlayers[0];
+
+      // Reliably open Role Card once per authoritative Online match start or rematch
+      if (
+        view.phase !== 'game_over' &&
+        viewer?.roleId &&
+        view.matchId !== lastRoleCardMatchIdRef.current &&
+        (isRematch || (view.round === 1 && view.phase === 'night' && lastRoleCardMatchIdRef.current === 0))
+      ) {
+        lastRoleCardMatchIdRef.current = view.matchId;
+        setIsRoleCardInitialOpen(true);
+        setShowMyRoleModal(true);
+      }
 
       const prevPhase = lastOnlinePhaseRef.current;
       const phaseChanged = prevPhase !== null && prevPhase !== view.phase;
@@ -2174,9 +2251,6 @@ export default function App() {
             tr(curLang, {
               vi: `💘 Mật báo Quản Trò: Bạn đã ghép đôi ${p1.name} (#${idx1 + 1}) và ${p2.name} (#${idx2 + 1}) thành Tình Nhân sinh tử!`,
               en: `💘 Secret GM Tap: You linked ${p1.name} (#${idx1 + 1}) and ${p2.name} (#${idx2 + 1}) as star-crossed Lovers!`,
-              fr: `💘 Message secret du MJ : Vous avez lié ${p1.name} (#${idx1 + 1}) et ${p2.name} (#${idx2 + 1}) comme Amoureux !`,
-              es: `💘 Aviso secreto del Narrador: ¡Has unido a ${p1.name} (#${idx1 + 1}) y ${p2.name} (#${idx2 + 1}) como Enamorados!`,
-              ja: `💘 GMからの密書：あなたは${p1.name}（#${idx1 + 1}）と${p2.name}（#${idx2 + 1}）を恋人に結びました！`,
             })
           );
         }
@@ -2192,9 +2266,6 @@ export default function App() {
             tr(curLang, {
               vi: `💘 Mật báo Quản Trò: Đêm qua mũi tên Cupid đã ghép đôi bạn với ${partner.name} (#${partnerIdx + 1}). Hai bạn cùng sống, cùng chết!`,
               en: `💘 Secret GM Tap: Cupid bound you as Lovers with ${partner.name} (#${partnerIdx + 1}). You live and die together!`,
-              fr: `💘 Message secret du MJ : Cupidon vous a lié à ${partner.name} (#${partnerIdx + 1}). Vous vivez et mourez ensemble !`,
-              es: `💘 Aviso secreto del Narrador: Cupido te ha unido con ${partner.name} (#${partnerIdx + 1}). ¡Viven y mueren juntos!`,
-              ja: `💘 GMからの密書：昨夜キューピッドの矢があなたと${partner.name}（#${partnerIdx + 1}）を恋人に結びました。二人は運命共同体です！`,
             })
           );
         }
@@ -2250,6 +2321,7 @@ export default function App() {
         onlineClockOffsetRef.current = 0;
         onlinePhaseEndsAtRef.current = 0;
         lastOnlineMatchIdRef.current = 0;
+        lastRoleCardMatchIdRef.current = 0;
         lastOnlinePhaseRef.current = null;
         lastOnlineStepKeyRef.current = '';
         lastSeenAnnouncementKeyRef.current = '';
@@ -2391,9 +2463,6 @@ export default function App() {
         text: tr(lang, {
           vi: `🤖 Quản Trò Máy: Ván đấu ${count} người bắt đầu! Vai trò bí mật của bạn là ${assignedDef.name.vi}.`,
           en: `🤖 Auto-GM: ${count}-player match started! Your secret role is ${assignedDef.name.en}.`,
-          fr: `🤖 MJ Auto : Partie à ${count} joueurs lancée ! Votre rôle secret est ${assignedDef.name.fr}.`,
-          es: `🤖 Narrador Auto: ¡Partida de ${count} jugadores iniciada! Tu rol secreto es ${assignedDef.name.es}.`,
-          ja: `🤖 自動GM：${count}人のゲームを開始！あなたの役職は「${assignedDef.name.ja}」です。`,
         }),
         timestamp: Date.now(),
         isSystem: true,
@@ -2497,7 +2566,7 @@ export default function App() {
   );
 
   // Resolve Night Actions -> Transition to Day with Authentic Real-Life GM Morning Briefing
-  const handleResolveNight = useCallback(() => {
+  const handleResolveNight = useCallback((overrides?: { hunterTargetId?: string | null }) => {
     const beforeNightPlayers = players;
     const livingWitches = players.filter(
       (p) => p.roleId === 'witch' && p.isAlive && !p.hasUsedPower
@@ -2514,7 +2583,9 @@ export default function App() {
         ? guardTargetTonightId || selectedTargetId
         : guardTargetTonightId;
     let hunterTarget: string | null | undefined =
-      me.roleId === 'hunter' && me.isAlive && !me.hasUsedPower
+      overrides?.hunterTargetId !== undefined
+        ? overrides.hunterTargetId
+        : me.roleId === 'hunter' && me.isAlive && !me.hasUsedPower
         ? hunterTargetTonightId !== undefined
           ? hunterTargetTonightId
           : selectedTargetId
@@ -2906,7 +2977,7 @@ export default function App() {
   ]);
 
   // Step-by-step Night Progression moderated by Quản Trò Máy (or Host-only server advance in Online mode)
-  const handleAdvanceNightStep = useCallback(() => {
+  const handleAdvanceNightStep = useCallback((overrides?: { hunterTargetId?: string | null }) => {
     if (phase !== 'night') return;
     if (gameMode === 'online') {
       if (!me.isHost) return;
@@ -2922,7 +2993,7 @@ export default function App() {
       setTimerSeconds(nextTimer);
       setNightStepIndex(nextIdx);
     } else {
-      handleResolveNight();
+      handleResolveNight(overrides);
     }
   }, [
     phase,
@@ -3418,7 +3489,6 @@ export default function App() {
       const {
         updatedPlayers,
         wolfPupTriggeredNextNight,
-        hunterShots,
         elderLynchedPenalty,
       } = applyDayLynch(beforeVotePlayers, victim.id, { elderSealActive });
 
@@ -3439,11 +3509,6 @@ export default function App() {
           round
         );
         return;
-      }
-
-      if (hunterShots.length > 0) {
-        // Night-Aim Hunter was lynched: the pre-marked bullet auto-fires, no live picking
-        triggerNightRoleCallout('hunter');
       }
 
       const mayorCheck = mayorId
@@ -3485,7 +3550,7 @@ export default function App() {
           votes: playerTargetVotes,
           isTie: false,
           elderLynchedPenalty,
-          hunterShots,
+          hunterShots: [],
           humanPlayerId: me.id,
           lang,
         }),
@@ -4133,7 +4198,17 @@ export default function App() {
     lastAutoAdvancedKeyRef.current = stepGuardKey;
 
     if (phase === 'night') {
-      handleAdvanceNightStep();
+      const nextHunterTarget = resolveHunterTimeoutTarget(
+        currentNightStep?.key,
+        isPlayerAwakeAtNight && me.roleId === 'hunter' && me.isAlive && !me.hasUsedPower,
+        hunterTargetTonightId
+      );
+      if (nextHunterTarget !== hunterTargetTonightId) {
+        setHunterTargetTonightId(nextHunterTarget);
+        handleAdvanceNightStep({ hunterTargetId: nextHunterTarget });
+      } else {
+        handleAdvanceNightStep();
+      }
     } else if (phase === 'day_discussion') {
       handleStartDayVoting();
     } else if (phase === 'day_voting') {
@@ -4157,8 +4232,13 @@ export default function App() {
     round,
     phase,
     nightStepIndex,
+    currentNightStep?.key,
+    isPlayerAwakeAtNight,
     me.isAlive,
     me.id,
+    me.roleId,
+    me.hasUsedPower,
+    hunterTargetTonightId,
     hasVoted,
     votes,
     handleAdvanceNightStep,
@@ -4694,6 +4774,7 @@ export default function App() {
         evt.targetId === currentUserRef.current.id
       ) {
         activeOnlineRoomCodeRef.current = null;
+        lastRoleCardMatchIdRef.current = 0;
         setOnlineMatchView(null);
         resetMatchUiState();
         setLobbyResetKey((k) => k + 1);
@@ -5042,9 +5123,6 @@ export default function App() {
             >
               <option value="vi">🇻🇳 VI</option>
               <option value="en">🇬🇧 EN</option>
-              <option value="fr">🇫🇷 FR</option>
-              <option value="es">🇪🇸 ES</option>
-              <option value="ja">🇯🇵 JA</option>
             </select>
 
             <button
@@ -5346,7 +5424,7 @@ export default function App() {
                   <button
                     type="button"
                     data-testid="blindfold-next-step-btn"
-                    onClick={handleAdvanceNightStep}
+                    onClick={() => handleAdvanceNightStep()}
                     className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
                   >
                     <Play className="w-3.5 h-3.5 fill-white" />
@@ -5359,26 +5437,41 @@ export default function App() {
                     ⏳ {`${t.waitingNightTurn} (${Math.round(timerSeconds)}s)...`}
                   </span>
                 )
-              ) : myNightStepIdx !== -1 && myNightStepIdx !== nightStepIndex ? (
-                <button
-                  type="button"
-                  data-testid="blindfold-jump-my-turn-btn"
-                  onClick={handleJumpToMyNightTurn}
-                  className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
-                >
-                  <FastForward className="w-3.5 h-3.5 fill-white" />
-                  <span>{t.jumpToMyTurn(myRole.name[lang])}</span>
-                </button>
               ) : (
-                <button
-                  type="button"
-                  data-testid="blindfold-skip-night-btn"
-                  onClick={handleAdvancePhaseFast}
-                  className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
-                >
-                  <FastForward className="w-3.5 h-3.5 fill-slate-950" />
-                  <span>{t.skipNightLongBtn}</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    data-testid="blindfold-skip-step-btn"
+                    onClick={() => {
+                      clearSkillCutscenes();
+                      handleAdvanceNightStep();
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-[#b84b10] hover:bg-[#d15916] border border-[#fbc266]/70 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
+                  >
+                    <span>{t.skipNightStepBtn}</span>
+                  </button>
+                  {myNightStepIdx !== -1 && myNightStepIdx !== nightStepIndex ? (
+                    <button
+                      type="button"
+                      data-testid="blindfold-jump-my-turn-btn"
+                      onClick={handleJumpToMyNightTurn}
+                      className="px-3 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
+                    >
+                      <FastForward className="w-3.5 h-3.5 fill-white" />
+                      <span>{t.jumpToMyTurn(myRole.name[lang])}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      data-testid="blindfold-skip-night-btn"
+                      onClick={handleAdvancePhaseFast}
+                      className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[11px] flex items-center gap-1 shadow-lg cursor-pointer"
+                    >
+                      <FastForward className="w-3.5 h-3.5 fill-slate-950" />
+                      <span>{t.skipNightLongBtn}</span>
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -5513,11 +5606,12 @@ export default function App() {
             showFactionHints={showFactionHints}
             showFastForwardBtn={false}
             myRole={myRole}
+            myElderLives={me.roleId === 'elder' && me.isAlive ? (me.elderLives ?? 2) : null}
             mayorName={players.find((p) => p.id === mayorId && p.isAlive)?.name || null}
             cameraPreset={cameraPreset}
             freeLook360={freeLook360}
             isMicOn={isMicOn && me.isAlive}
-            isDead={!me.isAlive}
+            isDead={!me.isAlive && !nightDeathCinematic}
             isMuted={isMuted}
             onAdjustTimer={(delta) =>
               setTimerSeconds((s) => Math.max(0, Math.min(600, s + delta)))
@@ -5962,29 +6056,29 @@ export default function App() {
               >
                 <span>
                   <strong className="text-[#f5b82e]">WASD</strong>{' '}
-                  {tr(lang, { vi: 'Đứng dậy & Đi', en: 'Stand & Walk', fr: 'Marcher', es: 'Caminar', ja: '歩く' })}
+                  {tr(lang, { vi: 'Đứng dậy & Đi', en: 'Stand & Walk',})}
                 </span>
                 <span className="opacity-40">·</span>
                 <span>
                   <strong className="text-[#f5b82e]">
-                    {tr(lang, { vi: 'Kéo chuột', en: 'Drag', fr: 'Glisser', es: 'Arrastrar', ja: 'ドラッグ' })}
+                    {tr(lang, { vi: 'Kéo chuột', en: 'Drag',})}
                   </strong>{' '}
-                  {tr(lang, { vi: 'Xoay 360°', en: 'Look 360°', fr: 'Vue 360°', es: 'Mirar 360°', ja: '360°視点' })}
+                  {tr(lang, { vi: 'Xoay 360°', en: 'Look 360°',})}
                 </span>
                 <span className="opacity-40">·</span>
                 <span>
                   <strong className="text-[#f5b82e]">Shift</strong>{' '}
-                  {tr(lang, { vi: 'Chạy nhanh', en: 'Sprint', fr: 'Courir', es: 'Correr', ja: '走る' })}
+                  {tr(lang, { vi: 'Chạy nhanh', en: 'Sprint',})}
                 </span>
                 <span className="opacity-40">·</span>
                 <span>
                   <strong className="text-[#f5b82e]">Space</strong>{' '}
-                  {tr(lang, { vi: 'Nhảy', en: 'Jump', fr: 'Sauter', es: 'Saltar', ja: 'ジャンプ' })}
+                  {tr(lang, { vi: 'Nhảy', en: 'Jump',})}
                 </span>
                 <span className="opacity-40">·</span>
                 <span>
                   <strong className="text-[#f5b82e]">X</strong>{' '}
-                  {tr(lang, { vi: 'Về ghế', en: 'Sit', fr: 'S’asseoir', es: 'Sentarse', ja: '座る' })}
+                  {tr(lang, { vi: 'Về ghế', en: 'Sit',})}
                 </span>
               </div>
             )}
@@ -6823,9 +6917,6 @@ export default function App() {
               >
                 <option value="vi">🇻🇳 Tiếng Việt</option>
                 <option value="en">🇬🇧 English</option>
-                <option value="fr">🇫🇷 Français</option>
-                <option value="es">🇪🇸 Español</option>
-                <option value="ja">🇯🇵 日本語</option>
               </select>
 
               <div className="flex items-center gap-1.5">

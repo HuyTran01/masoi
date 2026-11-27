@@ -324,6 +324,11 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     deathCinematicElapsed: 0,
     // Active Keyboard WASD + Movement Modifiers state
     keysPressed: new Set<string>(),
+    debugScenarioOverride: null as {
+      phase?: 'night' | 'day_discussion' | 'day_voting';
+      deadIndices?: number[];
+      biome?: AgrouMapBiome;
+    } | null,
   });
 
   useEffect(() => {
@@ -339,13 +344,17 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     const prevTitleScreen = stateRef.current.isTitleScreen;
     const prevAllowTitleOrbit = stateRef.current.allowTitleOrbit;
     const prevUserPlayerId = stateRef.current.userPlayerId;
+    const dbg = stateRef.current.debugScenarioOverride;
+    const deadSet = dbg ? new Set(dbg.deadIndices ?? [0, 3]) : null;
     stateRef.current = {
       ...stateRef.current,
-      players,
+      players: deadSet
+        ? players.map((p, idx) => ({ ...p, isAlive: !deadSet.has(idx) }))
+        : players,
       userPlayerId,
-      phase,
-      isTitleScreen,
-      isPlayerAwakeAtNight,
+      phase: dbg?.phase ?? phase,
+      isTitleScreen: dbg ? false : isTitleScreen,
+      isPlayerAwakeAtNight: dbg ? true : isPlayerAwakeAtNight,
       freeLook360,
       moveVector,
       thrownProps,
@@ -359,10 +368,10 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       cameraPreset,
       activePropTool,
       fpvLookTurnRate,
-      mapBiome,
+      mapBiome: dbg?.biome ?? mapBiome,
       mayorId,
       emoteEvents,
-      deathCinematic,
+      deathCinematic: dbg ? null : deathCinematic,
       activeNightScene,
       wakingActorIds,
       returnToSeatTrigger,
@@ -590,7 +599,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     }
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.16;
+    renderer.toneMappingExposure = 0.92;
     renderer.setPixelRatio(isSoftwareGl ? 1 : Math.min(window.devicePixelRatio, 2));
     renderer.shadowMap.enabled = !isSoftwareGl;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -613,19 +622,19 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
     const initialBiome = stateRef.current.mapBiome || 'forest';
     const initialSky = AGROU_BIOMES[initialBiome].daySky;
     scene.background = new THREE.Color(initialSky);
-    scene.fog = new THREE.FogExp2(initialSky, initialBiome === 'forest' ? 0.0195 : 0.0085);
+    scene.fog = new THREE.FogExp2(initialSky, initialBiome === 'forest' ? 0.0165 : 0.0072);
 
     const camera = new THREE.PerspectiveCamera(46, width / height, 0.12, 240);
     camera.position.set(0, 6.4, 15.2);
     camera.lookAt(0, 1.25, -1.2);
     scene.add(camera);
 
-    // Subtle Studio Environment Reflection Map (Skipped in software GL to prevent tab OOM/crash on rapid transitions)
+    // Subtle Studio Environment Reflection Map (kept low so matte snow, canvas tents & stone never glare!)
     if (!isSoftwareGl) {
       try {
         const pmremGenerator = new THREE.PMREMGenerator(renderer);
         scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-        scene.environmentIntensity = 0.42;
+        scene.environmentIntensity = 0.16;
         pmremGenerator.dispose();
       } catch {
         // Skip reflection env map safely if unsupported
@@ -720,16 +729,16 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
 
     fpvRigGroup.add(fpvRightHandGroup);
 
-    // 4. Lighting Rig (Agrou Dramatic Cool Atmospheric Mist vs Warm Sun/Campfire Glow!)
+    // 4. Warm Golden-Hour Storybook Lighting Rig (Golden Sun + Warm Rim Backlight + Cozy Campfire Bounce!)
     const hemiLight = new THREE.HemisphereLight(
       AGROU_BIOMES[initialBiome].dayHemiSky,
       AGROU_BIOMES[initialBiome].dayHemiGround,
-      1.15
+      1.28
     );
     scene.add(hemiLight);
 
-    const dirLight = new THREE.DirectionalLight(AGROU_BIOMES[initialBiome].daySunColor, 1.85);
-    dirLight.position.set(16, 23, 14);
+    const dirLight = new THREE.DirectionalLight(AGROU_BIOMES[initialBiome].daySunColor, 2.05);
+    dirLight.position.set(18, 22, 12);
     if (!isSoftwareGl) {
       dirLight.castShadow = true;
       dirLight.shadow.mapSize.set(2048, 2048);
@@ -739,13 +748,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       dirLight.shadow.camera.right = 24;
       dirLight.shadow.camera.top = 24;
       dirLight.shadow.camera.bottom = -24;
-      dirLight.shadow.bias = -0.0006;
+      dirLight.shadow.bias = -0.0005;
     }
     scene.add(dirLight);
 
-    // Soft cool rim backlight to separate dark redwood trunks & seated adventurer silhouettes
-    const rimLight = new THREE.DirectionalLight(0x7ea6cf, 0.55);
-    rimLight.position.set(-14, 12, -18);
+    // Warm golden rim backlight in daytime / cool lunar rim at night to separate silhouettes cleanly
+    const rimLight = new THREE.DirectionalLight(0xffe0a8, 0.62);
+    rimLight.position.set(-15, 13, -18);
     scene.add(rimLight);
 
     // 5. Build Modular Agrou Environment, Night Action Director & Seated Adventurer Pool
@@ -1244,7 +1253,46 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           return { playerId: seat.playerId, isCampfire: false, isOwnSeat: false };
         }
       }
+      // Screen-space fallback for grazing/crowded circles (e.g. 20p seats #6 and #13):
+      // if the ray barely grazes the cylinder edge, pick the nearest visible seat within 28px of the click.
       const st = stateRef.current;
+      if (!st.isTitleScreen) {
+        const clickX = clientX - rect.left;
+        const clickY = clientY - rect.top;
+        const fallbackMaxPx = st.players.length >= 14 ? 32 : 24;
+        let bestFallbackId: string | null = null;
+        let bestDistSq = fallbackMaxPx * fallbackMaxPx;
+        let bestDepth = Infinity;
+        const tmpScreen = new THREE.Vector3();
+        for (let i = 0; i < MAX_SEATS; i++) {
+          const seat = seats[i];
+          if (!seat || !seat.playerId) continue;
+          if (!seat.group.visible && !seat.ghostGroup.visible) continue;
+          // Project seat torso/chest height (~0.95m above ground)
+          if (seat.group.visible) {
+            tmpScreen.set(seat.currentPos.x, seat.currentPos.y + 0.95, seat.currentPos.z);
+          } else {
+            tmpScreen.copy(seat.ghostPos);
+          }
+          tmpScreen.project(camera);
+          if (tmpScreen.z < -1 || tmpScreen.z > 1) continue;
+          const sx = (tmpScreen.x + 1) * 0.5 * rect.width;
+          const sy = (-tmpScreen.y + 1) * 0.5 * rect.height;
+          const dx = clickX - sx;
+          const dy = clickY - sy;
+          const dSq = dx * dx + dy * dy;
+          if (dSq <= fallbackMaxPx * fallbackMaxPx) {
+            if (tmpScreen.z < bestDepth - 0.004 || (Math.abs(tmpScreen.z - bestDepth) <= 0.004 && dSq < bestDistSq)) {
+              bestDistSq = dSq;
+              bestDepth = tmpScreen.z;
+              bestFallbackId = seat.playerId;
+            }
+          }
+        }
+        if (bestFallbackId) {
+          return { playerId: bestFallbackId, isCampfire: false, isOwnSeat: false };
+        }
+      }
       // Fallback stone-ring campfire check during day_voting so clicking the fire rocks also abstains
       if (
         st.phase === 'day_voting' &&
@@ -1720,7 +1768,38 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             y: Number(camera.position.y.toFixed(2)),
             z: Number(camera.position.z.toFixed(2)),
           },
+          deadSeatsAudit: seats
+            .filter((s) => s.tombstoneGroup.visible)
+            .map((s) => ({
+              playerId: s.playerId,
+              tombstoneVisible: s.tombstoneGroup.visible,
+              bodyVisible: s.bodyGroup.visible,
+              stoolVisible: s.stoolGroup.visible,
+              hipLanternVisible: s.hipLantern.visible,
+              ghostVisible: s.ghostGroup.visible,
+            })),
         };
+      },
+      setDebugScenario: (opts: {
+        phase?: 'night' | 'day_discussion' | 'day_voting';
+        deadIndices?: number[];
+        biome?: AgrouMapBiome;
+      } | null) => {
+        const st = stateRef.current;
+        st.debugScenarioOverride = opts;
+        if (!opts) return;
+        st.isTitleScreen = false;
+        st.deathCinematic = null;
+        if (opts.biome) st.mapBiome = opts.biome;
+        if (opts.phase) {
+          st.phase = opts.phase;
+          st.isPlayerAwakeAtNight = true;
+        }
+        const deadSet = new Set(opts.deadIndices ?? [0, 3]);
+        st.players = st.players.map((p, idx) => ({
+          ...p,
+          isAlive: !deadSet.has(idx),
+        }));
       },
     };
 
@@ -1840,23 +1919,27 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
       hemiLight.color.setHex(isDay ? biome.dayHemiSky : biome.nightHemiSky);
       hemiLight.groundColor.setHex(isDay ? biome.dayHemiGround : biome.nightHemiGround);
       const targetHemi = isDay
-        ? activeBiomeKey === 'forest'
-          ? 1.05
-          : 1.38
+        ? activeBiomeKey === 'frostpeak'
+          ? 0.74
+          : activeBiomeKey === 'forest'
+          ? 0.88
+          : 0.96
         : isNightBlindfolded
         ? 0.015
         : activeDeathCinematic
         ? 0.14
-        : 0.42;
+        : 0.4;
       const targetDir = isDay
-        ? activeBiomeKey === 'forest'
-          ? 1.65
-          : 2.15
+        ? activeBiomeKey === 'frostpeak'
+          ? 1.12
+          : activeBiomeKey === 'forest'
+          ? 1.38
+          : 1.48
         : isNightBlindfolded
         ? 0.0
         : activeDeathCinematic
         ? 0.18
-        : 0.58;
+        : 0.54;
       hemiLight.intensity = isSoftwareGl
         ? targetHemi
         : THREE.MathUtils.damp(hemiLight.intensity, targetHemi, 5.5, dt);
@@ -1864,7 +1947,8 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         ? targetDir
         : THREE.MathUtils.damp(dirLight.intensity, targetDir, 5.5, dt);
       dirLight.color.setHex(isDay ? biome.daySunColor : biome.nightMoonLight);
-      rimLight.intensity = isDay ? 0.52 : isNightBlindfolded ? 0.0 : activeDeathCinematic ? 0.22 : 0.35;
+      rimLight.color.setHex(isDay ? 0xffe0a8 : 0x7ea6cf);
+      rimLight.intensity = isDay ? 0.62 : isNightBlindfolded ? 0.0 : activeDeathCinematic ? 0.22 : 0.36;
 
       // Update Procedural Agrou Environment (Terrain, Sky Dome, River, Redwoods, Campfire, Fireflies/Embers)
       envHandle.update({
@@ -2224,6 +2308,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.group.visible = false;
           seat.seatAnchorGroup.visible = false;
           seat.ghostGroup.visible = false;
+          seat.ghostGroundRune.visible = false;
           seat.playerId = '';
           seat.hitbox.userData.playerId = '';
           seat.ghostGroup.userData.playerId = '';
@@ -2236,6 +2321,8 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         seat.hitbox.userData.playerId = p.id;
         seat.ghostGroup.userData.playerId = p.id;
         seat.ghostHitbox.userData.playerId = p.id;
+        const hitboxXZScale = count >= 14 ? 1.24 : 1.0;
+        seat.hitbox.scale.set(hitboxXZScale, 1.08, hitboxXZScale);
         const isMe = p.id === st.userPlayerId;
 
         const angle = Math.PI / 2 + (i / count) * Math.PI * 2;
@@ -2634,8 +2721,13 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         const standingHeadOffset = THREE.MathUtils.lerp(1.72, 2.02, seat.standFactor) - seat.crouchBlend * 0.25 + seat.yOffset;
         seat.worldPos.set(seat.currentPos.x, groundY + standingHeadOffset, seat.currentPos.z);
 
-        // Hide own 3rd-person body mesh in First-Person View so camera is unobstructed
-        seat.bodyGroup.visible = !(isMe && isFirstPerson);
+        // Hide 3D adventurer body, wooden stool, shadow disc & hip lantern once dead (after any death cinematic finishes)
+        // so ONLY the sculpted mossy tombstone stands at the seat while their spirit floats above!
+        const showLivingOrDyingBody = p.isAlive || isDeathVictim;
+        seat.bodyGroup.visible = showLivingOrDyingBody && !(isMe && isFirstPerson);
+        seat.stoolGroup.visible = showLivingOrDyingBody;
+        seat.shadowDisc.visible = showLivingOrDyingBody;
+        seat.hipLantern.visible = p.isAlive;
 
         // Sync Custom Agrou Hat, Cloak Color (with wet water sheen) & Floating Golden Mayor Crown
         const fallbackCosm = getBotCosmetics(i);
@@ -2687,13 +2779,23 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         );
 
         seat.tombstoneGroup.visible = !p.isAlive && !activeDeathCinematic && !(isMe && isFirstPerson);
+        if (seat.tombstoneGroup.visible) {
+          const tombCloakHex = p.cloakColor ?? fallbackCosm.cloakColor;
+          seat.syncTombstonePortrait(tombCloakHex, activeHat);
+          const tombHat: AgrouHatId = activeHat === 'none' ? 'witch' : activeHat;
+          (Object.keys(seat.tombstoneHatVariants) as AgrouHatId[]).forEach((hk) => {
+            seat.tombstoneHatVariants[hk].visible = hk === tombHat;
+          });
+          seat.tombstoneRuneRing.visible = false;
+          seat.tombstoneMistMesh.visible = false;
+        }
         seat.lanternMat.emissiveIntensity = p.isAlive
           ? isNightBlindfolded
             ? 0.08
             : isWakingActor
-            ? 1.95
-            : 1.4
-          : 0.05;
+            ? 1.55
+            : 1.05
+          : 0.0;
 
         if (seat.reactionTimer > 0 && p.isAlive) {
           seat.reactionTimer = Math.max(0, seat.reactionTimer - simDt);
@@ -3077,14 +3179,20 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         if (!p.isAlive && !st.isTitleScreen && !activeDeathCinematic && !isNightBlindfolded) {
           seat.ghostGroup.visible = !(isMe && isFirstPerson);
 
-          // Initialize ghost position right above this player's own seat/tombstone once upon death
+          // Initialize ghost position right beside/behind this player's tombstone so both the tombstone and spirit are clearly readable!
           if (!seat.ghostInitialized) {
-            seat.ghostPos.set(hx, homeGroundY + 1.55, hz);
+            const seatAngle = Math.atan2(hz, hx);
+            const sideAngle = seatAngle - 0.34;
+            const spawnR = Math.hypot(hx, hz) + 0.45;
+            const gx = Math.cos(sideAngle) * spawnR;
+            const gz = Math.sin(sideAngle) * spawnR;
+            const gY = sampleTerrainHeight(gx, gz, activeBiomeKey);
+            seat.ghostPos.set(gx, gY + 0.38, gz);
             seat.ghostVelocity.x = 0;
             seat.ghostVelocity.z = 0;
-            seat.ghostHoverHeight = 1.55;
-            seat.ghostFacingYaw = Math.atan2(-hx, -hz);
-            seat.ghostWanderTarget = { x: hx, z: hz };
+            seat.ghostHoverHeight = 0.38;
+            seat.ghostFacingYaw = Math.atan2(-gx, -gz);
+            seat.ghostWanderTarget = { x: gx, z: gz };
             seat.ghostWanderWaitTimer = 0.8 + (i % 5) * 0.55;
             seat.ghostInitialized = true;
           }
@@ -3163,6 +3271,12 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.ghostGroup.position.copy(seat.ghostPos);
           seat.ghostGroup.rotation.y = seat.ghostFacingYaw;
 
+          // Update Fresnel Ghost Shader animation (no ground halo beneath ghosts)
+          for (let sm = 0; sm < seat.ghostShaderMats.length; sm++) {
+            seat.ghostShaderMats[sm].uniforms.uTime.value = elapsedTotal + i * 0.9;
+          }
+          seat.ghostGroundRune.visible = false;
+
           // Subtle ethereal ghost animation (undulating tail, orbiting motes, floating arms, flight lean)
           const ghostHorizSpeed = isMe
             ? Math.hypot(seat.ghostVelocity.x, seat.ghostVelocity.z)
@@ -3186,6 +3300,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           seat.worldPos.set(seat.ghostPos.x, seat.ghostPos.y + 1.98, seat.ghostPos.z);
         } else {
           seat.ghostGroup.visible = false;
+          seat.ghostGroundRune.visible = false;
           if (p.isAlive) {
             seat.ghostInitialized = false;
             seat.ghostVelocity.x = 0;
@@ -3211,23 +3326,30 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         const isHovered =
           st.hoveredPlayerId === p.id || (isDirectLook && st.aimedPlayerId === p.id);
 
-        if (isSelected) {
-          seat.haloMat.color.setHex(isVotingPhase ? 0xf5b82e : 0xe86f24);
-          seat.haloMat.opacity = 0.92;
-        } else if (isHovered) {
-          seat.haloMat.color.setHex(0xfbbf24);
-          seat.haloMat.opacity = 0.85;
-        } else if (isWakingActor) {
-          seat.haloMat.color.setHex(0xfde68a);
-          seat.haloMat.opacity = 0.56 + Math.sin(elapsedTotal * 3.6 + i) * 0.2;
-        } else if (isMayor) {
-          seat.haloMat.color.setHex(0xf59e0b);
-          seat.haloMat.opacity = 0.62;
-        } else if (isMe && !st.isTitleScreen) {
-          seat.haloMat.color.setHex(0x38bdf8);
-          seat.haloMat.opacity = 0.55;
-        } else {
+        seat.haloRing.visible = p.isAlive && !isNightBlindfolded;
+        if (!p.isAlive || isNightBlindfolded) {
           seat.haloMat.opacity = 0.0;
+        } else if (isSelected) {
+          seat.haloMat.color.setHex(isVotingPhase ? 0xffe478 : 0xff9b35);
+          seat.haloMat.opacity = 0.85;
+        } else if (isHovered) {
+          seat.haloMat.color.setHex(0xffe066);
+          seat.haloMat.opacity = 0.78;
+        } else if (isWakingActor) {
+          seat.haloMat.color.setHex(0xfef08a);
+          seat.haloMat.opacity = 0.62 + Math.sin(elapsedTotal * 3.6 + i) * 0.12;
+        } else if (isMayor) {
+          seat.haloMat.color.setHex(0xffd24c);
+          seat.haloMat.opacity = 0.68;
+        } else if (isMe && !st.isTitleScreen) {
+          seat.haloMat.color.setHex(0xffe37a);
+          seat.haloMat.opacity = 0.62;
+        } else if (!st.isTitleScreen) {
+          seat.haloMat.color.setHex(0xf5b83d);
+          seat.haloMat.opacity = 0.46 + Math.sin(elapsedTotal * 1.8 + i) * 0.04;
+        } else {
+          seat.haloMat.color.setHex(0xf5b83d);
+          seat.haloMat.opacity = 0.42;
         }
       }
 
@@ -3787,6 +3909,15 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
         lastLabelSync = nowMs;
         const cW = container.clientWidth;
         const cH = container.clientHeight;
+        const isDenseCircle = activePlayers.length >= 14;
+        const projectedLabels: Array<{
+          el: HTMLDivElement;
+          sx: number;
+          sy: number;
+          depth: number;
+          scale: number;
+          priority: number;
+        }> = [];
 
         for (let i = 0; i < MAX_SEATS; i++) {
           const el = labelElsRef.current[i];
@@ -3808,11 +3939,59 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
           if (_projVec.z >= -1 && _projVec.z <= 1) {
             const sx = (_projVec.x + 1) * 0.5 * cW;
             const sy = (-_projVec.y + 1) * 0.5 * cH;
-            el.style.display = 'flex';
-            el.style.transform = `translate3d(${Math.round(sx)}px, ${Math.round(sy)}px, 0) translate(-50%, -100%)`;
+            const camDist = camera.position.distanceTo(seat.worldPos);
+            const scale = isDenseCircle
+              ? Math.max(0.74, Math.min(1.0, 12.2 / Math.max(7.5, camDist)))
+              : 1.0;
+            const isSelectedSeat =
+              seat.playerId === st.selectedTargetId || seat.playerId === st.secondaryTargetId;
+            projectedLabels.push({
+              el,
+              sx,
+              sy,
+              depth: _projVec.z,
+              scale,
+              priority: isSelectedSeat ? 2 : isMeLabel ? 1 : 0,
+            });
           } else {
             el.style.display = 'none';
           }
+        }
+
+        // Front-to-back vertical overlap de-collision pass so 14-20p distant nameplates stay readable
+        if (isDenseCircle && projectedLabels.length > 1) {
+          projectedLabels.sort((a, b) => (b.priority - a.priority) || (a.depth - b.depth));
+          const placed: Array<{ sx: number; sy: number; w: number; h: number }> = [];
+          for (const item of projectedLabels) {
+            const boxW = Math.round(96 * item.scale);
+            const boxH = Math.round(24 * item.scale);
+            let adjY = item.sy;
+            for (let pass = 0; pass < 3; pass++) {
+              let collided = false;
+              for (const other of placed) {
+                if (
+                  Math.abs(item.sx - other.sx) < (boxW + other.w) * 0.48 &&
+                  Math.abs(adjY - other.sy) < (boxH + other.h) * 0.56
+                ) {
+                  adjY = other.sy - (boxH + 3);
+                  collided = true;
+                  break;
+                }
+              }
+              if (!collided) break;
+            }
+            item.sy = Math.max(44, Math.min(cH - 24, adjY));
+            placed.push({ sx: item.sx, sy: item.sy, w: boxW, h: boxH });
+          }
+        }
+
+        for (const item of projectedLabels) {
+          item.el.style.display = 'flex';
+          item.el.style.zIndex = String(item.priority > 0 ? 30 : Math.max(1, Math.round((1 - item.depth) * 20)));
+          item.el.style.transform =
+            item.scale < 0.99
+              ? `translate3d(${Math.round(item.sx)}px, ${Math.round(item.sy)}px, 0) translate(-50%, -100%) scale(${item.scale.toFixed(2)})`
+              : `translate3d(${Math.round(item.sx)}px, ${Math.round(item.sy)}px, 0) translate(-50%, -100%)`;
         }
 
         const cfEl = campfireLabelRef.current;
@@ -4054,27 +4233,27 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
                 </div>
               )}
 
-              {/* Ghost Soul Indicator if dead */}
-              {!p.isAlive && (
-                <div className="px-1.5 py-0.5 rounded-lg bg-[#0d2838] border border-[#67e8f9]/60 text-[#cffafe] font-bold text-[8px] sm:text-[9px] shadow leading-none">
+              {/* Ghost Soul Indicator if dead (hidden while death cinematic is playing) */}
+              {!p.isAlive && !deathCinematic && (
+                <div className="px-2 py-0.5 rounded-lg bg-[#102d3f]/92 border border-[#72e6ff]/70 text-[#d8f8ff] font-bold text-[8px] sm:text-[9px] shadow-md leading-none">
                   {t.ghostFloatingBadge}
                 </div>
               )}
 
-              {/* Warm Carved-Wood Agrou Nameplate */}
+              {/* Warm Storybook Wood Nameplate */}
               <div
-                className={`px-2 py-0.5 rounded-lg border text-center shadow-lg ${
+                className={`px-2.5 py-0.5 rounded-xl border text-center shadow-lg ${
                   !p.isAlive
-                    ? 'bg-[#1a1614]/88 border-[#67e8f9]/45 text-[#a5f3fc]/80'
+                    ? 'bg-[#191614]/90 border-[#72e6ff]/50 text-[#c6f5ff]/90'
                     : isSelected
                     ? phase === 'day_voting'
-                      ? 'bg-[#362312]/95 border-[#f5b82e] text-[#fef3c7] scale-105'
+                      ? 'bg-[#362312]/95 border-[#ffd15c] text-[#fef3c7] scale-105'
                       : 'bg-[#5c1d16]/95 border-[#f97316] text-[#fff7ed] scale-105'
                     : isMayor
-                    ? 'bg-[#362312]/95 border-[#f5b82e] text-[#fef3c7]'
+                    ? 'bg-[#332111]/95 border-[#ffd15c] text-[#fef3c7]'
                     : isMe
                     ? 'bg-[#1b2d3c]/95 border-[#60a5fa] text-[#eff6ff]'
-                    : 'bg-[#261a12]/90 border-[#9c7248]/65 text-[#f6ebd8]'
+                    : 'bg-[#221710]/92 border-[#b5874c]/65 text-[#f7ecd9]'
                 }`}
               >
                 <div className="flex items-center gap-0.5 sm:gap-1 text-[9px] sm:text-[11px] font-bold whitespace-nowrap leading-tight">
@@ -4085,8 +4264,11 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
                   {isSpeaking && <span className="text-[#4ade80]">🔊</span>}
                 </div>
                 {showRole && (
-                  <div className="text-[8px] sm:text-[9px] font-mono text-[#fcd34d] font-semibold leading-tight">
-                    {ROLES[p.roleId].name[lang]}
+                  <div className="text-[8px] sm:text-[9px] font-mono text-[#fcd34d] font-semibold leading-tight flex items-center justify-center gap-1">
+                    <span>{ROLES[p.roleId].name[lang]}</span>
+                    {isMe && p.roleId === 'elder' && p.isAlive && (
+                      <span className="text-rose-300">❤️ {p.elderLives ?? 2}/2</span>
+                    )}
                   </div>
                 )}
               </div>

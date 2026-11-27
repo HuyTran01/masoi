@@ -35,7 +35,7 @@ export interface QATestCase {
 }
 
 const ALL_ROLES = Object.keys(ROLES) as RoleId[];
-const ALL_LANGS: Language[] = ['vi', 'en', 'fr', 'es', 'ja'];
+const ALL_LANGS: Language[] = ['vi', 'en'];
 const ALL_PROPS: PropType[] = ['tomato', 'egg', 'water', 'rose'];
 
 /**

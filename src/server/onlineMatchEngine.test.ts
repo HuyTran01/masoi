@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
+import WebSocket from 'ws';
 import { RealtimeRoomManager } from './realtimeRooms.ts';
+import { createRealtimeAppServer } from './realtimeServer.ts';
 import { CAMPFIRE_ABSTAIN_ID } from '../game/agrouMechanics.ts';
 
 test('OnlineMatchEngine enforces strict zero-leak per-viewer projections across all roles and Ghost chat', () => {
@@ -893,3 +898,521 @@ test('Host cannot skip own unconfirmed Wolf step and stale expectedStepIndex is 
   assert.equal(validAdv.ok, true);
   assert.equal(mgr.getMatchState('HOST-WOLF')!.nightStepIndex, 2);
 });
+
+test('[Wave 0 Online] Hunter timeout at 0s sets hunterTargetId=null (no shot on night death), day lynch never fires, and night steps have uniform duration', () => {
+  const mgr = new RealtimeRoomManager();
+  let clock = 1_700_900_000_000;
+  mgr.createOrJoinRoom(
+    'WAVE0-ONL',
+    { id: 'u_host', name: 'Host', avatar: '🧑‍🌾', elo: 1500 },
+    { villageSize: 5, timerConfig: { nightActionSec: 17, dayDiscussSec: 45, dayVoteSec: 25 } }
+  );
+  mgr.createOrJoinRoom('WAVE0-ONL', { id: 'u_hunter', name: 'Thợ Săn', avatar: '🎯', elo: 1500 });
+  mgr.createOrJoinRoom('WAVE0-ONL', { id: 'u_wolf', name: 'Sói', avatar: '🐺', elo: 1500 });
+  mgr.fillBots('WAVE0-ONL', 'u_host');
+  const bots = mgr.getRoom('WAVE0-ONL')!.participants.filter((p) => p.isBot).map((p) => p.id);
+
+  assert.equal(
+    mgr.startMatch('WAVE0-ONL', 'u_host', {
+      now: clock,
+      customRoles: {
+        u_host: 'villager',
+        u_hunter: 'hunter',
+        u_wolf: 'werewolf',
+        [bots[0]]: 'bodyguard',
+        [bots[1]]: 'seer',
+      },
+    }).ok,
+    true
+  );
+
+  const match = mgr.getMatchState('WAVE0-ONL')!;
+  // Give Hunter a stale prior mark to prove 0s timeout clears it via hunterTargetId = null
+  match.players.find((p) => p.id === 'u_hunter')!.hunterMarkId = 'u_host';
+
+  // Step 0: bot Bodyguard -> duration must equal 17s
+  assert.equal(match.nightSchedule[match.nightStepIndex]?.key, 'bodyguard');
+  assert.equal(match.phaseEndsAt - match.phaseStartedAt, 17_000, 'Bot step must use uniform nightActionSec');
+
+  // Step 1: human Hunter -> duration must equal 17s; let it time out without sending hunter_mark
+  clock = match.phaseEndsAt;
+  assert.equal(mgr.tickRoom('WAVE0-ONL', clock).changed, true);
+  assert.equal(match.nightSchedule[match.nightStepIndex]?.key, 'hunter');
+  assert.equal(match.phaseEndsAt - match.phaseStartedAt, 17_000, 'Human step must use uniform nightActionSec');
+
+  // Timeout on Hunter step -> hunterTargetId MUST be explicitly set to null
+  clock = match.phaseEndsAt;
+  assert.equal(mgr.tickRoom('WAVE0-ONL', clock).changed, true);
+  assert.equal(match.nightActions.hunterTargetId, null, 'Timed-out human Hunter must resolve to explicit null (No Mark)');
+
+  // Step 2: human Werewolf -> let wolf bite bot Bodyguard (not Hunter) so Hunter survives into Day 1
+  assert.equal(match.nightSchedule[match.nightStepIndex]?.key, 'werewolf');
+  assert.equal(match.phaseEndsAt - match.phaseStartedAt, 17_000);
+  // Make sure bot Bodyguard did not self-shield so it dies cleanly on Night 1
+  match.nightActions.guardTargetId = bots[1];
+  assert.equal(
+    mgr.submitNightAction('WAVE0-ONL', 'u_wolf', { actionType: 'wolf_bite', targetId: bots[0] }, clock + 50).ok,
+    true
+  );
+  assert.equal(
+    mgr.submitNightAction('WAVE0-ONL', 'u_wolf', { actionType: 'confirm_done' }, clock + 100).ok,
+    true
+  );
+
+  // Step 3: bot Seer -> uniform 17s
+  assert.equal(match.nightSchedule[match.nightStepIndex]?.key, 'seer');
+  assert.equal(match.phaseEndsAt - match.phaseStartedAt, 17_000);
+
+  // Advance to Dawn -> u_hunter's prior mark was cleared by timeout (undefined)
+  clock = match.phaseEndsAt;
+  assert.equal(mgr.tickRoom('WAVE0-ONL', clock).changed, true);
+  assert.equal(match.phase, 'day_discussion');
+  assert.equal(match.players.find((p) => p.id === 'u_hunter')?.hunterMarkId, undefined);
+  assert.equal(match.players.find((p) => p.id === bots[0])?.isAlive, false);
+
+  // Set a mark on u_hunter and lynch u_hunter during Day 1 -> marked target MUST survive!
+  match.players.find((p) => p.id === 'u_hunter')!.hunterMarkId = 'u_wolf';
+  clock += 100;
+  assert.equal(mgr.advancePhase('WAVE0-ONL', 'u_host', clock).ok, true); // -> day_voting
+  assert.equal(match.phase, 'day_voting');
+  assert.equal(mgr.castVote('WAVE0-ONL', 'u_host', 'u_hunter').ok, true);
+  assert.equal(mgr.castVote('WAVE0-ONL', 'u_wolf', 'u_hunter').ok, true);
+  assert.equal(mgr.castVote('WAVE0-ONL', 'u_hunter', 'u_wolf').ok, true);
+  assert.equal(mgr.advancePhase('WAVE0-ONL', 'u_host', clock + 50).ok, true); // -> Dusk -> Night 2
+
+  assert.equal(match.players.find((p) => p.id === 'u_hunter')?.isAlive, false);
+  assert.equal(match.players.find((p) => p.id === 'u_wolf')?.isAlive, true, 'Lynching Hunter online must NOT shoot marked target');
+  assert.equal(match.players.find((p) => p.id === 'u_hunter')?.hunterMarkId, undefined);
+
+  // Night 2 step 0 is dead Bodyguard (gets +8s dusk announcement grace = 25s);
+  // Night 2 step 1 is dead Hunter (hasLivingActor === false) and step 2 is living Werewolf -> BOTH MUST be identical 17s!
+  assert.equal(match.phase, 'night');
+  assert.equal(match.round, 2);
+  assert.equal(match.nightSchedule[match.nightStepIndex]?.key, 'bodyguard');
+  assert.equal(match.nightSchedule[match.nightStepIndex]?.hasLivingActor, false);
+
+  clock = match.phaseEndsAt;
+  assert.equal(mgr.tickRoom('WAVE0-ONL', clock).changed, true);
+  assert.equal(match.nightSchedule[match.nightStepIndex]?.key, 'hunter');
+  assert.equal(match.nightSchedule[match.nightStepIndex]?.hasLivingActor, false);
+  const deadStepMs = match.phaseEndsAt - match.phaseStartedAt;
+  assert.equal(deadStepMs, 17_000, 'Dead-actor night step must have identical duration to living-actor steps');
+
+  clock = match.phaseEndsAt;
+  assert.equal(mgr.tickRoom('WAVE0-ONL', clock).changed, true);
+  assert.equal(match.nightSchedule[match.nightStepIndex]?.key, 'werewolf');
+  assert.equal(match.nightSchedule[match.nightStepIndex]?.hasLivingActor, true);
+  assert.equal(match.phaseEndsAt - match.phaseStartedAt, deadStepMs, 'Living and dead night steps must share exact duration');
+});
+
+test('[Wave 1 + Wave 4] Online per-viewer vi/en announcements & death cinematics + extra 5000ms Dawn grace on deaths', () => {
+  const mgr = new RealtimeRoomManager();
+  let clock = 1_701_200_000_000;
+
+  // Room with one Vietnamese viewer (u_vi) and one English viewer (u_en)
+  mgr.createOrJoinRoom(
+    'LANG-ROOM',
+    { id: 'u_vi', name: 'Minh', avatar: '🐺', elo: 1500 },
+    { villageSize: 5, timerConfig: { nightActionSec: 15, dayDiscussSec: 40, dayVoteSec: 20 }, lang: 'vi' }
+  );
+  mgr.createOrJoinRoom(
+    'LANG-ROOM',
+    { id: 'u_en', name: 'Alex', avatar: '🧑‍🌾', elo: 1500 },
+    { lang: 'en' }
+  );
+  mgr.createOrJoinRoom('LANG-ROOM', { id: 'u_wolf', name: 'Wolf', avatar: '🐺', elo: 1500 }, { lang: 'vi' });
+  mgr.fillBots('LANG-ROOM', 'u_vi');
+  const bots = mgr.getRoom('LANG-ROOM')!.participants.filter((p) => p.isBot).map((p) => p.id);
+
+  assert.equal(
+    mgr.startMatch('LANG-ROOM', 'u_vi', {
+      now: clock,
+      customRoles: {
+        u_vi: 'villager',
+        u_en: 'villager',
+        u_wolf: 'werewolf',
+        [bots[0]]: 'seer',
+        [bots[1]]: 'villager',
+      },
+    }).ok,
+    true
+  );
+
+  const match = mgr.getMatchState('LANG-ROOM')!;
+  // Step 0: Werewolf bites u_en (English viewer) so u_en gets a night death cinematic
+  assert.equal(match.nightSchedule[0]?.key, 'werewolf');
+  assert.equal(mgr.submitNightAction('LANG-ROOM', 'u_wolf', { actionType: 'wolf_bite', targetId: 'u_en' }, clock + 50).ok, true);
+  assert.equal(mgr.submitNightAction('LANG-ROOM', 'u_wolf', { actionType: 'confirm_done' }, clock + 100).ok, true);
+
+  // Step 1: bot Seer -> tick to Dawn
+  clock = match.phaseEndsAt;
+  assert.equal(mgr.tickRoom('LANG-ROOM', clock).changed, true);
+  assert.equal(match.phase, 'day_discussion');
+
+  // Wave 4 Dawn grace: 40s dayDiscussSec + 8s ANNOUNCEMENT_GRACE_MS + 5s death cinematic grace = 53s
+  assert.equal(
+    match.phaseEndsAt - match.phaseStartedAt,
+    40_000 + 8_000 + 5_000,
+    'Dawn with victims must include +5000ms extra grace for death cinematic'
+  );
+
+  // Wave 1 Per-viewer language: u_vi receives Vietnamese Dawn announcement, u_en receives English Dawn announcement & English death cinematic
+  const viView = mgr.getMatchViewForUser('LANG-ROOM', 'u_vi', clock + 10)!;
+  const enView = mgr.getMatchViewForUser('LANG-ROOM', 'u_en', clock + 10)!;
+  assert.ok(viView.announcement);
+  assert.ok(enView.announcement);
+  assert.match(viView.announcement.headline, /Đêm qua|thiệt mạng|Bình minh/i);
+  assert.match(enView.announcement.headline, /Last night|killed|eliminated|Dawn|fell/i);
+  assert.notEqual(viView.announcement.headline, enView.announcement.headline);
+  assert.ok(enView.deathCinematic, 'Killed viewer receives death cinematic');
+  assert.match(enView.deathCinematic.reasonText, /wolf|werewolf|devoured|eliminated|mauled|night|bitten/i);
+
+  // Switching u_en to 'vi' dynamically refreshes view in Vietnamese
+  mgr.setParticipantLang('LANG-ROOM', 'u_en', 'vi');
+  const switchedView = mgr.getMatchViewForUser('LANG-ROOM', 'u_en', clock + 20)!;
+  assert.match(switchedView.announcement!.headline, /Đêm qua|thiệt mạng|Bình minh/i);
+  assert.match(switchedView.deathCinematic!.reasonText, /Sói|cắn|đêm|hạ sát|gục/i);
+  // Switch back to 'en' before voting Dusk check
+  mgr.setParticipantLang('LANG-ROOM', 'u_en', 'en');
+
+  // Advance to voting & tie/skip (no lynch) -> Dusk announcement localized per viewer
+  clock += 100;
+  assert.equal(mgr.advancePhase('LANG-ROOM', 'u_vi', clock).ok, true);
+  assert.equal(match.phase, 'day_voting');
+  assert.equal(mgr.advancePhase('LANG-ROOM', 'u_vi', clock + 100).ok, true);
+  assert.equal(match.phase, 'night');
+  const viDusk = mgr.getMatchViewForUser('LANG-ROOM', 'u_vi', clock + 110)!.announcement!;
+  const enDusk = mgr.getMatchViewForUser('LANG-ROOM', 'u_en', clock + 110)!.announcement!;
+  assert.match(viDusk.headline, /Hoàng hôn|không treo cổ|bình yên|Không ai|Hòa phiếu/i);
+  assert.match(enDusk.headline, /Dusk|No Execution|Spared|Tie|Nobody|No one/i);
+  assert.notEqual(viDusk.headline, enDusk.headline);
+});
+
+test('[Wave 4] Peaceful Dawn without deaths does NOT add extra +5000ms death cinematic grace', () => {
+  const mgr = new RealtimeRoomManager();
+  let clock = 1_701_300_000_000;
+  mgr.createOrJoinRoom(
+    'PEACE-DAWN',
+    { id: 'u_host', name: 'Host', avatar: '🛡️', elo: 1500 },
+    { villageSize: 5, timerConfig: { nightActionSec: 15, dayDiscussSec: 40, dayVoteSec: 20 } }
+  );
+  mgr.createOrJoinRoom('PEACE-DAWN', { id: 'u_wolf', name: 'Wolf', avatar: '🐺', elo: 1500 });
+  mgr.fillBots('PEACE-DAWN', 'u_host');
+  const bots = mgr.getRoom('PEACE-DAWN')!.participants.filter((p) => p.isBot).map((p) => p.id);
+
+  assert.equal(
+    mgr.startMatch('PEACE-DAWN', 'u_host', {
+      now: clock,
+      customRoles: {
+        u_host: 'bodyguard',
+        u_wolf: 'werewolf',
+        [bots[0]]: 'seer',
+        [bots[1]]: 'villager',
+        [bots[2]]: 'villager',
+      },
+    }).ok,
+    true
+  );
+  const match = mgr.getMatchState('PEACE-DAWN')!;
+  // Bodyguard shields bots[1], Wolf bites bots[1] -> peaceful Dawn!
+  assert.equal(mgr.submitNightAction('PEACE-DAWN', 'u_host', { actionType: 'guard', targetId: bots[1] }, clock + 10).ok, true);
+  assert.equal(mgr.submitNightAction('PEACE-DAWN', 'u_host', { actionType: 'confirm_done' }, clock + 20).ok, true);
+  assert.equal(mgr.submitNightAction('PEACE-DAWN', 'u_wolf', { actionType: 'wolf_bite', targetId: bots[1] }, clock + 30).ok, true);
+  assert.equal(mgr.submitNightAction('PEACE-DAWN', 'u_wolf', { actionType: 'confirm_done' }, clock + 40).ok, true);
+  clock = match.phaseEndsAt;
+  assert.equal(mgr.tickRoom('PEACE-DAWN', clock).changed, true);
+
+  assert.equal(match.phase, 'day_discussion');
+  assert.equal(match.phaseEndsAt - match.phaseStartedAt, 40_000 + 8_000, 'Peaceful Dawn gets standard 8000ms grace only');
+});
+
+async function connectTestWs(wsUrl: string): Promise<{
+  ws: WebSocket;
+  messages: Array<Record<string, unknown>>;
+  send: (payload: Record<string, unknown>) => void;
+  waitFor: (predicate: (m: Record<string, unknown>) => boolean, timeoutMs?: number) => Promise<Record<string, unknown>>;
+}> {
+  const ws = new WebSocket(wsUrl);
+  const messages: Array<Record<string, unknown>> = [];
+  const waiters: Array<{
+    predicate: (m: Record<string, unknown>) => boolean;
+    resolve: (m: Record<string, unknown>) => void;
+    reject: (err: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = [];
+
+  ws.on('message', (raw) => {
+    const parsed = JSON.parse(String(raw)) as Record<string, unknown>;
+    messages.push(parsed);
+    for (let i = waiters.length - 1; i >= 0; i--) {
+      if (waiters[i].predicate(parsed)) {
+        const w = waiters.splice(i, 1)[0];
+        clearTimeout(w.timer);
+        w.resolve(parsed);
+      }
+    }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    ws.once('open', () => resolve());
+    ws.once('error', reject);
+  });
+
+  return {
+    ws,
+    messages,
+    send: (payload) => ws.send(JSON.stringify(payload)),
+    waitFor: (predicate, timeoutMs = 4000) => {
+      const existing = messages.find(predicate);
+      if (existing) return Promise.resolve(existing);
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          const idx = waiters.findIndex((w) => w.resolve === resolve);
+          if (idx !== -1) waiters.splice(idx, 1);
+          reject(new Error(`Timed out waiting for WS message (${timeoutMs}ms)`));
+        }, timeoutMs);
+        waiters.push({ predicate, resolve, reject, timer });
+      });
+    },
+  };
+}
+
+test('[Wave 3] Real multi-client HTTP+WS Online match: Night -> Dawn -> Chat -> Concurrent Votes -> Win -> Rematch + Reconnect + Host Grace + Rate Limit + Snapshot', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'masoi-w3-'));
+  const snapshotPath = path.join(tmpDir, 'rooms-snapshot.json');
+  const accountsPath = path.join(tmpDir, 'accounts.json');
+
+  const srv = await createRealtimeAppServer({
+    port: 0,
+    host: '127.0.0.1',
+    accountsDbPath: accountsPath,
+    snapshotPath,
+    enableSnapshots: true,
+    hostDisconnectGraceMs: 300,
+    tickIntervalMs: 80,
+    attachVite: false,
+    quiet: true,
+  });
+
+  try {
+    // 1. 4 real WS clients join room W3LIVE
+    const users = [
+      { id: 'u1', name: 'Host', avatar: '👑', elo: 1600, lang: 'vi' },
+      { id: 'u2', name: 'WolfA', avatar: '🐺', elo: 1550, lang: 'en' },
+      { id: 'u3', name: 'SeerB', avatar: '🔮', elo: 1540, lang: 'vi' },
+      { id: 'u4', name: 'VilC', avatar: '🧑‍🌾', elo: 1500, lang: 'en' },
+    ];
+    const clients = await Promise.all(users.map(() => connectTestWs(srv.wsUrl)));
+    const secrets: Record<string, string> = {};
+
+    for (let i = 0; i < users.length; i++) {
+      clients[i].send({
+        type: 'room:join',
+        code: 'W3LIVE',
+        user: users[i],
+        villageSize: 4,
+        lang: users[i].lang,
+        createIfMissing: i === 0,
+      });
+      const joined = await clients[i].waitFor((m) => m.type === 'room:joined' && m.userId === users[i].id);
+      secrets[users[i].id] = String(joined.playerSecret);
+      assert.ok(secrets[users[i].id].length >= 16);
+    }
+
+    // 2. Host disconnect grace window in WAITING room: brief drop does NOT delete room or transfer host before 300ms
+    clients[0].ws.close();
+    await new Promise((r) => setTimeout(r, 90));
+    const roomDuringGrace = srv.roomManager.getRoom('W3LIVE');
+    assert.ok(roomDuringGrace, 'Waiting room must survive brief host WS drop during grace window');
+    assert.equal(roomDuringGrace.hostId, 'u1', 'Host must remain u1 while inside grace window');
+
+    // Reconnect u1 with playerSecret before grace expires -> cancels transfer!
+    clients[0] = await connectTestWs(srv.wsUrl);
+    clients[0].send({
+      type: 'room:join',
+      code: 'W3LIVE',
+      user: users[0],
+      playerSecret: secrets.u1,
+      createIfMissing: false,
+    });
+    await clients[0].waitFor((m) => m.type === 'room:joined' && m.userId === 'u1');
+    await new Promise((r) => setTimeout(r, 350));
+    assert.equal(srv.roomManager.getRoom('W3LIVE')?.hostId, 'u1', 'Reconnecting before grace expiry preserves original Host');
+
+    // 3. Start match with deterministic custom roles via roomManager + WS play
+    const started = srv.roomManager.startMatch('W3LIVE', 'u1', {
+      customRoles: { u1: 'villager', u2: 'werewolf', u3: 'seer', u4: 'villager' },
+    });
+    assert.equal(started.ok, true);
+
+    // 4. u2 disconnects mid-match and reconnects with playerSecret -> restores full matchView
+    clients[1].ws.close();
+    await new Promise((r) => setTimeout(r, 80));
+    clients[1] = await connectTestWs(srv.wsUrl);
+    clients[1].send({
+      type: 'room:join',
+      code: 'W3LIVE',
+      user: users[1],
+      playerSecret: secrets.u2,
+      createIfMissing: false,
+    });
+    const reconnMatchState = await clients[1].waitFor((m) => m.type === 'room:match_state');
+    const reconnView = reconnMatchState.view as { players: Array<{ id: string; roleId?: string }>; phase: string };
+    assert.equal(
+      reconnView.players.find((p) => p.id === 'u2')?.roleId,
+      'werewolf',
+      'Reconnect via playerSecret must restore authoritative role'
+    );
+    assert.equal(reconnView.phase, 'night');
+
+    // 5. Night 1 via WS: Wolf u2 bites u4 & confirms, Seer u3 inspects u2 & confirms -> Dawn
+    clients[1].send({
+      type: 'room:night_action',
+      code: 'W3LIVE',
+      action: { actionType: 'wolf_bite', targetId: 'u4' },
+    });
+    clients[1].send({
+      type: 'room:night_action',
+      code: 'W3LIVE',
+      action: { actionType: 'confirm_done' },
+    });
+    await clients[2].waitFor(
+      (m) => m.type === 'room:match_state' && (m.view as { currentNightStep?: { key: string } })?.currentNightStep?.key === 'seer'
+    );
+    clients[2].send({
+      type: 'room:night_action',
+      code: 'W3LIVE',
+      action: { actionType: 'seer_inspect', targetId: 'u2' },
+    });
+    clients[2].send({
+      type: 'room:night_action',
+      code: 'W3LIVE',
+      action: { actionType: 'confirm_done' },
+    });
+    await clients[0].waitFor(
+      (m) => m.type === 'room:match_state' && (m.view as { phase?: string })?.phase === 'day_discussion'
+    );
+
+    // 6. Chat rate limit test on WS (burst > 15 messages triggers RATE_LIMITED error)
+    for (let k = 0; k < 17; k++) {
+      clients[0].send({
+        type: 'room:chat',
+        code: 'W3LIVE',
+        message: { id: `burst_${k}`, senderName: 'Host', text: `msg ${k}` },
+      });
+    }
+    const rateLimited = await clients[0].waitFor((m) => m.type === 'error' && m.code === 'RATE_LIMITED');
+    assert.equal(rateLimited.code, 'RATE_LIMITED');
+
+    // 7. Advance to day_voting -> concurrent votes lynch Wolf u2 -> Villagers win -> Rematch!
+    clients[0].send({ type: 'room:advance_phase', code: 'W3LIVE' });
+    await clients[0].waitFor(
+      (m) => m.type === 'room:match_state' && (m.view as { phase?: string })?.phase === 'day_voting'
+    );
+    clients[0].send({ type: 'room:vote', code: 'W3LIVE', targetId: 'u2' });
+    clients[2].send({ type: 'room:vote', code: 'W3LIVE', targetId: 'u2' });
+    clients[1].send({ type: 'room:vote', code: 'W3LIVE', targetId: 'u1' });
+    await new Promise((r) => setTimeout(r, 120));
+    clients[0].send({ type: 'room:advance_phase', code: 'W3LIVE' });
+    const overMsg = await clients[0].waitFor(
+      (m) => m.type === 'room:match_state' && (m.view as { phase?: string })?.phase === 'game_over'
+    );
+    assert.equal(
+      (overMsg.view as { gameResult?: { winner?: string } }).gameResult?.winner,
+      'villagers'
+    );
+
+    // 8. Host drops permanently -> after 300ms grace window, host transfers to u2 (connected human)!
+    clients[0].ws.close();
+    const transferred = await clients[1].waitFor(
+      (m) => m.type === 'room:state' && (m.room as { hostId?: string })?.hostId !== 'u1',
+      2500
+    );
+    const newHostId = String((transferred.room as { hostId?: string }).hostId);
+    assert.ok(['u2', 'u3', 'u4'].includes(newHostId), `Expected host transfer to connected human, got ${newHostId}`);
+
+    // New host restarts match (Rematch)
+    const newHostIdx = users.findIndex((u) => u.id === newHostId);
+    clients[newHostIdx].send({ type: 'room:restart', code: 'W3LIVE' });
+    const rematch = await clients[newHostIdx].waitFor((m) => m.type === 'room:match_started');
+    assert.equal((rematch.room as { status?: string }).status, 'in_match');
+
+    // 9. Flush snapshots & verify a second server instance restores the room cleanly
+    srv.flushSnapshotsNow();
+    for (const c of clients) c.ws.close();
+    await srv.close();
+
+    const srv2 = await createRealtimeAppServer({
+      port: 0,
+      host: '127.0.0.1',
+      accountsDbPath: accountsPath,
+      snapshotPath,
+      enableSnapshots: true,
+      attachVite: false,
+      quiet: true,
+    });
+    try {
+      const restored = srv2.roomManager.getRoom('W3LIVE');
+      assert.ok(restored, 'Server restart must restore W3LIVE room from disk snapshot');
+      assert.equal(restored.status, 'in_match');
+      assert.equal(restored.hostId, newHostId);
+
+      // Verify /api/ai-chat returns graceful fallback when GEMINI_API_KEY is unset
+      const prevKey = process.env.GEMINI_API_KEY;
+      delete process.env.GEMINI_API_KEY;
+      try {
+        const aiRes = await fetch(`${srv2.baseUrl}/api/ai-chat`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            lang: 'vi',
+            round: 1,
+            humanMessage: 'Ai là sói?',
+            bot: { name: 'Minh', seat: 2, persona: 'observer', roleName: 'Dân Làng', faction: 'villager', privateMemory: {} },
+            publicState: { players: [] },
+          }),
+        });
+        assert.equal(aiRes.status, 200);
+        const aiJson = (await aiRes.json()) as { ok: boolean; fallback: boolean; reason: string };
+        assert.equal(aiJson.ok, false);
+        assert.equal(aiJson.fallback, true);
+        assert.equal(aiJson.reason, 'missing_api_key');
+      } finally {
+        if (prevKey !== undefined) process.env.GEMINI_API_KEY = prevKey;
+      }
+    } finally {
+      await srv2.close();
+    }
+  } finally {
+    await srv.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('[Wave 3] Two human Werewolves splitting targets resolve deterministically by lowest seat order on timeout', () => {
+  const mgr = new RealtimeRoomManager();
+  const t0 = 1_701_500_000_000;
+  mgr.createOrJoinRoom('WOLF-TIE', { id: 'w1', name: 'Wolf 1', avatar: '🐺', elo: 1500 }, { villageSize: 6 });
+  mgr.createOrJoinRoom('WOLF-TIE', { id: 'w2', name: 'Wolf 2', avatar: '🐺', elo: 1500 });
+  mgr.createOrJoinRoom('WOLF-TIE', { id: 'v1', name: 'Seat 3', avatar: '🧑‍🌾', elo: 1500 });
+  mgr.createOrJoinRoom('WOLF-TIE', { id: 'v2', name: 'Seat 4', avatar: '🧑‍🌾', elo: 1500 });
+  mgr.createOrJoinRoom('WOLF-TIE', { id: 'v3', name: 'Seat 5', avatar: '🔮', elo: 1500 });
+  mgr.createOrJoinRoom('WOLF-TIE', { id: 'v4', name: 'Seat 6', avatar: '🧑‍🌾', elo: 1500 });
+
+  assert.equal(
+    mgr.startMatch('WOLF-TIE', 'w1', {
+      now: t0,
+      customRoles: { w1: 'werewolf', w2: 'werewolf', v1: 'villager', v2: 'villager', v3: 'seer', v4: 'villager' },
+    }).ok,
+    true
+  );
+
+  // Wolf 1 picks Seat 4 (v2), Wolf 2 picks Seat 3 (v1) -> 1-1 tie; deterministic consensus picks valid target
+  assert.equal(mgr.submitNightAction('WOLF-TIE', 'w1', { actionType: 'wolf_bite', targetId: 'v2' }, t0 + 10).ok, true);
+  assert.equal(mgr.submitNightAction('WOLF-TIE', 'w2', { actionType: 'wolf_bite', targetId: 'v1' }, t0 + 20).ok, true);
+  const match = mgr.getMatchState('WOLF-TIE')!;
+  assert.equal(match.nightActions.wolfTargetId, 'v1', 'Wolf consensus tie must deterministically resolve to v1');
+});
+
+
+

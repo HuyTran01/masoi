@@ -1,3 +1,4 @@
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import type { StateStore } from './stateStore.ts';
 import {
   applyOnlineMatchEloUpdates,
@@ -59,6 +60,8 @@ export interface ApiRouterOptions {
   roomManager?: RealtimeRoomManager;
   gmRoomManager?: GMRoomManager;
   hooks?: ApiRouterHooks;
+  withRoomLock?: <T>(code: string, fn: () => Promise<T> | T) => Promise<T>;
+  disableRateLimits?: boolean;
 }
 
 interface VoteShard {
@@ -96,7 +99,44 @@ const VALID_NIGHT_ACTIONS = new Set<OnlineNightActionType>([
 const MAX_BODY_BYTES = 100 * 1024;
 const AUTH_RATE_WINDOW_MS = 60_000;
 const AUTH_RATE_LIMIT = 30;
+const AI_CHAT_RATE_WINDOW_MS = 60_000;
+const AI_CHAT_RATE_LIMIT = 25;
+const AI_CHAT_TIMEOUT_MS = 2500;
+const ROOM_CREATE_RATE_WINDOW_MS = 60_000;
+const ROOM_CREATE_RATE_LIMIT = 25;
+const CHAT_RATE_WINDOW_MS = 10_000;
+const CHAT_RATE_LIMIT = 15;
 const IDLE_ROOM_TTL_MS = 2 * 60 * 60 * 1000;
+
+let cachedGeminiKey = '';
+let cachedGeminiClient: GoogleGenAI | null = null;
+
+function getGeminiClient(): GoogleGenAI | null {
+  const apiKey = String(process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) return null;
+  if (!cachedGeminiClient || cachedGeminiKey !== apiKey) {
+    cachedGeminiKey = apiKey;
+    cachedGeminiClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  }
+  return cachedGeminiClient;
+}
+
+function sanitizeAiChatLine(raw: string): string {
+  return String(raw || '')
+    .replace(/\r?\n+/g, ' ')
+    .replace(/[*_`~]/g, '')
+    .replace(/^["'“”«»]+|["'“”«»]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 220);
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -133,26 +173,43 @@ async function parseJsonBody(
 }
 
 export function createApiRouter(options: ApiRouterOptions) {
-  const { store, isNetlify, persistRooms, hooks } = options;
+  const { store, isNetlify, persistRooms, hooks, withRoomLock, disableRateLimits } = options;
   const sharedRoomManager = options.roomManager ?? new RealtimeRoomManager();
   const sharedGMManager = options.gmRoomManager ?? new GMRoomManager();
   const authRateMap = new Map<string, { count: number; resetAt: number }>();
+  const aiChatRateMap = new Map<string, { count: number; resetAt: number }>();
+  const roomCreateRateMap = new Map<string, { count: number; resetAt: number }>();
+  const chatRateMap = new Map<string, { count: number; resetAt: number }>();
 
-  function checkAuthRateLimit(ip: string): Response | null {
+  const runWithRoomLock = async <T>(code: string, fn: () => Promise<T> | T): Promise<T> => {
+    if (withRoomLock) return withRoomLock(code, fn);
+    return await fn();
+  };
+
+  function checkRateBucket(
+    bucket: Map<string, { count: number; resetAt: number }>,
+    key: string,
+    limit: number,
+    windowMs: number
+  ): boolean {
     const now = Date.now();
-    if (authRateMap.size > 1000) {
-      for (const [k, v] of authRateMap.entries()) {
-        if (now >= v.resetAt) authRateMap.delete(k);
+    if (bucket.size > 1000) {
+      for (const [k, v] of bucket.entries()) {
+        if (now >= v.resetAt) bucket.delete(k);
       }
     }
-    const key = ip || 'unknown';
-    const entry = authRateMap.get(key);
+    const normalized = key || 'unknown';
+    const entry = bucket.get(normalized);
     if (!entry || now >= entry.resetAt) {
-      authRateMap.set(key, { count: 1, resetAt: now + AUTH_RATE_WINDOW_MS });
-      return null;
+      bucket.set(normalized, { count: 1, resetAt: now + windowMs });
+      return true;
     }
     entry.count += 1;
-    if (entry.count > AUTH_RATE_LIMIT) {
+    return entry.count <= limit;
+  }
+
+  function checkAuthRateLimit(ip: string): Response | null {
+    if (!checkRateBucket(authRateMap, ip, AUTH_RATE_LIMIT, AUTH_RATE_WINDOW_MS)) {
       return jsonResponse(
         {
           ok: false,
@@ -840,6 +897,7 @@ export function createApiRouter(options: ApiRouterOptions) {
       const code = normalizeRoomCode(decodeURIComponent(roomMatch[1]));
       const endpoint = roomMatch[2];
 
+      return runWithRoomLock(code, async () => {
       if (method === 'POST' && endpoint === 'join') {
         const parsed = await parseJsonBody(req);
         if (!parsed.ok) return jsonResponse({ ok: false, error: parsed.error }, parsed.status);
@@ -881,6 +939,21 @@ export function createApiRouter(options: ApiRouterOptions) {
 
         const { mgr } = await loadOnlineRoomManager(code);
         const existingRoom = mgr.getRoom(code);
+        if (
+          !existingRoom &&
+          body.createIfMissing !== false &&
+          !disableRateLimits &&
+          !checkRateBucket(roomCreateRateMap, clientIp, ROOM_CREATE_RATE_LIMIT, ROOM_CREATE_RATE_WINDOW_MS)
+        ) {
+          return jsonResponse(
+            {
+              ok: false,
+              code: 'RATE_LIMITED',
+              error: 'Bạn tạo phòng quá nhanh. Vui lòng thử lại sau ít phút.',
+            },
+            429
+          );
+        }
         const alreadyInRoom = Boolean(existingRoom?.participants.some((p) => p.id === cleanUserId));
         if (
           alreadyInRoom &&
@@ -913,6 +986,7 @@ export function createApiRouter(options: ApiRouterOptions) {
                   })
                 : undefined,
             createIfMissing: body.createIfMissing !== false,
+            lang: body.lang === 'en' ? 'en' : body.lang === 'vi' ? 'vi' : undefined,
           }
         );
         if (!joinRes.ok) {
@@ -960,6 +1034,11 @@ export function createApiRouter(options: ApiRouterOptions) {
 
         if (!mgr.verifyPlayerSecret(code, userId, playerSecret)) {
           return jsonResponse({ ok: false, error: 'Mã xác thực người chơi không hợp lệ.' }, 403);
+        }
+
+        const qLang = url.searchParams.get('lang');
+        if (qLang === 'vi' || qLang === 'en') {
+          mgr.setParticipantLang(code, userId, qLang);
         }
 
         const beforePhase = mgr.getMatchState(code)?.phase;
@@ -1068,6 +1147,19 @@ export function createApiRouter(options: ApiRouterOptions) {
           if (!res.ok) return jsonResponse(res, 400);
           hookKind = 'match_started';
         } else if (action === 'chat') {
+          if (
+            !disableRateLimits &&
+            !checkRateBucket(chatRateMap, `${code}:${userId}`, CHAT_RATE_LIMIT, CHAT_RATE_WINDOW_MS)
+          ) {
+            return jsonResponse(
+              {
+                ok: false,
+                code: 'RATE_LIMITED',
+                error: 'Bạn gửi tin nhắn quá nhanh. Vui lòng chờ vài giây.',
+              },
+              429
+            );
+          }
           const rawMsg = (body.message && typeof body.message === 'object'
             ? body.message
             : {}) as Partial<RealtimeChatMessage>;
@@ -1178,6 +1270,9 @@ export function createApiRouter(options: ApiRouterOptions) {
           const res = mgr.advancePhase(code, userId, now, expectedStepIndex);
           if (!res.ok) return jsonResponse(res, 400);
           eloUpdates = res.eloUpdates;
+        } else if (action === 'set_lang') {
+          const nextLang = body.lang === 'en' ? 'en' : 'vi';
+          mgr.setParticipantLang(code, userId, nextLang);
         } else {
           return jsonResponse({ ok: false, error: `Hành động không hỗ trợ: ${action}` }, 400);
         }
@@ -1212,6 +1307,114 @@ export function createApiRouter(options: ApiRouterOptions) {
           recentProps: mgr.getRecentProps(code),
           serverNow: now,
         });
+      }
+
+      return jsonResponse({ ok: false, error: 'API endpoint not found.' }, 404);
+      });
+    }
+
+    // ---------- AI Practice Tier-2 Smart Bot Chat (Gemini server-side) ----------
+    if (method === 'POST' && pathname === '/api/ai-chat') {
+      if (!checkRateBucket(aiChatRateMap, clientIp, AI_CHAT_RATE_LIMIT, AI_CHAT_RATE_WINDOW_MS)) {
+        return jsonResponse({ ok: false, fallback: true, reason: 'rate_limited' }, 200);
+      }
+
+      const parsed = await parseJsonBody(req);
+      if (!parsed.ok) return jsonResponse({ ok: false, fallback: true, reason: 'invalid_json' }, 400);
+
+      const body = parsed.body;
+      const lang = body.lang === 'en' ? 'en' : 'vi';
+      const round = Math.max(1, Math.min(30, Number(body.round) || 1));
+      const humanMessage = String(body.humanMessage || '').trim().slice(0, 280);
+      const humanName = String(body.humanName || (lang === 'vi' ? 'Bạn' : 'You')).trim().slice(0, 48);
+      const humanSeat = Math.max(1, Math.min(20, Number(body.humanSeat) || 1));
+      const bot =
+        body.bot && typeof body.bot === 'object' && !Array.isArray(body.bot)
+          ? (body.bot as Record<string, unknown>)
+          : null;
+      const publicState =
+        body.publicState && typeof body.publicState === 'object' && !Array.isArray(body.publicState)
+          ? (body.publicState as Record<string, unknown>)
+          : null;
+
+      if (!humanMessage || !bot || !publicState) {
+        return jsonResponse({ ok: false, fallback: true, reason: 'invalid_payload' }, 400);
+      }
+
+      const ai = getGeminiClient();
+      if (!ai) {
+        return jsonResponse({ ok: false, fallback: true, reason: 'missing_api_key' }, 200);
+      }
+
+      const botName = String(bot.name || 'Bot').trim().slice(0, 48);
+      const botSeat = Math.max(1, Math.min(20, Number(bot.seat) || 2));
+      const botPersona = String(bot.persona || 'observer').trim().slice(0, 32);
+      const botRoleName = String(bot.roleName || 'Villager').trim().slice(0, 48);
+      const botFaction = String(bot.faction || 'villager').trim().slice(0, 24);
+      const privateMemory =
+        bot.privateMemory && typeof bot.privateMemory === 'object' ? bot.privateMemory : {};
+
+      const systemInstruction =
+        lang === 'vi'
+          ? [
+              `Bạn là ${botName} (#${botSeat}), một người chơi Ma Sói đang ngồi quanh lửa trại thảo luận vào Ngày ${round}.`,
+              `Tính cách: ${botPersona}. Vai bí mật của CHỈ RIÊNG BẠN: ${botRoleName} (phe ${botFaction}).`,
+              `Quy tắc tuyệt đối:`,
+              `1. Chỉ trả lời 1-2 câu ngắn gọn, tự nhiên như người Việt chơi Ma Sói thật (xưng hô tự nhiên, nhắc ghế kiểu #3 hoặc tên).`,
+              `2. KHÔNG BAO GIỜ dùng markdown, dấu sao (*), ngoặc kép bọc ngoài, hay tiết lộ mình là AI.`,
+              `3. KHÔNG BAO GIỜ lộ vai bí mật nếu là Sói hoặc vai đặc biệt chưa cần lộ; Sói phải nói dối khéo như dân thường.`,
+              `4. CHỈ dựa vào dữ kiện công khai và ký ức riêng của riêng bạn trong JSON bên dưới — không tự bịa người chết hay phiếu bầu không có thật.`,
+            ].join('\n')
+          : [
+              `You are ${botName} (#${botSeat}), a Werewolf player debating around the campfire on Day ${round}.`,
+              `Persona: ${botPersona}. YOUR private secret role only: ${botRoleName} (${botFaction} faction).`,
+              `Strict rules:`,
+              `1. Reply in 1-2 short, natural sentences like a real social-deduction player (use seat tags like #3 or names).`,
+              `2. NEVER use markdown, asterisks (*), wrapping quotes, or mention being an AI.`,
+              `3. NEVER admit to being a Werewolf; Wolves must blend in and deflect smoothly.`,
+              `4. ONLY rely on the public game state and your own private memory provided below — never invent deaths or votes.`,
+            ].join('\n');
+
+      const promptContext = JSON.stringify({
+        round,
+        humanSpeaker: { seat: humanSeat, name: humanName },
+        humanMessage,
+        yourPrivateMemory: privateMemory,
+        publicState,
+      }).slice(0, 6000);
+
+      const userPrompt =
+        lang === 'vi'
+          ? `Người chơi ${humanName} (#${humanSeat}) vừa nhắn: "${humanMessage}"\nDữ kiện ván đấu:\n${promptContext}\nHãy viết câu trả lời ngắn của ${botName} (#${botSeat}):`
+          : `Player ${humanName} (#${humanSeat}) just said: "${humanMessage}"\nMatch context:\n${promptContext}\nWrite ${botName} (#${botSeat})'s short in-character reply:`;
+
+      let timerId: ReturnType<typeof setTimeout> | null = null;
+      try {
+        const result = await Promise.race([
+          ai.models.generateContent({
+            model: 'gemini-4-hydrogen',
+            contents: userPrompt,
+            config: {
+              systemInstruction,
+              thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+            },
+          }),
+          new Promise<null>((resolve) => {
+            timerId = setTimeout(() => resolve(null), AI_CHAT_TIMEOUT_MS);
+          }),
+        ]);
+        if (timerId) clearTimeout(timerId);
+        if (!result) {
+          return jsonResponse({ ok: false, fallback: true, reason: 'timeout' }, 200);
+        }
+        const cleaned = sanitizeAiChatLine(result.text ?? '');
+        if (!cleaned) {
+          return jsonResponse({ ok: false, fallback: true, reason: 'empty_response' }, 200);
+        }
+        return jsonResponse({ ok: true, text: cleaned, source: 'gemini' }, 200);
+      } catch {
+        if (timerId) clearTimeout(timerId);
+        return jsonResponse({ ok: false, fallback: true, reason: 'upstream_error' }, 200);
       }
     }
 

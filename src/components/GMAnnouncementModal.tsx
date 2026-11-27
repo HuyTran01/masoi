@@ -198,16 +198,10 @@ export const GMAnnouncementModal: React.FC<GMAnnouncementModalProps> = ({
                 ? {
                     vi: 'Không có ai thiệt mạng đêm qua! Cả làng cùng suy luận xem chuyện gì đã xảy ra.',
                     en: 'Zero casualties last night! Discuss with the village to figure out what happened.',
-                    fr: 'Aucune victime cette nuit ! Discutez avec le village pour comprendre ce qui s’est passé.',
-                    es: '¡Sin víctimas anoche! Debate con la aldea para descubrir qué ocurrió.',
-                    ja: '昨夜は犠牲者なし！村のみんなで何が起きたか話し合いましょう。',
                   }[lang]
                 : {
                     vi: 'Không có ai bị treo cổ hôm nay. Màn đêm sắp buông xuống!',
                     en: 'Nobody was executed today. Night is about to fall!',
-                    fr: 'Personne n’a été éliminé aujourd’hui. La nuit tombe !',
-                    es: 'Nadie fue ejecutado hoy. ¡Cae la noche!',
-                    ja: '本日の処刑者はいませんでした。まもなく夜が訪れます！',
                   }[lang]}
             </div>
           </div>

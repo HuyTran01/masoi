@@ -101,9 +101,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Auuuuuu... Trăng máu đã lên! Đàn Ma Sói thức dậy đi săn mồi nào!',
       en: 'Awooooo... The Blood Moon rises! Werewolves, awaken and hunt your prey!',
-      fr: 'Aouuuuu... La Lune de Sang se lève ! Loups-Garous, réveillez-vous et chassez !',
-      es: '¡Auuuuu... La Luna de Sangre se alza! ¡Hombres Lobo, despertad y cazad!',
-      ja: 'アオォォーン…血の月が昇った！人狼よ、目覚めて獲物を狩れ！',
     },
     sfxLabel: '🐺 Tiếng Sói Hú Trăng Máu & Gió Rừng Đêm',
     musicTitle: '🎵 Bản Giao Hưởng Trăng Máu (Blood Moon Pack Howl)',
@@ -113,9 +110,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Gâu gâu! Sói Con nhe nanh thức dậy cùng bầy đàn nào!',
       en: 'Arf arf! The fierce Wolf Pup bares its fangs with the pack!',
-      fr: 'Wouf wouf ! Le Louveteau montre les crocs avec la meute !',
-      es: '¡Guau guau! ¡El Cachorro de Lobo muestra sus colmillos con la manada!',
-      ja: 'ワンワン！狼の子が群れと共に牙を剥く！',
     },
     sfxLabel: '🐾 Tiếng Sói Con Gầm Gừ & Trống Chiến Cuồng Nộ',
     musicTitle: '🎵 Vũ Điệu Nanh Sói Non (Feral Cub Drums)',
@@ -125,9 +119,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Khà khà khà... Vạc độc sôi sùng sục... Cứu ai hay giết ai đêm nay đây?',
       en: 'Hehehe... My cauldron bubbles... Who shall I heal, and who shall taste poison tonight?',
-      fr: 'Héhéhé... Mon chaudron bouillonne... Qui sauver ou empoisonner cette nuit ?',
-      es: 'Jajaja... Mi caldero burbujea... ¿A quién salvaré o envenenaré esta noche?',
-      ja: 'ヒッヒッヒ…大釜が煮えたぎる…今夜は誰を生かし、誰に毒を盛ろうか？',
     },
     sfxLabel: '🧪 Tiếng Vạc Độc Sôi Sùng Sục & Tiếng Thì Thầm Ma Mị',
     musicTitle: '🎵 Khúc Nhạc Giả Kim Huyền Bí (Midnight Cauldron Waltz)',
@@ -137,9 +128,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Cạch rốp! Khẩu súng săn đã lên nòng... Kẻ nào hạ gục ta sẽ phải trả giá!',
       en: 'Click-clack! My hunting shotgun is loaded... Whoever strikes me down will pay the price!',
-      fr: 'Clic-clac ! Mon fusil de chasse est chargé... Quiconque m’abat en paiera le prix !',
-      es: '¡Clic-clac! Mi escopeta de caza está cargada... ¡Quien me derribe pagará el precio!',
-      ja: 'カチャッ！猟銃の引き金は引いた…俺を倒した者は必ず道連れにしてやる！',
     },
     sfxLabel: '🔫 Tiếng Lên Nòng Súng Săn & Phát Bắn Rừng Đêm',
     musicTitle: '🎵 Hành Khúc Xạ Thủ Rừng Già (Iron Shotgun March)',
@@ -149,9 +137,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Hỡi quả cầu pha lê huyền bí... Hãy vạch trần bộ mặt thật kẻ ẩn mình trong bóng tối!',
       en: 'O mystic crystal ball... Reveal the true alignment hidden in the shadows!',
-      fr: 'Ô boule de cristal mystique... Révèle la vraie nature cachée dans l’ombre !',
-      es: 'Oh esfera de cristal mística... ¡Revela la verdadera identidad oculta en las sombras!',
-      ja: '神秘の水晶玉よ…闇に潜む者の正体を映し出せ！',
     },
     sfxLabel: '🔮 Tiếng Chuông Pha Lê & Nhịp Đập Nhãn Thần',
     musicTitle: '🎵 Giai Điệu Tiên Tri Tinh Tú (Astral Divination Chimes)',
@@ -161,9 +146,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Keng! Khiên thép đã giương cao! Đêm nay không con sói nào bước qua được xác ta!',
       en: 'Clang! My iron shield is raised! No werewolf shall pass my watch tonight!',
-      fr: 'Clang ! Mon bouclier d’acier est levé ! Aucun loup ne passera cette nuit !',
-      es: '¡Clang! ¡Mi escudo de acero está en alto! ¡Ningún lobo pasará mi guardia hoy!',
-      ja: 'カァン！鋼の盾は掲げられた！今夜、人狼どもは一歩も通さん！',
     },
     sfxLabel: '🛡️ Tiếng Khiên Thép Va Chạm & Tù Và Hộ Vệ',
     musicTitle: '🎵 Khúc Ca Kỵ Sĩ Hộ Vệ (Citadel Shield Fanfare)',
@@ -173,9 +155,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Vút... Phập! Mũi tên tình ái đã giương cung, hai sinh mệnh kết nối cùng sống cùng chết!',
       en: 'Whoosh... Thwip! Cupid’s arrow flies, binding two souls in life and death!',
-      fr: 'Zou... La flèche de Cupidon vole, liant deux âmes à la vie, à la mort !',
-      es: '¡Fiuuu! ¡La flecha de Cupido vuela, uniendo dos almas en la vida y la muerte!',
-      ja: 'ヒュン…キューピッドの矢が放たれ、二つの魂が生死を共にする！',
     },
     sfxLabel: '💘 Tiếng Bắn Cung Tên Tình Ái & Đàn Hạc Thiên Thần',
     musicTitle: '🎵 Bản Tình Ca Định Mệnh (Celestial Harp Serenade)',
@@ -185,9 +164,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Chiếc gương ma thuật phản chiếu... Khi ngươi ngã xuống, ta sẽ mang hình hài của ngươi!',
       en: 'The phantom mirror reflects... When you fall, I shall become your shadow!',
-      fr: 'Le miroir fantôme reflète... Quand tu tomberas, je prendrai ton visage !',
-      es: 'El espejo fantasma refleja... ¡Cuando caigas, tomaré tu lugar y tu poder!',
-      ja: '幻影の鏡が映し出す…お前が倒れる時、私がお前の姿と力を継ぐ！',
     },
     sfxLabel: '🪞 Tiếng Gương Ma Thuật Ngân Vang & Bóng Phân Thân',
     musicTitle: '🎵 Vũ Khúc Phản Chiếu Trong Gương (Phantom Mirror Echo)',
@@ -197,9 +173,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Boong... Lão già làng chống gậy sắt thức tỉnh! Sức mạnh cổ xưa che chở ngôi làng!',
       en: 'Boooong... The Village Elder awakens! Ancient wisdom shields our bloodline!',
-      fr: 'Boooong... L’Ancien du village s’éveille ! La sagesse ancestrale nous protège !',
-      es: '¡Boooong... El Anciano del pueblo despierta! ¡La sabiduría antigua nos protege!',
-      ja: 'ゴォォーン…長老が杖を鳴らす！古の知恵が村を守護する！',
     },
     sfxLabel: '👑 Tiếng Chuông Đồng Cổ Đại & Gậy Trượng Già Làng',
     musicTitle: '🎵 Hào Khí Trưởng Lão Ngàn Năm (Ancient Temple Gong)',
@@ -209,9 +182,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Thịch... thịch... Dòng máu nguyền rủa đang sôi trào dưới ánh trăng đêm!',
       en: 'Thump... thump... The cursed blood simmers beneath the moonlight!',
-      fr: 'Boum... boum... Le sang maudit bouillonne sous le clair de lune !',
-      es: 'Latido... latido... ¡La sangre maldita hierve bajo la luz de la luna!',
-      ja: 'ドクン…ドクン…呪われた血が月光の下で疼き出す！',
     },
     sfxLabel: '🌓 Tiếng Tim Đập Huyết Nguyền & Tiếng Gầm Hóa Sói',
     musicTitle: '🎵 Giao Hưởng Huyết Nguyền (Dark Transformation Pulse)',
@@ -221,9 +191,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Xoẹt! Lưỡi dao găm giấu trong tay áo... Ta sẽ dẫn đường cho bầy Sói làm cỏ ngôi làng này!',
       en: 'Shhhk! A dagger hidden in the dark... I serve the Werewolves from within!',
-      fr: 'Chlac ! Une dague cachée dans l’ombre... Je sers les Loups de l’intérieur !',
-      es: '¡Zas! Una daga oculta en las sombras... ¡Guiaré a los Lobos a la victoria!',
-      ja: 'シュッ！袖に隠した短剣…村の内側から人狼どもを勝利へ導く！',
     },
     sfxLabel: '🗡️ Tiếng Tuốt Dao Găm Sắc Lạnh & Lời Thì Thầm Phản Bội',
     musicTitle: '🎵 Khúc Nhạc Mưu Đồ Bóng Tối (Shadow Dagger Intrigue)',
@@ -233,9 +200,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Haha! Treo cổ ta đi! Chỉ cần bước lên giá treo cổ là ta độc chiếm chiến thắng!',
       en: 'Haha! Lynch me today! The gallows are my throne of solo victory!',
-      fr: 'Haha ! Pendez-moi aujourd’hui ! La potence est ma victoire solitaire !',
-      es: '¡Jaja! ¡Cuelguenme hoy! ¡La horca es mi victoria en solitario!',
-      ja: 'ハハハ！俺を処刑してみろ！処刑台こそが俺の単独勝利だ！',
     },
     sfxLabel: '🎭 Tiếng Hộp Nhạc Hề Ma & Chuông Giá Treo Cổ',
     musicTitle: '🎵 Điệu Nhảy Kẻ Chán Đời (Jester Gallows Polka)',
@@ -245,9 +209,6 @@ export const ROLE_CALLOUT_LINES: Record<RoleId, RoleCalloutMeta> = {
     quotes: {
       vi: 'Boong... Màn đêm tĩnh mịch bao trùm... Dân làng khoá chặt cửa cầu nguyện bình an...',
       en: 'Bong... Silence falls over the dark village... Lock your doors and pray for dawn...',
-      fr: 'Bong... Le silence tombe sur le village... Verrouillez vos portes jusqu’à l’aube...',
-      es: 'Bong... El silencio cae sobre la aldea... Cierren sus puertas hasta el amanecer...',
-      ja: 'ゴーン…静寂が村を包む…夜明けまで扉を閉ざして祈りなさい…',
     },
     sfxLabel: '🔔 Tiếng Chuông Canh Đêm & Dế Kêu Rừng Khuya',
     musicTitle: '🎵 Khúc Ru Đêm Làng Cổ (Silent Village Lullaby)',
@@ -261,16 +222,10 @@ export const PROP_REACTION_META: Record<PropType, PropReactionMeta> = {
     badgeText: {
       vi: '🤬 TỨC GIẬN SÔI MÁU!',
       en: '🤬 FURIOUS RAGE!',
-      fr: '🤬 FURIEUX !',
-      es: '🤬 ¡FURIOSO!',
-      ja: '🤬 激怒カンカン！',
     },
     speechText: {
       vi: 'Á à! Đứa nào dám ném cà chua vào mặt ta đó?! Tức điên lên được! 🍅💢',
       en: 'Hey!! Who threw that rotten tomato at my face?! I am furious! 🍅💢',
-      fr: 'Hé ! Qui a osé me lancer cette tomate ?! Je suis furieux ! 🍅💢',
-      es: '¡¿Quién se atrevió a lanzarme ese tomate?! ¡Estoy furioso! 🍅💢',
-      ja: 'ちょっと！誰がトマトを投げたの？！頭にきたぞ！🍅💢',
     },
   },
   egg: {
@@ -279,16 +234,10 @@ export const PROP_REACTION_META: Record<PropType, PropReactionMeta> = {
     badgeText: {
       vi: '😡 NỔI GIẬN ĐÙNG ĐÙNG!',
       en: '😡 BOILING ANGRY!',
-      fr: '😡 EN COLÈRE NOIRE !',
-      es: '😡 ¡HIRVIENDO DE IRA!',
-      ja: '😡 大激怒プンプン！',
     },
     speechText: {
       vi: 'Trứng thối bốc mùi kinh quá! Đồ đáng ghét! 🥚💢',
       en: 'Yuck, rotten egg! That smells awful! You will pay for this! 🥚💢',
-      fr: 'Pouah, un œuf pourri ! Ça pue horriblement ! 🥚💢',
-      es: '¡Puaj, huevo podrido! ¡Me las pagarás en la votación! 🥚💢',
-      ja: 'うわっ、腐った卵だ！臭すぎる！覚えてろよ！🥚💢',
     },
   },
   water: {
@@ -297,16 +246,10 @@ export const PROP_REACTION_META: Record<PropType, PropReactionMeta> = {
     badgeText: {
       vi: '😤 TỨC XÌ KHÓI ĐẦU!',
       en: '😤 SOAKED & ANGRY!',
-      fr: '😤 TREMPÉ & FURIEUX !',
-      es: '😤 ¡MOJADO Y ENOJADO!',
-      ja: '😤 ずぶ濡れで激怒！',
     },
     speechText: {
       vi: 'Ướt nhẹp cả người rồi! Lạnh quá đi mất, coi chừng ta! 🪣💢',
       en: 'I am completely soaked! Freezing cold! Watch yourself! 🪣💢',
-      fr: 'Je suis trempé jusqu’aux os ! Gare à toi ! 🪣💢',
-      es: '¡Estoy empapado! ¡Qué frío, ten cuidado conmigo! 🪣💢',
-      ja: '全身ずぶ濡れじゃないか！冷たい！許さないぞ！🪣💢',
     },
   },
   rose: {
@@ -315,16 +258,10 @@ export const PROP_REACTION_META: Record<PropType, PropReactionMeta> = {
     badgeText: {
       vi: '💃 VUI MỪNG NHẢY MÚA!',
       en: '💃 HAPPY DANCING!',
-      fr: '💃 DANSE DE JOIE !',
-      es: '💃 ¡BAILANDO DE ALEGRÍA!',
-      ja: '💃 歓喜のダンス！',
     },
     speechText: {
       vi: 'Oa hoa hồng thơm quá! Vui quá nhảy múa thôi! 💐💖🎶',
       en: 'Aw, a lovely rose bouquet! Time for a happy dance! 💐💖🎶',
-      fr: 'Oh, un bouquet de roses ! Dansons de joie ! 💐💖🎶',
-      es: '¡Qué hermoso ramo de rosas! ¡A bailar de alegría! 💐💖🎶',
-      ja: 'わぁ、素敵なバラの花束！嬉しくて踊っちゃう！💐💖🎶',
     },
   },
 };

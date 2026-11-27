@@ -35,8 +35,10 @@ import {
   extractChatVoteSignals,
   stripMarkdownAsterisks,
   buildBotDayDiscussionLines,
+  getStepInitialTimerSeconds,
   prepareNightStartForHuman,
   shouldAutoAdvanceOnTimerZero,
+  resolveHunterTimeoutTarget,
   buildDawnGMAnnouncement,
   buildDuskGMAnnouncement,
   buildPrivateHumanNightNotice,
@@ -88,8 +90,8 @@ test('[QA-Team-1000-Playthroughs] Run 1,000 full Werewolf matches from Night 1 t
   assert.ok(campaign.avgRounds >= 1 && campaign.avgRounds <= 20);
 });
 
-test('[i18n Agent] UI_TEXT and ROLES provide complete translations across all 5 languages (vi, en, fr, es, ja)', () => {
-  const langs: Language[] = ['vi', 'en', 'fr', 'es', 'ja'];
+test('[i18n Agent] UI_TEXT and ROLES provide complete translations across both languages (vi, en)', () => {
+  const langs: Language[] = ['vi', 'en'];
   for (const l of langs) {
     const t = UI_TEXT[l];
     assert.ok(t, `Missing UI_TEXT for language: ${l}`);
@@ -147,7 +149,7 @@ test('[GM Logic & Custom Count Agent] Custom player counts (4..20) and Morning D
 });
 
 test('[Audio & Reaction Agent] Prop emotional reactions (angry vs happy_dance) and 13-role musical callouts', () => {
-  const langs: Language[] = ['vi', 'en', 'fr', 'es', 'ja'];
+  const langs: Language[] = ['vi', 'en'];
   const props: PropType[] = ['tomato', 'egg', 'water', 'rose'];
 
   assert.equal(PROP_REACTION_META.tomato.emotion, 'angry');
@@ -187,7 +189,6 @@ test('[Auto-GM Agent] Sequential night call schedule, strict role wake rules, bo
     botStepSec: 4,
     dayDiscussSec: 60,
     dayVoteSec: 30,
-    hunterShotSec: 18,
   };
 
   // Night 1 schedule follows canonical order: doppelganger -> cupid -> bodyguard -> werewolf -> witch -> seer
@@ -197,7 +198,7 @@ test('[Auto-GM Agent] Sequential night call schedule, strict role wake rules, bo
     ['doppelganger', 'cupid', 'bodyguard', 'werewolf', 'witch', 'seer']
   );
 
-  // Verify custom timer config is respected: human turn gets nightActionSec (25s), bot steps get botStepSec (4s)
+  // Verify custom timer config is respected uniformly across human and bot steps (nightActionSec = 25s)
   const seerStep = night1.find((s) => s.key === 'seer');
   const wolfStep = night1.find((s) => s.key === 'werewolf');
   assert.ok(seerStep);
@@ -205,7 +206,7 @@ test('[Auto-GM Agent] Sequential night call schedule, strict role wake rules, bo
   assert.equal(seerStep.humanDurationSec, 25);
   assert.ok(wolfStep);
   assert.equal(wolfStep.isHumanTurn, false);
-  assert.equal(wolfStep.botDurationSec, 4);
+  assert.equal(wolfStep.botDurationSec, 25);
 
   // Verify findHumanNightStepIndex and getHumanRoleWakeGuidance
   const humanIdx = findHumanNightStepIndex(night1, roster[0], 1);
@@ -317,8 +318,8 @@ test('[Human Turn Protection] prepareNightStartForHuman, shouldAutoAdvanceOnTime
   assert.ok(prepared.preSimulatedActions.wolfTargetId, 'Bot werewolf should have selected a victim before human Seer wakes');
   assert.ok(prepared.preSimulatedActions.cupidLovers, 'Bot cupid should have linked lovers before human Seer wakes');
 
-  // Verify shouldAutoAdvanceOnTimerZero NEVER auto-skips human night turn,
-  // while day_voting at 0s MUST auto-advance with abstain so timer never freezes (BUG-15)
+  // Verify shouldAutoAdvanceOnTimerZero auto-advances at 0s even on human night turn (Wave 0: no 0s stall),
+  // and day_voting at 0s MUST auto-advance with abstain so timer never freezes (BUG-15)
   assert.equal(
     shouldAutoAdvanceOnTimerZero({
       shellState: 'playing',
@@ -328,8 +329,8 @@ test('[Human Turn Protection] prepareNightStartForHuman, shouldAutoAdvanceOnTime
       isHumanAlive: true,
       hasHumanVoted: false,
     }),
-    false,
-    'Must NEVER auto-advance when human player is awake on their night turn'
+    true,
+    'Night turn MUST auto-advance at 0s instead of stalling'
   );
 
   assert.equal(
@@ -519,8 +520,8 @@ test('[Authentic AI GM Announcements] Dawn/Dusk briefings announce casualties cl
   assert.ok(duskLynch.headline.includes('Tuấn Kiệt') && duskLynch.headline.includes('4 phiếu'));
   assert.ok(duskLynch.publicEvents.some((e) => e.includes('Già Làng')));
 
-  // Case 6: Multi-language Dawn announcements across all 5 languages
-  for (const lang of ['vi', 'en', 'fr', 'es', 'ja'] as Language[]) {
+  // Case 6: Multi-language Dawn announcements across vi & en
+  for (const lang of ['vi', 'en'] as Language[]) {
     const ann = buildDawnGMAnnouncement({
       round: 1,
       beforePlayers,
@@ -851,12 +852,12 @@ test('[Zero-Leak Night Kill Short Film & Dawn Hunter] End-of-night cinematic act
   assert.equal(shotWolfCinematic?.killerRoleId, 'hunter');
   assert.ok(shotWolfCinematic?.reasonText.includes('Thợ Săn') && shotWolfCinematic?.reasonText.includes('Tuấn Kiệt'));
 
-  // 8. Dawn announcement with Hunter night revenge shot leaks ZERO Hunter info across all 5 languages
+  // 8. Dawn announcement with Hunter night revenge shot leaks ZERO Hunter info across vi & en
   const afterHunterDawn: Player[] = baseRoster.map((p) =>
     p.id === 'b_guard' || p.id === 'b_vil' ? { ...p, isAlive: false } : { ...p }
   );
-  const forbiddenTerms = ['Thợ Săn', 'Hunter', 'Chasseur', 'Cazador', 'ハンター', 'kéo theo', 'shot', 'bắn'];
-  for (const lang of ['vi', 'en', 'fr', 'es', 'ja'] as Language[]) {
+  const forbiddenTerms = ['Thợ Săn', 'Hunter', 'kéo theo', 'shot', 'bắn'];
+  for (const lang of ['vi', 'en'] as Language[]) {
     const ann = buildDawnGMAnnouncement({
       round: 2,
       beforePlayers: baseRoster,
@@ -932,26 +933,26 @@ test('[QA Regression] BUG-08: Chained Hunter cascade and pendingDeathCascade win
   );
   assert.equal(guarded.isOver, false);
 
-  // Night-Aim: a lynched Hunter's mark on another Hunter chains into that Hunter's own mark
-  const chained = applyDayLynch(
-    players.map((p) =>
-      p.id === 'h1'
-        ? { ...p, isAlive: true, hunterMarkId: 'h2' }
-        : p.id === 'h2'
-        ? { ...p, hunterMarkId: 'v1' }
-        : p
-    ),
-    'h1'
+  // Night-Aim (Wave 0): lynching a marked Hunter does NOT fire; night death fires mark and cascades via Lover bond
+  const markedRoster = players.map((p) =>
+    p.id === 'h1'
+      ? { ...p, isAlive: true, hunterMarkId: 'h2' }
+      : p.id === 'h2'
+      ? { ...p, loverId: 'v1' }
+      : p.id === 'v1'
+      ? { ...p, loverId: 'h2' }
+      : p
   );
-  assert.deepEqual(
-    chained.hunterShots,
-    [
-      { hunterId: 'h1', targetId: 'h2' },
-      { hunterId: 'h2', targetId: 'v1' },
-    ]
-  );
-  assert.equal(chained.updatedPlayers.find((p) => p.id === 'h2')?.isAlive, false);
-  assert.equal(chained.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, false);
+  const lynched = applyDayLynch(markedRoster, 'h1');
+  assert.deepEqual(lynched.hunterShots, []);
+  assert.equal(lynched.updatedPlayers.find((p) => p.id === 'h1')?.hunterMarkId, undefined);
+  assert.equal(lynched.updatedPlayers.find((p) => p.id === 'h2')?.isAlive, true);
+  assert.equal(lynched.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, true);
+
+  const nightChained = resolveNightActions(markedRoster, { wolfTargetId: 'h1', hunterTargetId: 'h2' });
+  assert.deepEqual(nightChained.result.hunterShots, [{ hunterId: 'h1', targetId: 'h2' }]);
+  assert.equal(nightChained.updatedPlayers.find((p) => p.id === 'h2')?.isAlive, false);
+  assert.equal(nightChained.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, false);
 });
 
 test('[QA Regression] BUG-10: computeFactionAliveCounts separates Wolves, Villagers, and Third-Party (Tanner/Traitor)', () => {
@@ -1055,24 +1056,23 @@ test('[P1-1] Elder Lynch Power-Seal prevents sealed Villager roles from waking a
   assert.equal(dpAfterLynch.hasUsedHeal, true);
   assert.equal(dpAfterLynch.hasUsedPoison, true);
 
-  // Hunter-mark kill under elderSealActive: Doppelgänger inheriting a Hunter is sealed, but NOT when inheriting a Werewolf
+  // Day-lynch inheritance under elderSealActive: Doppelgänger inheriting a Hunter is sealed, but NOT when inheriting a Werewolf
   const shotRoster: Player[] = [
-    { id: 'h1', name: 'Thợ Săn 1', avatar: '🎯', roleId: 'hunter', isAlive: true, hunterMarkId: 'h2' },
     { id: 'h2', name: 'Thợ Săn 2', avatar: '🎯', roleId: 'hunter', isAlive: true, hasUsedPower: true },
     { id: 'dp', name: 'Nhân Bản', avatar: '🎭', roleId: 'doppelganger', isAlive: true, targetPlayerId: 'h2', targetRoleId: 'hunter' },
     { id: 'wf', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
   ];
-  const shotOut = applyDayLynch(shotRoster, 'h1', { elderSealActive: true });
+  const shotOut = applyDayLynch(shotRoster, 'h2', { elderSealActive: true });
   const dpAfterShot = shotOut.updatedPlayers.find((p) => p.id === 'dp')!;
   assert.equal(dpAfterShot.roleId, 'hunter');
   assert.equal(dpAfterShot.hasUsedPower, true);
 
   const wolfDoppelRoster: Player[] = [
-    { id: 'h1', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: true, hunterMarkId: 'wf' },
     { id: 'wf', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
     { id: 'dp', name: 'Nhân Bản', avatar: '🎭', roleId: 'doppelganger', isAlive: true, targetPlayerId: 'wf', targetRoleId: 'werewolf' },
+    { id: 'v1', name: 'Dân', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true },
   ];
-  const wolfShot = applyDayLynch(wolfDoppelRoster, 'h1', { elderSealActive: true });
+  const wolfShot = applyDayLynch(wolfDoppelRoster, 'wf', { elderSealActive: true });
   const dpWolf = wolfShot.updatedPlayers.find((p) => p.id === 'dp')!;
   assert.equal(dpWolf.roleId, 'werewolf');
   assert.notEqual(dpWolf.hasUsedPower, true, 'Werewolf inheritance must NOT be sealed by Elder penalty');
@@ -1147,15 +1147,14 @@ test('[P1-9 & P3-7] Multi-Hunter Lover cascade fires each marked bullet and cros
   assert.deepEqual(nightRes.result.killedPlayerIds.sort(), ['h1', 'h2', 'v1']);
   assert.equal(nightRes.result.hunterShots.length, 1, 'Only the first living Hunter received the mark action');
 
-  // Multi-Hunter day lynch cascade with stored marks on both Hunters
+  // Multi-Hunter day lynch cascade does NOT fire stored marks (Wave 0: night-death only)
   const markedHunters = nightHunters.map((p) =>
     p.id === 'h1' ? { ...p, hunterMarkId: 'v1' } : p.id === 'h2' ? { ...p, hunterMarkId: 'w1' } : p
   );
   const dayRes = applyDayLynch(markedHunters, 'h1');
-  assert.deepEqual(
-    dayRes.hunterShots.map((s) => s.hunterId).sort(),
-    ['h1', 'h2']
-  );
+  assert.deepEqual(dayRes.hunterShots, []);
+  assert.equal(dayRes.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, true);
+  assert.equal(dayRes.updatedPlayers.find((p) => p.id === 'w1')?.isAlive, true);
 
   // P3-7: 3 alive = Wolf A + Villager B (Lovers) + Wolf C -> MUST NOT end as Werewolves win!
   const threeAliveCrossLovers: Player[] = [
@@ -1412,13 +1411,13 @@ test('[Night-Aim 4] A mark that is already dead (or the Hunter itself) never fir
   assert.equal(selfMark.updatedPlayers.find((p) => p.id === 'hn')?.hunterMarkId, undefined);
 });
 
-test('[Night-Aim 5] Lynching the Hunter auto-fires the bullet marked the previous night', () => {
+test('[Night-Aim 5] Lynching the Hunter does NOT fire the bullet (only clears mark); re-marking & clearing work across nights', () => {
   const night = resolveNightActions(nightAimRoster(), { hunterTargetId: 'wf' });
   assert.equal(night.updatedPlayers.find((p) => p.id === 'hn')?.hunterMarkId, 'wf');
   const lynch = applyDayLynch(night.updatedPlayers, 'hn');
-  assert.deepEqual(lynch.hunterShots, [{ hunterId: 'hn', targetId: 'wf' }]);
-  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'wf')?.isAlive, false);
-  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'hn')?.hasUsedPower, true);
+  assert.deepEqual(lynch.hunterShots, []);
+  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'wf')?.isAlive, true, 'Marked target must survive when Hunter is lynched by day');
+  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'hn')?.hunterMarkId, undefined, 'Lynched Hunter mark must be cleared');
 
   // A later night overwrites the old mark; "Không ghim" clears it
   const reMark = resolveNightActions(night.updatedPlayers, { hunterTargetId: 'v1' });
@@ -1444,7 +1443,7 @@ test('[Night-Aim 6] Lynching the Elder seals the Hunter: no mark is fired', () =
   assert.equal(sealedNight.result.hunterShots.length, 0);
 });
 
-test('[Night-Aim 7] The marked target\'s Lover dies with them (cascade) and Doppelgänger inheriting Hunter starts with no stale mark', () => {
+test('[Night-Aim 7] The marked target\'s Lover dies with them on Hunter night death and Doppelgänger inheriting Hunter starts with no stale mark', () => {
   const roster: Player[] = [
     { id: 'wf', name: 'Sói', avatar: '🐺', roleId: 'werewolf', isAlive: true },
     { id: 'hn', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: true, hunterMarkId: 'v1' },
@@ -1452,13 +1451,24 @@ test('[Night-Aim 7] The marked target\'s Lover dies with them (cascade) and Dopp
     { id: 'v2', name: 'Dân 2', avatar: '🧑‍🌾', roleId: 'villager', isAlive: true, loverId: 'v1' },
     { id: 'dp', name: 'Nhân Bản', avatar: '🎭', roleId: 'doppelganger', isAlive: true, targetPlayerId: 'hn', targetRoleId: 'hunter', hunterMarkId: 'wf' },
   ];
+  // Night death of Hunter fires the mark and cascades to the mark's Lover
+  const nightKill = resolveNightActions(roster, { wolfTargetId: 'hn', hunterTargetId: 'v1' });
+  assert.equal(nightKill.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, false);
+  assert.equal(nightKill.updatedPlayers.find((p) => p.id === 'v2')?.isAlive, false, 'Lover chain must cascade from the night bullet');
+  const dpNight = nightKill.updatedPlayers.find((p) => p.id === 'dp')!;
+  assert.equal(dpNight.roleId, 'hunter');
+  assert.equal(dpNight.hunterMarkId, undefined, 'Inherited Hunter must not carry a stale mark');
+  assert.notEqual(dpNight.hasUsedPower, true);
+
+  // Day lynch of Hunter does NOT fire mark, while Doppelgänger still inherits cleanly with no stale mark
   const lynch = applyDayLynch(roster, 'hn');
-  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, false);
-  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'v2')?.isAlive, false, 'Lover chain must cascade from the bullet');
-  const dp = lynch.updatedPlayers.find((p) => p.id === 'dp')!;
-  assert.equal(dp.roleId, 'hunter');
-  assert.equal(dp.hunterMarkId, undefined, 'Inherited Hunter must not carry a stale mark');
-  assert.notEqual(dp.hasUsedPower, true);
+  assert.equal(lynch.hunterShots.length, 0);
+  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, true);
+  assert.equal(lynch.updatedPlayers.find((p) => p.id === 'v2')?.isAlive, true);
+  const dpDay = lynch.updatedPlayers.find((p) => p.id === 'dp')!;
+  assert.equal(dpDay.roleId, 'hunter');
+  assert.equal(dpDay.hunterMarkId, undefined, 'Inherited Hunter must not carry a stale mark');
+  assert.notEqual(dpDay.hasUsedPower, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -1517,10 +1527,10 @@ test('[W3-rules 4] Cross-faction Lovers only delay the Wolf win when a biting Wo
   assert.equal(checkWinCondition(wolfLovers).isOver, false);
 });
 
-test('[W3-stall] Last night step auto-advances at 0s for a living human who is no longer awake', () => {
+test('[W3-stall] Night step auto-advances at 0s regardless of whether human is awake or asleep (Wave 0)', () => {
   const base = { shellState: 'playing', phase: 'night', showOnboardingTour: false, isHumanAlive: true, hasHumanVoted: false } as const;
   assert.equal(shouldAutoAdvanceOnTimerZero({ ...base, isPlayerAwakeAtNight: false }), true);
-  assert.equal(shouldAutoAdvanceOnTimerZero({ ...base, isPlayerAwakeAtNight: true }), false);
+  assert.equal(shouldAutoAdvanceOnTimerZero({ ...base, isPlayerAwakeAtNight: true }), true);
 });
 
 test('[W3-mayor] Dusk announcement keeps the voting Mayor even if the Mayor died in the same lynch', () => {
@@ -1534,3 +1544,106 @@ test('[W3-mayor] Dusk announcement keeps the voting Mayor even if the Mayor died
   });
   assert.equal(dusk.votingMayorId, 'm');
 });
+
+// ---------------------------------------------------------------------------
+// Wave 0 tests: 6p balance, night-only Hunter, 0s timeout = null, uniform night timer
+// ---------------------------------------------------------------------------
+test('[Wave 0] 6-player roster is strictly 2 Werewolves vs 4 Villagers (Seer, Bodyguard, 2 Villagers)', () => {
+  const r6 = generateBalancedRoster(6);
+  assert.deepEqual([...r6].sort(), ['bodyguard', 'seer', 'villager', 'villager', 'werewolf', 'werewolf']);
+});
+
+test('[Wave 0] Hunter night-death pierces Bodyguard shield & Witch heal; day lynch & day Lover cascade never fire', () => {
+  const nightRoster: Player[] = [
+    w3Player('wf', 'werewolf'),
+    w3Player('hn', 'hunter'),
+    w3Player('bg', 'bodyguard'),
+    w3Player('wi', 'witch'),
+    w3Player('v1', 'villager'),
+  ];
+  // Night death: wolves bite Hunter, Hunter marks v1, Bodyguard shields v1 & Witch heals v1 -> v1 still dies
+  const nightRes = resolveNightActions(nightRoster, {
+    wolfTargetId: 'hn',
+    hunterTargetId: 'v1',
+    guardTargetId: 'v1',
+    witchHealTargetId: 'v1',
+  });
+  assert.deepEqual(nightRes.result.hunterShots, [{ hunterId: 'hn', targetId: 'v1' }]);
+  assert.equal(nightRes.updatedPlayers.find((p) => p.id === 'hn')?.isAlive, false);
+  assert.equal(nightRes.updatedPlayers.find((p) => p.id === 'v1')?.isAlive, false);
+
+  // Day lynch of Hunter's Lover -> Hunter dies by Lover bond during day -> gun must NOT fire
+  const dayLoverRoster: Player[] = [
+    w3Player('wf', 'werewolf'),
+    w3Player('hn', 'hunter', { loverId: 'v2', hunterMarkId: 'wf' }),
+    w3Player('v2', 'villager', { loverId: 'hn' }),
+    w3Player('v1', 'villager'),
+  ];
+  const dayLoverLynch = applyDayLynch(dayLoverRoster, 'v2');
+  assert.deepEqual(dayLoverLynch.hunterShots, []);
+  assert.equal(dayLoverLynch.updatedPlayers.find((p) => p.id === 'hn')?.isAlive, false);
+  assert.equal(dayLoverLynch.updatedPlayers.find((p) => p.id === 'hn')?.hunterMarkId, undefined);
+  assert.equal(dayLoverLynch.updatedPlayers.find((p) => p.id === 'wf')?.isAlive, true);
+});
+
+test('[Wave 0] Timeout at 0s on human Hunter turn resolves hunterTargetId to null (No Mark) without overwriting explicit picks', () => {
+  assert.equal(resolveHunterTimeoutTarget('hunter', true, undefined), null);
+  assert.equal(resolveHunterTimeoutTarget('hunter', true, 'v1'), 'v1');
+  assert.equal(resolveHunterTimeoutTarget('hunter', true, null), null);
+  assert.equal(resolveHunterTimeoutTarget('hunter', false, undefined), undefined);
+  assert.equal(resolveHunterTimeoutTarget('werewolf', true, undefined), undefined);
+});
+
+test('[Wave 0] Uniform night step duration across living human, living bot, dead actor, and ghost spectator', () => {
+  const customCfg: CustomTimerConfig = {
+    ...DEFAULT_TIMER_CONFIG,
+    nightActionSec: 18,
+    botStepSec: 4,
+  };
+  const roster: Player[] = [
+    w3Player('u1', 'seer'),
+    w3Player('w1', 'werewolf', { isBot: true }),
+    w3Player('bg', 'bodyguard', { isBot: true, isAlive: false }),
+    w3Player('wi', 'witch', { isBot: true }),
+  ];
+  const schedule = buildAutoGMNightSchedule(roster, 2, customCfg, 'u1');
+  const humanStep = schedule.find((s) => s.key === 'seer')!;
+  const botAliveStep = schedule.find((s) => s.key === 'werewolf')!;
+  const deadActorStep = schedule.find((s) => s.key === 'bodyguard')!;
+  assert.equal(humanStep.hasLivingActor, true);
+  assert.equal(botAliveStep.hasLivingActor, true);
+  assert.equal(deadActorStep.hasLivingActor, false);
+
+  assert.equal(getStepInitialTimerSeconds(humanStep, 3, 3, false), 18);
+  assert.equal(getStepInitialTimerSeconds(botAliveStep, 3, 1, false), 18);
+  assert.equal(getStepInitialTimerSeconds(deadActorStep, 3, 0, false), 18);
+  assert.equal(getStepInitialTimerSeconds(botAliveStep, -1, 1, true), 18);
+  assert.equal(getStepInitialTimerSeconds(deadActorStep, -1, 0, true), 18);
+});
+
+test('[Wave 1] Strict vi + en language parity across UI_TEXT, ROLES, ROLE_CALLOUT_LINES, and PROP_REACTION_META', () => {
+  assert.deepEqual(Object.keys(UI_TEXT).sort(), ['en', 'vi']);
+  const viKeys = Object.keys(UI_TEXT.vi).sort();
+  const enKeys = Object.keys(UI_TEXT.en).sort();
+  assert.deepEqual(enKeys, viKeys, 'UI_TEXT.en and UI_TEXT.vi must expose identical keys');
+
+  for (const [roleId, def] of Object.entries(ROLES)) {
+    assert.deepEqual(Object.keys(def.name).sort(), ['en', 'vi'], `ROLES.${roleId}.name keys`);
+    assert.deepEqual(Object.keys(def.description).sort(), ['en', 'vi'], `ROLES.${roleId}.description keys`);
+    assert.deepEqual(Object.keys(def.instructions).sort(), ['en', 'vi'], `ROLES.${roleId}.instructions keys`);
+    assert.deepEqual(Object.keys(def.guideForNewbie).sort(), ['en', 'vi'], `ROLES.${roleId}.guideForNewbie keys`);
+    assert.ok(def.name.vi.trim().length > 0 && def.name.en.trim().length > 0);
+  }
+
+  for (const [roleId, callout] of Object.entries(ROLE_CALLOUT_LINES)) {
+    assert.deepEqual(Object.keys(callout.quotes).sort(), ['en', 'vi'], `ROLE_CALLOUT_LINES.${roleId}.quotes keys`);
+    assert.ok(callout.quotes.vi.trim().length > 0 && callout.quotes.en.trim().length > 0);
+  }
+
+  for (const [propId, meta] of Object.entries(PROP_REACTION_META)) {
+    assert.deepEqual(Object.keys(meta.badgeText).sort(), ['en', 'vi'], `PROP_REACTION_META.${propId}.badgeText keys`);
+    assert.deepEqual(Object.keys(meta.speechText).sort(), ['en', 'vi'], `PROP_REACTION_META.${propId}.speechText keys`);
+  }
+});
+
+

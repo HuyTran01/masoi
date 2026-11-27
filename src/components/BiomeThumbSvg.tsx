@@ -6,23 +6,14 @@ export const BIOME_DESCRIPTIONS: Record<AgrouMapBiome, Record<Language, string>>
   forest: {
     vi: 'Lửa trại ấm áp giữa rừng thông đỏ cổ thụ',
     en: 'Warm campfire beneath ancient redwood pines',
-    fr: 'Feu de camp sous les séquoias géants',
-    es: 'Fogata cálida bajo pinos milenarios',
-    ja: '巨木の赤松林に灯る焚き火',
   },
   frostpeak: {
     vi: 'Đỉnh núi tuyết băng giá dưới bầu trời cực quang',
     en: 'Snowy alpine summit under polar twilight',
-    fr: 'Sommet enneigé sous le crépuscule polaire',
-    es: 'Cumbre nevada bajo el crepúsculo polar',
-    ja: 'オーロラ輝く雪山の頂',
   },
   autumn: {
     vi: 'Đồi cỏ xanh mướt, suối trong, đại thụ cổ & đom đóm bay lấp lánh',
     en: 'Rolling emerald meadow, sparkling blue river, ancient oaks & fireflies',
-    fr: 'Prairie verdoyante, rivière bleue, chênes anciens et lucioles dorées',
-    es: 'Pradera esmeralda, río cristalino, robles antiguos y luciérnagas doradas',
-    ja: '緑の丘、澄んだ清流、古木の大樹と黄金の蛍',
   },
 };
 

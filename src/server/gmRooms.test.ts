@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 import { GMRoomManager } from './gmRooms';
+import { createRealtimeAppServer } from './realtimeServer.ts';
 
 test('GM room virtual_deck mode deals roles and strictly isolates player view (zero-leak)', () => {
   const mgr = new GMRoomManager();
@@ -327,3 +331,107 @@ test('GMRoomManager issues and verifies hostSecret/playerToken without leaking t
   mgr.leaveAsPlayer('GM-6666', 'u_elder');
   assert.equal(mgr.hasPlayerToken('GM-6666', 'u_elder'), false);
 });
+
+test('[Wave 3] Real HTTP multi-client GM Room flow: host sync, player join with tokens, anti-hijack 403, duplicate seat block & rematch redeal', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'masoi-gm-w3-'));
+  const srv = await createRealtimeAppServer({
+    port: 0,
+    host: '127.0.0.1',
+    accountsDbPath: path.join(tmpDir, 'accounts.json'),
+    enableSnapshots: false,
+    attachVite: false,
+    quiet: true,
+  });
+
+  try {
+    // 1. Host creates GM room via HTTP sync
+    const syncRes = await fetch(`${srv.baseUrl}/api/gm-rooms/GMLIVE/sync`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        hostId: 'gm_host',
+        deckMode: 'virtual_deck',
+        status: 'setup',
+        seats: [
+          { id: 'p_1', name: 'Alice', roleId: 'seer', roleSource: 'auto_dealt' },
+          { id: 'p_2', name: 'Bob', roleId: 'werewolf', roleSource: 'auto_dealt' },
+          { id: 'p_3', name: 'Carol', roleId: 'villager', roleSource: 'auto_dealt' },
+          { id: 'p_4', name: 'Dave', roleId: 'villager', roleSource: 'auto_dealt' },
+        ],
+      }),
+    });
+    assert.equal(syncRes.status, 200);
+    const syncJson = (await syncRes.json()) as { ok: boolean; hostSecret: string; room: { matchId: string } };
+    assert.equal(syncJson.ok, true);
+    const hostSecret = syncJson.hostSecret;
+    const initialMatchId = syncJson.room.matchId;
+
+    // 2. Hijacker trying to overwrite GM room with wrong hostSecret gets 403
+    const hijackRes = await fetch(`${srv.baseUrl}/api/gm-rooms/GMLIVE/sync`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-gm-host-secret': 'wrong_secret' },
+      body: JSON.stringify({ hostId: 'gm_host', round: 99 }),
+    });
+    assert.equal(hijackRes.status, 403);
+
+    // 3. Player 1 joins seat p_1 -> receives token and ONLY own role
+    const p1Res = await fetch(`${srv.baseUrl}/api/gm-rooms/GMLIVE/join`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ user: { id: 'u_alice', name: 'Alice' }, seatId: 'p_1' }),
+    });
+    assert.equal(p1Res.status, 200);
+    const p1Json = (await p1Res.json()) as { ok: boolean; playerToken: string; view: { mySeat: { roleId: string } } };
+    assert.equal(p1Json.view.mySeat.roleId, 'seer');
+    assert.equal(JSON.stringify(p1Json.view).includes('werewolf'), false);
+
+    // 4. Player 2 trying to steal p_1 gets rejected (400)
+    const stealRes = await fetch(`${srv.baseUrl}/api/gm-rooms/GMLIVE/join`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ user: { id: 'u_bob', name: 'Bob' }, seatId: 'p_1' }),
+    });
+    assert.equal(stealRes.status, 400);
+
+    // 5. Player 2 joins seat p_2 cleanly
+    const p2Res = await fetch(`${srv.baseUrl}/api/gm-rooms/GMLIVE/join`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ user: { id: 'u_bob', name: 'Bob' }, seatId: 'p_2' }),
+    });
+    assert.equal(p2Res.status, 200);
+
+    // 6. Rematch redeal via hostSecret updates matchId and preserves seat claim with new role
+    const redealRes = await fetch(`${srv.baseUrl}/api/gm-rooms/GMLIVE/sync`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-gm-host-secret': hostSecret },
+      body: JSON.stringify({
+        hostId: 'gm_host',
+        resetMatch: true,
+        seats: [
+          { id: 'p_1', name: 'Alice', roleId: 'witch', roleSource: 'auto_dealt' },
+          { id: 'p_2', name: 'Bob', roleId: 'bodyguard', roleSource: 'auto_dealt' },
+          { id: 'p_3', name: 'Carol', roleId: 'werewolf', roleSource: 'auto_dealt' },
+          { id: 'p_4', name: 'Dave', roleId: 'villager', roleSource: 'auto_dealt' },
+        ],
+      }),
+    });
+    assert.equal(redealRes.status, 200);
+    const redealJson = (await redealRes.json()) as { room: { matchId: string } };
+    assert.notEqual(redealJson.room.matchId, initialMatchId);
+
+    // Alice polls player state with her playerToken -> sees updated role 'witch' and new matchId
+    const pollRes = await fetch(
+      `${srv.baseUrl}/api/gm-rooms/GMLIVE/player/u_alice`,
+      { headers: { 'x-gm-player-token': p1Json.playerToken } }
+    );
+    assert.equal(pollRes.status, 200);
+    const pollJson = (await pollRes.json()) as { view: { matchId: string; mySeat: { roleId: string } } };
+    assert.equal(pollJson.view.matchId, redealJson.room.matchId);
+    assert.equal(pollJson.view.mySeat.roleId, 'witch');
+  } finally {
+    await srv.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+

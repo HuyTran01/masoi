@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import type { RoleId } from '../types/game.ts';
+import type { Language, RoleId } from '../types/game.ts';
 import {
   applyHostAdvancePhase,
   applyOnlineDayVote,
@@ -23,6 +23,7 @@ export interface RealtimeParticipant {
   elo: number;
   joinedAt: number;
   connected?: boolean;
+  lang?: Language;
 }
 
 export interface RealtimeTimerConfig {
@@ -133,6 +134,12 @@ export class RealtimeRoomManager {
   private playerSecrets = new Map<string, Map<string, string>>();
   private kickedSecrets = new Map<string, Map<string, string>>();
   private recentProps = new Map<string, RealtimePropEvent[]>();
+  private pendingHostTransfers = new Map<string, { disconnectedHostId: string; transferAt: number }>();
+  private hostDisconnectGraceMs: number;
+
+  constructor(options?: { hostDisconnectGraceMs?: number }) {
+    this.hostDisconnectGraceMs = Math.max(0, options?.hostDisconnectGraceMs ?? 15_000);
+  }
 
   private deleteRoomInternal(code: string) {
     this.rooms.delete(code);
@@ -140,6 +147,7 @@ export class RealtimeRoomManager {
     this.playerSecrets.delete(code);
     this.kickedSecrets.delete(code);
     this.recentProps.delete(code);
+    this.pendingHostTransfers.delete(code);
   }
 
   private pruneRooms(now = Date.now()) {
@@ -239,12 +247,32 @@ export class RealtimeRoomManager {
   getMatchViewForUser(
     rawCode: string,
     viewerId: string,
-    serverNow: number = Date.now()
+    serverNow: number = Date.now(),
+    explicitLang?: Language
   ): OnlinePlayerMatchView | null {
     const code = normalizeRoomCode(rawCode);
     const match = this.matchStates.get(code);
     if (!match) return null;
-    return buildPlayerMatchView(match, viewerId, serverNow);
+    const room = this.rooms.get(code);
+    const participantLang = room?.participants.find((p) => p.id === viewerId)?.lang;
+    const viewerLang: Language =
+      explicitLang === 'en' || (!explicitLang && participantLang === 'en') ? 'en' : 'vi';
+    return buildPlayerMatchView(match, viewerId, serverNow, viewerLang);
+  }
+
+  setParticipantLang(
+    rawCode: string,
+    userId: string,
+    lang: Language
+  ): { ok: true; room: RealtimeRoomState } | { ok: false; error: string } {
+    const code = normalizeRoomCode(rawCode);
+    const room = this.rooms.get(code);
+    if (!room) return { ok: false, error: 'Phòng không tồn tại.' };
+    const participant = room.participants.find((p) => p.id === userId);
+    if (!participant) return { ok: false, error: 'Người chơi không có trong phòng.' };
+    participant.lang = lang === 'en' ? 'en' : 'vi';
+    room.updatedAt = Date.now();
+    return { ok: true, room: this.cloneRoom(room) };
   }
 
   getOrIssuePlayerSecret(rawCode: string, userId: string): string {
@@ -319,6 +347,27 @@ export class RealtimeRoomManager {
     );
   }
 
+  exportAllSnapshots(): StoredOnlineRoomSnapshot[] {
+    const out: StoredOnlineRoomSnapshot[] = [];
+    for (const code of this.rooms.keys()) {
+      const snap = this.exportSnapshot(code);
+      if (snap) out.push(snap);
+    }
+    return out;
+  }
+
+  importAllSnapshots(snapshots: StoredOnlineRoomSnapshot[], now = Date.now()): number {
+    let loaded = 0;
+    if (!Array.isArray(snapshots)) return 0;
+    for (const snap of snapshots) {
+      if (!snap?.room?.code) continue;
+      if (now - (snap.room.updatedAt || 0) > IDLE_ROOM_TTL_MS) continue;
+      this.importSnapshot(snap);
+      loaded += 1;
+    }
+    return loaded;
+  }
+
   listOpenRooms(): OpenRoomSummary[] {
     const summaries: OpenRoomSummary[] = [];
     for (const room of this.rooms.values()) {
@@ -338,8 +387,13 @@ export class RealtimeRoomManager {
 
   createOrJoinRoom(
     rawCode: string,
-    user: { id: string; name: string; avatar: string; elo: number },
-    options?: { villageSize?: number; timerConfig?: Partial<RealtimeTimerConfig>; createIfMissing?: boolean }
+    user: { id: string; name: string; avatar: string; elo: number; lang?: Language },
+    options?: {
+      villageSize?: number;
+      timerConfig?: Partial<RealtimeTimerConfig>;
+      createIfMissing?: boolean;
+      lang?: Language;
+    }
   ): { ok: true; room: RealtimeRoomState; created: boolean } | { ok: false; error: string } {
     const code = normalizeRoomCode(rawCode);
     if (code.length < 3) {
@@ -347,6 +401,8 @@ export class RealtimeRoomManager {
     }
 
     const now = Date.now();
+    const resolvedLang: Language =
+      options?.lang === 'en' || user.lang === 'en' ? 'en' : 'vi';
     const existing = this.rooms.get(code);
 
     if (!existing) {
@@ -375,6 +431,7 @@ export class RealtimeRoomManager {
             elo: Number(user.elo) || 1500,
             joinedAt: now,
             connected: true,
+            lang: resolvedLang,
           },
         ],
         chatMessages: [],
@@ -396,7 +453,12 @@ export class RealtimeRoomManager {
         avatar: user.avatar.slice(0, 16) || existing.participants[alreadyIdx].avatar,
         elo: Number(user.elo) || existing.participants[alreadyIdx].elo,
         connected: true,
+        lang: options?.lang || user.lang ? resolvedLang : existing.participants[alreadyIdx].lang || 'vi',
       };
+      const pending = this.pendingHostTransfers.get(code);
+      if (pending && pending.disconnectedHostId === user.id) {
+        this.pendingHostTransfers.delete(code);
+      }
       existing.updatedAt = now;
       return { ok: true, room: this.cloneRoom(existing), created: false };
     }
@@ -427,6 +489,7 @@ export class RealtimeRoomManager {
       elo: Number(user.elo) || 1500,
       joinedAt: now,
       connected: true,
+      lang: resolvedLang,
     });
     this.kickedSecrets.get(code)?.delete(user.id);
     existing.updatedAt = now;
@@ -436,19 +499,27 @@ export class RealtimeRoomManager {
   leaveRoom(
     rawCode: string,
     userId: string,
-    options?: { isDisconnect?: boolean }
+    options?: { isDisconnect?: boolean; now?: number }
   ): { room: RealtimeRoomState | null; deleted: boolean } {
     const code = normalizeRoomCode(rawCode);
     const room = this.rooms.get(code);
     if (!room) return { room: null, deleted: false };
+    const now = options?.now ?? Date.now();
 
-    if (options?.isDisconnect && room.status === 'in_match') {
+    if (options?.isDisconnect) {
       const participant = room.participants.find((p) => p.id === userId);
       if (participant) {
         participant.connected = false;
       }
-      // ponytail: never delete active in_match rooms on brief WS drops; idle TTL pruneRooms handles cleanup
-      room.updatedAt = Date.now();
+      if (room.hostId === userId) {
+        this.pendingHostTransfers.set(code, {
+          disconnectedHostId: userId,
+          transferAt: now + this.hostDisconnectGraceMs,
+        });
+      }
+      // Never delete waiting or active in_match rooms on a brief WS disconnect;
+      // grace timer handles host transfer/waiting cleanup and idle TTL prunes stale rooms.
+      room.updatedAt = now;
       return { room: this.cloneRoom(room), deleted: false };
     }
 
@@ -462,7 +533,9 @@ export class RealtimeRoomManager {
     }
 
     if (room.hostId === userId || !room.participants.some((p) => p.id === room.hostId)) {
-      const nextHost = remainingHumans[0];
+      this.pendingHostTransfers.delete(code);
+      const nextHost =
+        remainingHumans.find((p) => p.connected !== false) ?? remainingHumans[0];
       room.hostId = nextHost.id;
       room.participants = room.participants.map((p) => ({
         ...p,
@@ -470,7 +543,7 @@ export class RealtimeRoomManager {
       }));
     }
 
-    room.updatedAt = Date.now();
+    room.updatedAt = now;
     return { room: this.cloneRoom(room), deleted: false };
   }
 
@@ -729,31 +802,87 @@ export class RealtimeRoomManager {
   tickRoom(
     rawCode: string,
     now: number = Date.now()
-  ): { changed: boolean; room: RealtimeRoomState | null; eloUpdates?: EloUpdateEntry[] } {
+  ): {
+    changed: boolean;
+    room: RealtimeRoomState | null;
+    deleted?: boolean;
+    eloUpdates?: EloUpdateEntry[];
+  } {
     const code = normalizeRoomCode(rawCode);
     const room = this.rooms.get(code);
+    if (!room) {
+      this.pendingHostTransfers.delete(code);
+      return { changed: false, room: null };
+    }
+
+    let changed = false;
+    const pendingHost = this.pendingHostTransfers.get(code);
+    if (pendingHost && now >= pendingHost.transferAt) {
+      this.pendingHostTransfers.delete(code);
+      const currentHost = room.participants.find((p) => p.id === room.hostId);
+      if (
+        room.hostId === pendingHost.disconnectedHostId &&
+        currentHost &&
+        currentHost.connected === false
+      ) {
+        const nextConnectedHuman = room.participants.find(
+          (p) => !p.isBot && p.id !== pendingHost.disconnectedHostId && p.connected !== false
+        );
+        if (nextConnectedHuman) {
+          room.hostId = nextConnectedHuman.id;
+          room.participants = room.participants.map((p) => ({
+            ...p,
+            isHost: p.id === nextConnectedHuman.id,
+          }));
+          room.updatedAt = now;
+          changed = true;
+        } else if (room.status === 'waiting') {
+          this.deleteRoomInternal(code);
+          return { changed: true, room: null, deleted: true };
+        }
+      }
+    }
+
     const match = this.matchStates.get(code);
-    if (!room || !match) return { changed: false, room: room ? this.cloneRoom(room) : null };
+    if (!match) {
+      return { changed, room: this.cloneRoom(room) };
+    }
 
     const res = tickOnlineMatchIfDue(match, this.createBridge(room), now);
     if (res.changed) {
       room.updatedAt = now;
+      changed = true;
     }
-    return { changed: res.changed, room: this.cloneRoom(room), eloUpdates: res.eloUpdates };
+    return { changed, room: this.cloneRoom(room), eloUpdates: res.eloUpdates };
   }
 
   tickDueRooms(
     now: number = Date.now()
-  ): Array<{ code: string; room: RealtimeRoomState; eloUpdates?: EloUpdateEntry[] }> {
+  ): Array<{
+    code: string;
+    room: RealtimeRoomState | null;
+    deleted?: boolean;
+    eloUpdates?: EloUpdateEntry[];
+  }> {
     const changedRooms: Array<{
       code: string;
-      room: RealtimeRoomState;
+      room: RealtimeRoomState | null;
+      deleted?: boolean;
       eloUpdates?: EloUpdateEntry[];
     }> = [];
-    for (const code of this.matchStates.keys()) {
+    const candidateCodes = new Set<string>([
+      ...this.matchStates.keys(),
+      ...this.pendingHostTransfers.keys(),
+    ]);
+    for (const code of candidateCodes) {
       const res = this.tickRoom(code, now);
-      if (res.changed && res.room) {
-        changedRooms.push({ code, room: res.room, eloUpdates: res.eloUpdates });
+      if (res.changed) {
+        changedRooms.push({
+          code,
+          room: res.room,
+          deleted: res.deleted,
+          eloUpdates: res.eloUpdates,
+        });
       }
     }
     return changedRooms;

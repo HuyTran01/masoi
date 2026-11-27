@@ -1,6 +1,15 @@
 import * as THREE from 'three';
 import { AGROU_BIOMES, AgrouMapBiome } from '../../game/agrouMechanics';
 import type { EnvObstacle } from '../../game/fpvCamera';
+import {
+  createSoftSmokeTexture,
+  createStoneTexture,
+  createStylizedFlameTexture,
+  createTerrainBumpTexture,
+  createTerrainDetailTexture,
+  createWaterRippleTexture,
+  createWoodGrainTexture,
+} from './stylizedAssets';
 
 export type { EnvObstacle };
 
@@ -125,45 +134,76 @@ function createRadialGlowTexture(
   return tex;
 }
 
-// Create lush multi-blade low-poly grass tuft BufferGeometry (7 lush fanned tapered blades)
+// Create lush curved multi-blade storybook grass tuft BufferGeometry (9 arching 2-segment blades with root-to-tip vertex shading!)
 function createGrassTuftGeometry(): THREE.BufferGeometry {
   const positions: number[] = [];
   const normals: number[] = [];
+  const colors: number[] = [];
   const bladeSpecs = [
-    { angle: 0.0, lean: 0.18, h: 0.68, w: 0.11, ox: 0.0, oz: 0.0 },
-    { angle: 0.9, lean: 0.24, h: 0.56, w: 0.095, ox: 0.09, oz: 0.06 },
-    { angle: 1.8, lean: 0.21, h: 0.64, w: 0.105, ox: -0.07, oz: 0.08 },
-    { angle: 2.7, lean: 0.25, h: 0.5, w: 0.09, ox: -0.1, oz: -0.04 },
-    { angle: 3.6, lean: 0.2, h: 0.6, w: 0.1, ox: 0.06, oz: -0.09 },
-    { angle: 4.55, lean: 0.26, h: 0.46, w: 0.085, ox: 0.12, oz: -0.02 },
-    { angle: 5.5, lean: 0.22, h: 0.58, w: 0.095, ox: -0.04, oz: -0.11 },
+    { angle: 0.0, lean: 0.24, h: 0.72, w: 0.082, ox: 0.0, oz: 0.0 },
+    { angle: 0.72, lean: 0.29, h: 0.58, w: 0.072, ox: 0.09, oz: 0.06 },
+    { angle: 1.44, lean: 0.26, h: 0.68, w: 0.078, ox: -0.07, oz: 0.08 },
+    { angle: 2.16, lean: 0.31, h: 0.52, w: 0.068, ox: -0.11, oz: -0.04 },
+    { angle: 2.88, lean: 0.25, h: 0.64, w: 0.075, ox: 0.06, oz: -0.09 },
+    { angle: 3.6, lean: 0.32, h: 0.48, w: 0.066, ox: 0.12, oz: -0.02 },
+    { angle: 4.32, lean: 0.27, h: 0.62, w: 0.074, ox: -0.04, oz: -0.11 },
+    { angle: 5.04, lean: 0.3, h: 0.54, w: 0.07, ox: -0.09, oz: 0.05 },
+    { angle: 5.76, lean: 0.22, h: 0.66, w: 0.076, ox: 0.04, oz: 0.1 },
   ];
 
-  const vA = new THREE.Vector3();
-  const vB = new THREE.Vector3();
-  const vC = new THREE.Vector3();
+  const v0 = new THREE.Vector3();
+  const v1 = new THREE.Vector3();
+  const v2 = new THREE.Vector3();
+  const v3 = new THREE.Vector3();
+  const v4 = new THREE.Vector3();
   const e1 = new THREE.Vector3();
   const e2 = new THREE.Vector3();
   const n = new THREE.Vector3();
 
+  const pushTri = (
+    a: THREE.Vector3,
+    b: THREE.Vector3,
+    c: THREE.Vector3,
+    ca: [number, number, number],
+    cb: [number, number, number],
+    cc: [number, number, number]
+  ) => {
+    e1.subVectors(b, a);
+    e2.subVectors(c, a);
+    n.crossVectors(e1, e2).normalize();
+    // Tilt normal softly upward so grass catches warm sunlit sky lighting naturally
+    n.lerp(new THREE.Vector3(0, 1, 0), 0.45).normalize();
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+    normals.push(n.x, n.y, n.z, n.x, n.y, n.z, n.x, n.y, n.z);
+    colors.push(...ca, ...cb, ...cc);
+  };
+
+  const cRoot: [number, number, number] = [0.48, 0.54, 0.38];
+  const cMid: [number, number, number] = [0.85, 0.92, 0.72];
+  const cTip: [number, number, number] = [1.14, 1.18, 0.88];
+
   for (const b of bladeSpecs) {
     const ca = Math.cos(b.angle);
     const sa = Math.sin(b.angle);
-    vA.set(b.ox - sa * b.w, 0, b.oz + ca * b.w);
-    vB.set(b.ox + sa * b.w, 0, b.oz - ca * b.w);
-    vC.set(b.ox + ca * b.lean, b.h, b.oz + sa * b.lean);
+    const midW = b.w * 0.58;
+    const midLean = b.lean * 0.36;
+    const midH = b.h * 0.54;
 
-    e1.subVectors(vB, vA);
-    e2.subVectors(vC, vA);
-    n.crossVectors(e1, e2).normalize();
+    v0.set(b.ox - sa * b.w, 0, b.oz + ca * b.w);
+    v1.set(b.ox + sa * b.w, 0, b.oz - ca * b.w);
+    v2.set(b.ox + ca * midLean - sa * midW, midH, b.oz + sa * midLean + ca * midW);
+    v3.set(b.ox + ca * midLean + sa * midW, midH, b.oz + sa * midLean - ca * midW);
+    v4.set(b.ox + ca * b.lean, b.h, b.oz + sa * b.lean);
 
-    positions.push(vA.x, vA.y, vA.z, vB.x, vB.y, vB.z, vC.x, vC.y, vC.z);
-    normals.push(n.x, n.y, n.z, n.x, n.y, n.z, n.x, n.y, n.z);
+    pushTri(v0, v1, v2, cRoot, cRoot, cMid);
+    pushTri(v1, v3, v2, cRoot, cMid, cMid);
+    pushTri(v2, v3, v4, cMid, cMid, cTip);
   }
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   return geo;
 }
 
@@ -219,13 +259,13 @@ function createCanvasTent(variant: 'light' | 'dark'): {
   rightFlap: THREE.Mesh;
 } {
   const tent = new THREE.Group();
-  const canvasColor = variant === 'light' ? 0xdad5c7 : 0xcfcfc2;
+  const canvasColor = variant === 'light' ? 0xb5ada0 : 0xa39d92;
   const sideWallColor = variant === 'light' ? 0x4b4642 : 0x353c45;
   const trimColor = 0x26292e;
 
   const canvasMat = new THREE.MeshStandardMaterial({
     color: canvasColor,
-    roughness: 0.9,
+    roughness: 0.96,
     metalness: 0.0,
     flatShading: true,
     side: THREE.DoubleSide,
@@ -371,49 +411,86 @@ function createCanvasTent(variant: 'light' | 'dark'): {
   return { tent, leftFlap, rightFlap };
 }
 
-// Build a monumental ancient gnarled hilltop oak tree with wide umbrella canopy framed cleanly in sky (Matches Image 1 & 3!)
-function createAncientOakTree(scale: number): THREE.Group {
+// Build a lush painterly storybook gnarled oak tree with organic roots, spreading boughs & layered leafy clusters!
+function createAncientOakTree(scale: number, woodTex: THREE.Texture): THREE.Group {
   const oak = new THREE.Group();
   const barkMat = new THREE.MeshStandardMaterial({
-    color: 0x3b2d24,
-    roughness: 0.96,
-    flatShading: true,
+    color: 0x5c3e26,
+    map: woodTex,
+    roughness: 0.94,
+    metalness: 0.0,
   });
   const canopyDarkMat = new THREE.MeshStandardMaterial({
-    color: 0x2d5223,
-    roughness: 0.9,
-    flatShading: true,
+    color: 0x264419,
+    roughness: 0.88,
+    metalness: 0.0,
   });
   const canopyMidMat = new THREE.MeshStandardMaterial({
-    color: 0x426e2b,
-    roughness: 0.88,
-    flatShading: true,
+    color: 0x3f6922,
+    roughness: 0.84,
+    metalness: 0.0,
   });
   const canopyLightMat = new THREE.MeshStandardMaterial({
-    color: 0x5c8c38,
-    roughness: 0.86,
-    flatShading: true,
+    color: 0x678f2e,
+    roughness: 0.8,
+    metalness: 0.0,
+  });
+  const canopySunMat = new THREE.MeshStandardMaterial({
+    color: 0x8db03c,
+    roughness: 0.78,
+    metalness: 0.0,
   });
 
-  // Massive flared gnarled trunk (compact proportions so sweeping boughs & wide green umbrella crown frame inside upper sky!)
-  const lowerTrunk = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 2.0, 2.6, 8), barkMat);
-  lowerTrunk.position.y = 1.25;
+  // Flared organic surface roots gripping the grassy soil
+  for (let r = 0; r < 5; r++) {
+    const ra = (r / 5) * Math.PI * 2 + 0.3;
+    const root = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.56, 2.3, 8), barkMat);
+    root.position.set(Math.cos(ra) * 1.15, 0.55, Math.sin(ra) * 1.15);
+    root.rotation.z = Math.cos(ra) * 0.82;
+    root.rotation.x = -Math.sin(ra) * 0.82;
+    root.castShadow = true;
+    oak.add(root);
+  }
+
+  // Smooth gnarled trunk
+  const lowerTrunk = new THREE.Mesh(new THREE.CylinderGeometry(0.88, 1.65, 2.9, 12), barkMat);
+  lowerTrunk.position.y = 1.4;
   lowerTrunk.castShadow = true;
+  lowerTrunk.receiveShadow = true;
   oak.add(lowerTrunk);
 
-  const upperTrunk = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 1.02, 2.1, 8), barkMat);
-  upperTrunk.position.set(0.14, 3.15, 0.08);
-  upperTrunk.rotation.z = -0.06;
+  const upperTrunk = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 0.94, 2.3, 12), barkMat);
+  upperTrunk.position.set(0.16, 3.45, 0.08);
+  upperTrunk.rotation.z = -0.07;
   upperTrunk.castShadow = true;
   oak.add(upperTrunk);
 
   const boughSpecs = [
-    { angle: 0.25, tilt: 0.95, len: 5.0, r: 0.46, y: 3.7 },
-    { angle: 1.4, tilt: 0.88, len: 4.7, r: 0.42, y: 3.95 },
-    { angle: 2.55, tilt: 0.96, len: 5.4, r: 0.48, y: 3.65 },
-    { angle: 3.7, tilt: 0.9, len: 4.5, r: 0.42, y: 3.9 },
-    { angle: 4.9, tilt: 0.94, len: 4.9, r: 0.44, y: 3.75 },
+    { angle: 0.25, tilt: 0.95, len: 5.0, r: 0.44, y: 3.9 },
+    { angle: 1.4, tilt: 0.88, len: 4.7, r: 0.4, y: 4.15 },
+    { angle: 2.55, tilt: 0.96, len: 5.3, r: 0.46, y: 3.85 },
+    { angle: 3.7, tilt: 0.9, len: 4.5, r: 0.4, y: 4.1 },
+    { angle: 4.9, tilt: 0.94, len: 4.9, r: 0.42, y: 3.95 },
   ];
+
+  // Organic scalloped leafy clump geometry (jittered vertices prevent smooth pancake/mushroom look!)
+  const makeLeafClusterGeo = (radius: number, seed: number) => {
+    const g = new THREE.IcosahedronGeometry(radius, 1);
+    const pos = g.attributes.position as THREE.BufferAttribute;
+    for (let vi = 0; vi < pos.count; vi++) {
+      const vx = pos.getX(vi);
+      const vy = pos.getY(vi);
+      const vz = pos.getZ(vi);
+      const n = 0.86 + hash2(vx * 3.1 + vy * 2.3, vz * 3.7 + seed) * 0.28;
+      pos.setXYZ(vi, vx * n, vy * n, vz * n);
+    }
+    pos.needsUpdate = true;
+    g.computeVertexNormals();
+    return g;
+  };
+  const puffGeoLarge = makeLeafClusterGeo(1.78, 1.1);
+  const puffGeoMed = makeLeafClusterGeo(1.32, 3.7);
+  const puffGeoSmall = makeLeafClusterGeo(0.92, 6.4);
 
   for (let i = 0; i < boughSpecs.length; i++) {
     const b = boughSpecs[i];
@@ -422,7 +499,7 @@ function createAncientOakTree(scale: number): THREE.Group {
     boughPivot.rotation.y = b.angle;
 
     const branch = new THREE.Mesh(
-      new THREE.CylinderGeometry(b.r * 0.42, b.r, b.len, 6),
+      new THREE.CylinderGeometry(b.r * 0.36, b.r, b.len, 8),
       barkMat
     );
     branch.position.set(0, b.len * 0.44, 0);
@@ -430,35 +507,69 @@ function createAncientOakTree(scale: number): THREE.Group {
     boughPivot.add(branch);
     oak.add(boughPivot);
 
-    const tipDist = Math.sin(b.tilt) * b.len * 0.88;
-    const tipY = b.y + Math.cos(b.tilt) * b.len * 0.8;
+    const tipDist = Math.sin(b.tilt) * b.len * 0.86;
+    const tipY = b.y + Math.cos(b.tilt) * b.len * 0.85;
     const cx = Math.cos(-b.angle) * tipDist;
     const cz = Math.sin(-b.angle) * tipDist;
 
-    const leafCluster = new THREE.Mesh(
-      new THREE.DodecahedronGeometry(2.85 + (i % 2) * 0.5, 1),
-      i % 2 === 0 ? canopyMidMat : canopyDarkMat
-    );
-    leafCluster.scale.set(1.36, 0.62, 1.24);
-    leafCluster.position.set(cx, tipY + 0.8, cz);
-    leafCluster.castShadow = true;
-    oak.add(leafCluster);
+    // Deep shaded lower bough cluster
+    const underPuff = new THREE.Mesh(puffGeoLarge, canopyDarkMat);
+    underPuff.scale.set(1.12, 0.82, 1.06);
+    underPuff.position.set(cx, tipY + 0.55, cz);
+    underPuff.rotation.set(i * 0.4, i * 1.1, 0.2);
+    underPuff.castShadow = true;
+    oak.add(underPuff);
 
-    const leafSub = new THREE.Mesh(new THREE.DodecahedronGeometry(2.1, 1), canopyLightMat);
-    leafSub.scale.set(1.26, 0.58, 1.15);
-    leafSub.position.set(cx * 0.72, tipY + 1.75, cz * 0.72);
-    oak.add(leafSub);
+    // Rich mid-canopy rounded leafy clump
+    const midPuff = new THREE.Mesh(puffGeoLarge, canopyMidMat);
+    midPuff.scale.set(1.06, 0.9, 1.02);
+    midPuff.position.set(cx * 0.84, tipY + 1.45, cz * 0.84);
+    midPuff.rotation.set(0.2, i * 1.7, -0.15);
+    midPuff.castShadow = true;
+    oak.add(midPuff);
+
+    // Irregular overhanging leafy sprigs around the bough edge
+    for (let k = 0; k < 4; k++) {
+      const ka = b.angle + (k - 1.5) * 0.58;
+      const sub = new THREE.Mesh(
+        k % 2 === 0 ? puffGeoSmall : puffGeoMed,
+        k === 1 ? canopySunMat : k === 2 ? canopyLightMat : canopyMidMat
+      );
+      sub.scale.set(0.95 + (k % 2) * 0.16, 0.78 + (k % 3) * 0.12, 0.92);
+      sub.position.set(
+        cx + Math.cos(ka) * (1.15 + (k % 2) * 0.45),
+        tipY + 0.85 + (k === 1 ? 1.15 : k === 2 ? 0.55 : -0.05),
+        cz + Math.sin(ka) * (1.15 + (k % 2) * 0.45)
+      );
+      sub.rotation.set(k * 0.5, ka, k * 0.3);
+      oak.add(sub);
+    }
+
+    // Sunlit crown tip cluster
+    const topPuff = new THREE.Mesh(puffGeoMed, i % 2 === 0 ? canopySunMat : canopyLightMat);
+    topPuff.scale.set(1.05, 0.88, 1.0);
+    topPuff.position.set(cx * 0.62, tipY + 2.35, cz * 0.62);
+    oak.add(topPuff);
   }
 
-  const crownTop = new THREE.Mesh(new THREE.DodecahedronGeometry(4.0, 1), canopyMidMat);
-  crownTop.scale.set(1.44, 0.56, 1.32);
-  crownTop.position.set(0.1, 6.4, 0);
-  oak.add(crownTop);
-
-  const crownHighlight = new THREE.Mesh(new THREE.DodecahedronGeometry(2.9, 1), canopyLightMat);
-  crownHighlight.scale.set(1.25, 0.54, 1.18);
-  crownHighlight.position.set(-0.5, 7.4, 0.4);
-  oak.add(crownHighlight);
+  // Sculpted asymmetric storybook crown dome (irregular clusters, never a flat pancake!)
+  const crownClusters = [
+    { x: 0.1, y: 6.2, z: 0.0, s: 1.38, sy: 1.05, mat: canopyDarkMat },
+    { x: -1.1, y: 7.0, z: 0.8, s: 1.18, sy: 0.96, mat: canopyMidMat },
+    { x: 1.25, y: 7.1, z: -0.65, s: 1.15, sy: 0.95, mat: canopyMidMat },
+    { x: 0.2, y: 7.55, z: 0.35, s: 1.24, sy: 1.02, mat: canopyLightMat },
+    { x: -0.55, y: 8.35, z: 0.45, s: 0.98, sy: 0.88, mat: canopySunMat },
+    { x: 0.75, y: 8.15, z: -0.2, s: 0.88, sy: 0.84, mat: canopySunMat },
+  ];
+  for (let c = 0; c < crownClusters.length; c++) {
+    const cc = crownClusters[c];
+    const m = new THREE.Mesh(c < 4 ? puffGeoLarge : puffGeoMed, cc.mat);
+    m.scale.set(cc.s, cc.sy, cc.s * 0.96);
+    m.position.set(cc.x, cc.y, cc.z);
+    m.rotation.set(c * 0.3, c * 1.4, c * 0.2);
+    m.castShadow = true;
+    oak.add(m);
+  }
 
   oak.scale.setScalar(scale);
   return oak;
@@ -482,11 +593,24 @@ export function buildAgrouEnvironment(
     disposableMats.push(m);
     return m;
   };
+  const trackTex = <T extends THREE.Texture>(t: T): T => {
+    disposableTex.push(t);
+    return t;
+  };
+
+  // Shared high-craft procedural hand-painted textures
+  const terrainDetailTex = trackTex(createTerrainDetailTexture());
+  const terrainBumpTex = trackTex(createTerrainBumpTexture());
+  const woodGrainTex = trackTex(createWoodGrainTexture());
+  const stoneTex = trackTex(createStoneTexture());
+  const waterRippleTex = trackTex(createWaterRippleTexture());
+  const softSmokeTex = trackTex(createSoftSmokeTexture());
+  const stylizedFlameTex = trackTex(createStylizedFlameTexture());
 
   // =========================================================================
-  // 1. PROCEDURAL GRADIENT SKY DOME + STARS + SOFT CLOUDS
+  // 1. GOLDEN-HOUR STORYBOOK SKY DOME + STARS + SOFT CLOUDS
   // =========================================================================
-  const skyGeo = trackGeo(new THREE.SphereGeometry(96, 24, 16));
+  const skyGeo = trackGeo(new THREE.SphereGeometry(96, 28, 18));
   const skyPos = skyGeo.attributes.position;
   const skyColors = new Float32Array(skyPos.count * 3);
   skyGeo.setAttribute('color', new THREE.BufferAttribute(skyColors, 3));
@@ -512,19 +636,19 @@ export function buildAgrouEnvironment(
       cMid.setHex(0x060a14);
       cHorizon.setHex(0x0c1322);
     } else if (biome === 'autumn') {
-      // Riverside Meadow: bright painted sky-blue dome (Image 1 & 3)
-      cTop.setHex(isDay ? 0x3b74b8 : 0x0a1326);
-      cMid.setHex(isDay ? 0x6ba1d6 : 0x162642);
-      cHorizon.setHex(isDay ? 0xa9cde8 : 0x263c5c);
+      // Riverside Meadow: warm golden-hour sunlit meadow mist horizon (Matches reference!)
+      cTop.setHex(isDay ? 0x89b3c4 : 0x0a1326);
+      cMid.setHex(isDay ? 0xd5d2b0 : 0x162642);
+      cHorizon.setHex(isDay ? 0xf2e6be : 0x263c5c);
     } else if (biome === 'frostpeak') {
       cTop.setHex(isDay ? 0x5c90c2 : 0x091224);
-      cMid.setHex(isDay ? 0x91bcdb : 0x162945);
-      cHorizon.setHex(isDay ? 0xd0e6f5 : 0x2a4060);
+      cMid.setHex(isDay ? 0x9ec4e0 : 0x162945);
+      cHorizon.setHex(isDay ? 0xe5f0f7 : 0x2a4060);
     } else {
-      // Redwood Forest Camp: cool blue-slate atmospheric forest mist sky (Image 2 & 4)
-      cTop.setHex(isDay ? 0x22303d : 0x080d17);
-      cMid.setHex(isDay ? 0x3a4d5e : 0x121c2c);
-      cHorizon.setHex(isDay ? 0x5c7082 : 0x1e2c3e);
+      // Redwood Forest Camp: warm dappled golden forest mist sky
+      cTop.setHex(isDay ? 0x587478 : 0x080d17);
+      cMid.setHex(isDay ? 0x98ab96 : 0x121c2c);
+      cHorizon.setHex(isDay ? 0xd9d7b6 : 0x1e2c3e);
     }
 
     const colAttr = skyGeo.attributes.color as THREE.BufferAttribute;
@@ -541,7 +665,7 @@ export function buildAgrouEnvironment(
   };
 
   // Night Starfield
-  const STAR_COUNT = 120;
+  const STAR_COUNT = 130;
   const starGeo = trackGeo(new THREE.OctahedronGeometry(0.14, 0));
   const starMat = trackMat(
     new THREE.MeshBasicMaterial({ color: 0xe6f0ff, transparent: true, opacity: 0.85, fog: false })
@@ -564,10 +688,10 @@ export function buildAgrouEnvironment(
   starInst.instanceMatrix.needsUpdate = true;
   scene.add(starInst);
 
-  // Soft Wispy Horizon Clouds (visible on Meadow & Frostpeak day sky)
+  // Soft Warm Sunlit Horizon Clouds
   const cloudGroup = new THREE.Group();
   const cloudMat = trackMat(
-    new THREE.MeshBasicMaterial({ color: 0xdcebf7, transparent: true, opacity: 0.5, fog: false })
+    new THREE.MeshBasicMaterial({ color: 0xf7f1dd, transparent: true, opacity: 0.44, fog: false })
   );
   const cloudClusters: Array<{ mesh: THREE.Group; baseAngle: number; radius: number; height: number; speed: number }> = [];
   for (let c = 0; c < 8; c++) {
@@ -577,7 +701,7 @@ export function buildAgrouEnvironment(
     const height = 22 + (c % 4) * 3.5;
     for (let p = 0; p < 4; p++) {
       const puff = new THREE.Mesh(
-        trackGeo(new THREE.DodecahedronGeometry(2.6 + (p % 2) * 1.4, 0)),
+        trackGeo(new THREE.IcosahedronGeometry(2.6 + (p % 2) * 1.4, 1)),
         cloudMat
       );
       puff.position.set((p - 1.5) * 2.5, (p % 2) * 0.6, (p % 3 - 1) * 0.8);
@@ -590,30 +714,31 @@ export function buildAgrouEnvironment(
   scene.add(cloudGroup);
 
   // =========================================================================
-  // 2. SCULPTED VERTEX-COLORED LOW-POLY FACETED TERRAIN (Radial-Concentrated Smooth Rim!)
+  // 2. SMOOTH HAND-PAINTED TEXTURED & VERTEX-COLORED STORYBOOK TERRAIN
   // =========================================================================
-  const baseTerrainGeo = new THREE.PlaneGeometry(164, 164, 68, 68);
-  baseTerrainGeo.rotateX(-Math.PI / 2);
-  const bPos = baseTerrainGeo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < bPos.count; i++) {
-    const ux = bPos.getX(i) / 82;
-    const uz = bPos.getZ(i) / 82;
-    bPos.setX(i, Math.sign(ux) * Math.pow(Math.abs(ux), 1.28) * 82);
-    bPos.setZ(i, Math.sign(uz) * Math.pow(Math.abs(uz), 1.28) * 82);
-  }
-  const terrainGeo = trackGeo(baseTerrainGeo.toNonIndexed());
-  baseTerrainGeo.dispose();
-
+  const terrainGeo = trackGeo(new THREE.PlaneGeometry(164, 164, 74, 74));
+  terrainGeo.rotateX(-Math.PI / 2);
   const tPos = terrainGeo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < tPos.count; i++) {
+    const ux = tPos.getX(i) / 82;
+    const uz = tPos.getZ(i) / 82;
+    tPos.setX(i, Math.sign(ux) * Math.pow(Math.abs(ux), 1.24) * 82);
+    tPos.setZ(i, Math.sign(uz) * Math.pow(Math.abs(uz), 1.24) * 82);
+  }
+
   const terrainColors = new Float32Array(tPos.count * 3);
   terrainGeo.setAttribute('color', new THREE.BufferAttribute(terrainColors, 3));
 
   const terrainMat = trackMat(
     new THREE.MeshStandardMaterial({
+      color: 0xffffff,
       vertexColors: true,
-      roughness: 0.94,
+      map: terrainDetailTex,
+      bumpMap: terrainBumpTex,
+      bumpScale: 0.14,
+      roughness: 0.93,
       metalness: 0.0,
-      flatShading: true,
+      flatShading: false,
     })
   );
   const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
@@ -621,7 +746,10 @@ export function buildAgrouEnvironment(
   scene.add(terrainMesh);
 
   const cSand = new THREE.Color();
+  const cSandWarm = new THREE.Color();
+  const cSandDark = new THREE.Color();
   const cGrass = new THREE.Color();
+  const cGrassSun = new THREE.Color();
   const cGrassDeep = new THREE.Color();
   const cCliff = new THREE.Color();
   const cBank = new THREE.Color();
@@ -629,53 +757,66 @@ export function buildAgrouEnvironment(
 
   const rebuildTerrainGeometry = (biome: AgrouMapBiome, isDay: boolean) => {
     const pal = AGROU_BIOMES[biome];
-    cSand.setHex(isDay ? pal.clearingDirt : biome === 'frostpeak' ? 0x6d7782 : 0x766248);
+    cSand.setHex(isDay ? pal.clearingDirt : biome === 'frostpeak' ? 0x5c6875 : 0x523c28);
+    cSandWarm.copy(cSand).offsetHSL(0.015, 0.05, 0.08);
+    cSandDark.copy(cSand).multiplyScalar(0.76);
     cGrass.setHex(isDay ? pal.groundDay : pal.groundNight);
-    cGrassDeep.copy(cGrass).multiplyScalar(0.8);
-    cCliff.setHex(isDay ? 0x454e4f : 0x242a2e);
-    cBank.setHex(isDay ? 0x8f8260 : 0x4a4332);
+    cGrassSun.copy(cGrass).offsetHSL(-0.025, 0.06, 0.11);
+    cGrassDeep.copy(cGrass).multiplyScalar(0.72);
+    cCliff.setHex(isDay ? 0x565c58 : 0x242a2e);
+    cBank.setHex(isDay ? 0x7a6544 : 0x3c3426);
 
     const colAttr = terrainGeo.attributes.color as THREE.BufferAttribute;
-    for (let i = 0; i < tPos.count; i += 3) {
-      let maxH = -999;
-      let minH = 999;
-      for (let k = 0; k < 3; k++) {
-        const vx = tPos.getX(i + k);
-        const vz = tPos.getZ(i + k);
-        const vy = sampleTerrainHeight(vx, vz, biome);
-        tPos.setY(i + k, vy);
-        if (vy > maxH) maxH = vy;
-        if (vy < minH) minH = vy;
-      }
-      const slope = maxH - minH;
+    for (let i = 0; i < tPos.count; i++) {
+      const vx = tPos.getX(i);
+      const vz = tPos.getZ(i);
+      const vy = sampleTerrainHeight(vx, vz, biome);
+      tPos.setY(i, vy);
 
-      // Per-vertex smooth color blending eliminates blocky squares while keeping crisp flat-shaded triangles!
-      for (let k = 0; k < 3; k++) {
-        const vx = tPos.getX(i + k);
-        const vz = tPos.getZ(i + k);
-        const r = Math.hypot(vx, vz);
-        const ang = Math.atan2(vz, vx);
-        const edgeRadius = 11.4 + Math.sin(ang * 5) * 0.55 + Math.cos(ang * 9) * 0.32;
-        const sandToGrass = THREE.MathUtils.smoothstep(r, edgeRadius - 1.35, edgeRadius + 1.45);
+      const r = Math.hypot(vx, vz);
+      const ang = Math.atan2(vz, vx);
+      const edgeRadius = 11.1 + Math.sin(ang * 5) * 0.72 + Math.cos(ang * 9) * 0.38;
+      const sandToGrass = THREE.MathUtils.smoothstep(r, edgeRadius - 1.9, edgeRadius + 1.85);
 
-        cVert.lerpColors(cSand, cGrass, sandToGrass);
-        if (sandToGrass > 0.45) {
-          const wavePatch = 0.5 + 0.5 * Math.sin(vx * 0.14 + vz * 0.11);
-          cVert.lerp(cGrassDeep, wavePatch * 0.22);
-        }
-        if (biome === 'autumn') {
-          const distRiver = Math.abs(vz - getRiverCenterZ(vx));
-          if (distRiver < 3.0) {
-            cVert.lerp(cBank, (1 - distRiver / 3.0) * 0.65);
-          }
-        }
-        if (slope > 0.92 && r > 12) {
-          cVert.lerp(cCliff, THREE.MathUtils.clamp((slope - 0.92) * 0.65, 0, 0.85));
-        }
-        const microJitter = (hash2(Math.floor(vx * 0.8), Math.floor(vz * 0.8)) - 0.5) * 0.035;
-        cVert.offsetHSL(0, 0, microJitter);
-        colAttr.setXYZ(i + k, cVert.r, cVert.g, cVert.b);
+      // Rich organic earth mottling inside the campfire clearing
+      const dirtMottle =
+        0.5 +
+        0.32 * Math.sin(vx * 0.38 + vz * 0.29) +
+        0.18 * Math.cos(vx * 0.72 - vz * 0.61);
+      cVert.lerpColors(cSandDark, cSandWarm, THREE.MathUtils.clamp(dirtMottle, 0, 1));
+      // Warm campfire-lit soil ring near center
+      if (r < 4.5) {
+        cVert.lerp(cSandWarm, (1 - r / 4.5) * 0.28);
       }
+
+      // Smooth lush blend into meadow grass with golden sunlit hill crests & deep shaded hollows
+      if (sandToGrass > 0.001) {
+        const grassShade = 0.5 + 0.5 * Math.sin(vx * 0.13 + vz * 0.11);
+        const hillSun = THREE.MathUtils.clamp((vy - 0.6) / 3.8, 0, 1);
+        cTmp.lerpColors(cGrassDeep, cGrass, grassShade);
+        if (isDay && biome !== 'frostpeak') {
+          cTmp.lerp(cGrassSun, hillSun * 0.65);
+        }
+        cVert.lerp(cTmp, sandToGrass);
+      }
+
+      if (biome === 'autumn') {
+        const distRiver = Math.abs(vz - getRiverCenterZ(vx));
+        if (distRiver < 3.1) {
+          cVert.lerp(cBank, (1 - distRiver / 3.1) * 0.55);
+        }
+      }
+      if (vy > 3.8 && r > 18) {
+        const slopeApprox = Math.abs(
+          sampleTerrainHeight(vx + 0.8, vz, biome) - sampleTerrainHeight(vx - 0.8, vz, biome)
+        );
+        if (slopeApprox > 0.75) {
+          cVert.lerp(cCliff, THREE.MathUtils.clamp((slopeApprox - 0.75) * 0.75, 0, 0.75));
+        }
+      }
+      const microJitter = (hash2(Math.floor(vx * 0.9), Math.floor(vz * 0.9)) - 0.5) * 0.025;
+      cVert.offsetHSL(0, 0, microJitter);
+      colAttr.setXYZ(i, cVert.r, cVert.g, cVert.b);
     }
     tPos.needsUpdate = true;
     colAttr.needsUpdate = true;
@@ -683,38 +824,37 @@ export function buildAgrouEnvironment(
   };
 
   // =========================================================================
-  // 3. INSTANCED FLAT CLEARING PEBBLES (~170) & SWAYING GRASS TUFTS (~520)
+  // 3. SCATTERED RIVER STONES, FALLEN LEAVES, CURVED GRASS TUFTS & WILDFLOWERS
   // =========================================================================
-  const PEBBLE_COUNT = 170;
-  const pebbleGeo = trackGeo(new THREE.DodecahedronGeometry(0.19, 0));
+  const PEBBLE_COUNT = 125;
+  const pebbleGeo = trackGeo(new THREE.IcosahedronGeometry(0.15, 1));
   const pebbleMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      roughness: 0.93,
-      metalness: 0.02,
-      flatShading: true,
+      map: stoneTex,
+      roughness: 0.94,
+      metalness: 0.01,
     })
   );
   const pebbleInst = new THREE.InstancedMesh(pebbleGeo, pebbleMat, PEBBLE_COUNT);
   pebbleInst.receiveShadow = true;
 
-  const pebblePalette = [0x8b8378, 0x736c62, 0xa09582, 0x625e57, 0x998e7b];
+  const pebblePalette = [0x6b5844, 0x5c4b3a, 0x78644e, 0x4f4031, 0x665441];
   for (let i = 0; i < PEBBLE_COUNT; i++) {
     const a = hash2(i, 4.1) * Math.PI * 2;
-    // Scatter pebbles across clearing (r = 1.55..8.3), denser near fire & mid-ring (Images 1, 2, 3, 4!)
-    const rNorm = Math.pow(hash2(i, 9.7), 0.72);
-    const r = 1.55 + rNorm * 6.8;
+    const rNorm = Math.pow(hash2(i, 9.7), 0.82);
+    const r = 1.9 + rNorm * 9.5;
     const px = Math.cos(a) * r;
     const pz = Math.sin(a) * r;
-    const sx = 0.48 + hash2(i, 2.3) * 1.25;
-    const sz = 0.45 + hash2(i, 5.9) * 1.15;
-    const sy = 0.16 + hash2(i, 8.2) * 0.2;
+    const sx = 0.35 + hash2(i, 2.3) * 0.85;
+    const sz = 0.32 + hash2(i, 5.9) * 0.78;
+    const sy = 0.08 + hash2(i, 8.2) * 0.14;
 
-    dummy.position.set(px, sy * 0.12, pz);
+    dummy.position.set(px, sy * 0.04, pz);
     dummy.rotation.set(
-      (hash2(i, 1.1) - 0.5) * 0.2,
+      (hash2(i, 1.1) - 0.5) * 0.16,
       hash2(i, 6.4) * Math.PI * 2,
-      (hash2(i, 3.3) - 0.5) * 0.2
+      (hash2(i, 3.3) - 0.5) * 0.16
     );
     dummy.scale.set(sx, sy, sz);
     dummy.updateMatrix();
@@ -726,53 +866,115 @@ export function buildAgrouEnvironment(
   if (pebbleInst.instanceColor) pebbleInst.instanceColor.needsUpdate = true;
   scene.add(pebbleInst);
 
-  // Instanced Lush Multi-Blade Low-Poly Grass Tufts carpeting the clearing rim & foreground meadow!
-  const GRASS_COUNT = isSoftwareGl ? 500 : 760;
+  // Scattered Fallen Warm Leaves & Twigs across the earthy clearing (rich foreground detail from reference!)
+  const LEAF_COUNT = 160;
+  const leafGeo = trackGeo(new THREE.CircleGeometry(0.11, 5));
+  leafGeo.rotateX(-Math.PI / 2);
+  const leafMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.92,
+      metalness: 0.0,
+      side: THREE.DoubleSide,
+    })
+  );
+  const leafInst = new THREE.InstancedMesh(leafGeo, leafMat, LEAF_COUNT);
+  leafInst.receiveShadow = true;
+  const leafPalette = [0xb36b2c, 0x945224, 0xc98a38, 0x735629, 0x824420];
+  for (let i = 0; i < LEAF_COUNT; i++) {
+    const a = hash2(i, 2.7) * Math.PI * 2;
+    const r = 1.8 + Math.pow(hash2(i, 6.3), 0.72) * 9.5;
+    const lx = Math.cos(a) * r;
+    const lz = Math.sin(a) * r;
+    dummy.position.set(lx, 0.014, lz);
+    dummy.rotation.set(0, hash2(i, 8.9) * Math.PI * 2, 0);
+    dummy.scale.set(0.65 + hash2(i, 4.4) * 0.85, 1, 0.45 + hash2(i, 9.2) * 0.55);
+    dummy.updateMatrix();
+    leafInst.setMatrixAt(i, dummy.matrix);
+    cTmp.setHex(leafPalette[i % leafPalette.length]);
+    leafInst.setColorAt(i, cTmp);
+  }
+  leafInst.instanceMatrix.needsUpdate = true;
+  if (leafInst.instanceColor) leafInst.instanceColor.needsUpdate = true;
+  scene.add(leafInst);
+
+  // Instanced Lush Curved Multi-Blade Grass Tufts carpeting the clearing rim, riverbank & hills!
+  const GRASS_COUNT = isSoftwareGl ? 620 : 980;
   const grassGeo = trackGeo(createGrassTuftGeometry());
   const grassMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0xffffff,
-      roughness: 0.88,
+      vertexColors: true,
+      roughness: 0.84,
       metalness: 0.0,
-      flatShading: true,
       side: THREE.DoubleSide,
     })
   );
   const grassInst = new THREE.InstancedMesh(grassGeo, grassMat, GRASS_COUNT);
   const grassPlacements: Array<{ x: number; z: number; rotY: number; scale: number; tint: number }> = [];
   for (let i = 0; i < GRASS_COUNT; i++) {
-    const a = (i / GRASS_COUNT) * Math.PI * 2 + (hash2(i, 2.1) - 0.5) * 0.2;
-    const edgeR = 11.2 + Math.sin(a * 5) * 0.5 + Math.cos(a * 9) * 0.3;
+    const a = (i / GRASS_COUNT) * Math.PI * 2 + (hash2(i, 2.1) - 0.5) * 0.22;
+    const edgeR = 10.6 + Math.sin(a * 5) * 0.65 + Math.cos(a * 9) * 0.35;
     let r: number;
-    if (i < 190) {
-      r = edgeR - 0.35 + hash2(i, 6.2) * 1.8;
-    } else if (i < 380) {
-      r = edgeR + 1.2 + hash2(i, 5.1) * 6.5;
+    if (i < 260) {
+      // Dense foreground & clearing-edge grass rim framing the campfire soil
+      r = edgeR - 0.65 + hash2(i, 6.2) * 2.2;
+    } else if (i < 520) {
+      r = edgeR + 1.1 + hash2(i, 5.1) * 7.0;
     } else {
-      r = edgeR + 6.0 + Math.pow(hash2(i, 7.7), 1.15) * 16.5;
+      r = edgeR + 6.0 + Math.pow(hash2(i, 7.7), 1.15) * 17.5;
     }
     grassPlacements.push({
       x: Math.cos(a) * r,
       z: Math.sin(a) * r,
       rotY: hash2(i, 4.9) * Math.PI * 2,
-      scale: 0.98 + hash2(i, 8.8) * 0.95,
+      scale: 0.92 + hash2(i, 8.8) * 1.05,
       tint: hash2(i, 3.2),
     });
   }
   scene.add(grassInst);
 
+  // Instanced Charming Meadow Wildflowers (daisies, yellow buttercups, rose petals tucked into the grass!)
+  const FLOWER_COUNT = isSoftwareGl ? 150 : 240;
+  const flowerGeo = trackGeo(new THREE.DodecahedronGeometry(0.055, 0));
+  const flowerMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.78,
+      metalness: 0.0,
+    })
+  );
+  const flowerInst = new THREE.InstancedMesh(flowerGeo, flowerMat, FLOWER_COUNT);
+  const flowerPlacements: Array<{ x: number; z: number; scale: number; colorHex: number }> = [];
+  const flowerColors = [0xfff5cc, 0xfacc15, 0xfef9c3, 0xf472b6, 0xe11d48, 0xfde047];
+  for (let i = 0; i < FLOWER_COUNT; i++) {
+    // Cluster 3-4 blooms per wildflower patch around the clearing rim & outer meadow
+    const clusterIdx = Math.floor(i / 4);
+    const ca = hash2(clusterIdx, 1.9) * Math.PI * 2;
+    const edgeR = 11.2 + Math.sin(ca * 5) * 0.65;
+    const cr = edgeR + 0.4 + hash2(clusterIdx, 5.3) * 8.5;
+    const fx = Math.cos(ca) * cr + (hash2(i, 3.1) - 0.5) * 0.55;
+    const fz = Math.sin(ca) * cr + (hash2(i, 7.7) - 0.5) * 0.55;
+    flowerPlacements.push({
+      x: fx,
+      z: fz,
+      scale: 0.52 + hash2(i, 4.8) * 0.55,
+      colorHex: flowerColors[clusterIdx % flowerColors.length],
+    });
+  }
+  scene.add(flowerInst);
+
   const repositionGrassForBiome = (biome: AgrouMapBiome, isDay: boolean) => {
     const cG1 = new THREE.Color(
-      biome === 'frostpeak' ? (isDay ? 0xc8dce8 : 0x5d768f) : isDay ? 0x4e8c2b : 0x24421d
+      biome === 'frostpeak' ? (isDay ? 0x9cb5c7 : 0x506880) : isDay ? 0x3b631e : 0x1c3318
     );
     const cG2 = new THREE.Color(
-      biome === 'frostpeak' ? (isDay ? 0x9cb9cc : 0x475e75) : isDay ? 0x6ea834 : 0x325725
+      biome === 'frostpeak' ? (isDay ? 0x7b96aa : 0x3d5369) : isDay ? 0x638a2b : 0x294a20
     );
 
     for (let i = 0; i < GRASS_COUNT; i++) {
       const g = grassPlacements[i];
-      // Skip grass directly inside the Riverside Meadow river channel
-      const inRiver = biome === 'autumn' && Math.abs(g.z - getRiverCenterZ(g.x)) < 2.35;
+      const inRiver = biome === 'autumn' && Math.abs(g.z - getRiverCenterZ(g.x)) < 2.25;
       if (inRiver) {
         dummy.position.set(0, -20, 0);
         dummy.scale.setScalar(0.001);
@@ -789,6 +991,31 @@ export function buildAgrouEnvironment(
     }
     grassInst.instanceMatrix.needsUpdate = true;
     if (grassInst.instanceColor) grassInst.instanceColor.needsUpdate = true;
+
+    for (let i = 0; i < FLOWER_COUNT; i++) {
+      const fl = flowerPlacements[i];
+      const hideFlower =
+        biome === 'frostpeak' ||
+        (biome === 'autumn' && Math.abs(fl.z - getRiverCenterZ(fl.x)) < 2.5);
+      if (hideFlower) {
+        dummy.position.set(0, -20, 0);
+        dummy.scale.setScalar(0.001);
+      } else {
+        const y = sampleTerrainHeight(fl.x, fl.z, biome);
+        dummy.position.set(fl.x, y + 0.11 + (i % 3) * 0.04, fl.z);
+        dummy.rotation.set(0.2, i * 1.1, 0.15);
+        dummy.scale.set(fl.scale * 1.05, fl.scale * 0.45, fl.scale * 1.05);
+      }
+      dummy.updateMatrix();
+      flowerInst.setMatrixAt(i, dummy.matrix);
+      cTmp.setHex(fl.colorHex);
+      if (!isDay) cTmp.multiplyScalar(0.42);
+      flowerInst.setColorAt(i, cTmp);
+    }
+    flowerInst.instanceMatrix.needsUpdate = true;
+    if (flowerInst.instanceColor) flowerInst.instanceColor.needsUpdate = true;
+
+    leafInst.visible = biome !== 'frostpeak';
   };
 
   // =========================================================================
@@ -797,16 +1024,17 @@ export function buildAgrouEnvironment(
   const campfireGroup = new THREE.Group();
   scene.add(campfireGroup);
 
-  // Low flat hearth stones (compact, low-profile like Images 1, 2, 4!)
+  // Textured rounded hearth stones
   const hearthStoneMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x5c5750, roughness: 0.94, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x6b655c, map: stoneTex, roughness: 0.92 })
   );
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2 + 0.2;
-    const st = new THREE.Mesh(trackGeo(new THREE.DodecahedronGeometry(0.24, 0)), hearthStoneMat);
-    st.scale.set(1.25, 0.42, 0.95);
-    st.position.set(Math.cos(a) * 0.72, 0.06, Math.sin(a) * 0.72);
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2 + 0.15;
+    const st = new THREE.Mesh(trackGeo(new THREE.IcosahedronGeometry(0.24, 1)), hearthStoneMat);
+    st.scale.set(1.22, 0.48, 0.95);
+    st.position.set(Math.cos(a) * 0.76, 0.08, Math.sin(a) * 0.76);
     st.rotation.y = a;
+    st.receiveShadow = true;
     campfireGroup.add(st);
   }
 
@@ -815,114 +1043,170 @@ export function buildAgrouEnvironment(
     new THREE.MeshStandardMaterial({
       color: 0x3b1808,
       emissive: 0xff6200,
-      emissiveIntensity: 2.4,
+      emissiveIntensity: 1.85,
       roughness: 0.9,
-      flatShading: true,
       fog: false,
     })
   );
-  const emberBed = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.56, 0.64, 0.09, 8)), emberBedMat);
+  const emberBed = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.56, 0.64, 0.09, 12)), emberBedMat);
   emberBed.position.y = 0.04;
   campfireGroup.add(emberBed);
 
-  // Crossed campfire logs
+  // Crossed wood-textured campfire logs
   const logMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x452b18,
-      emissive: 0x6b1d00,
-      emissiveIntensity: 0.55,
-      roughness: 0.92,
-      flatShading: true,
+      color: 0x4c2e19,
+      map: woodGrainTex,
+      emissive: 0x7c2200,
+      emissiveIntensity: 0.45,
+      roughness: 0.9,
     })
   );
   for (let i = 0; i < 6; i++) {
     const a = (i / 6) * Math.PI * 2;
-    const log = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.085, 0.105, 1.15, 6)), logMat);
-    log.position.set(Math.cos(a) * 0.24, 0.24, Math.sin(a) * 0.24);
+    const log = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.088, 0.11, 1.22, 8)), logMat);
+    log.position.set(Math.cos(a) * 0.25, 0.25, Math.sin(a) * 0.25);
     log.rotation.z = Math.PI / 2 - 0.56;
     log.rotation.y = -a;
     campfireGroup.add(log);
   }
 
-  // Soft additive radial golden ground light pool (Signature Agrou warm floor glow!)
+  // Soft additive radial golden ground light pool (Warm campfire floor illumination without washout!)
   const fireGlowTex = createRadialGlowTexture(
-    'rgba(255, 248, 195, 0.95)',
-    'rgba(255, 178, 56, 0.55)',
-    'rgba(255, 118, 22, 0.14)'
+    'rgba(255, 224, 145, 0.68)',
+    'rgba(255, 148, 38, 0.36)',
+    'rgba(255, 98, 14, 0.08)'
   );
   disposableTex.push(fireGlowTex);
   const fireGlowPoolMat = trackMat(
     new THREE.MeshBasicMaterial({
       map: fireGlowTex,
       transparent: true,
-      opacity: 0.92,
+      opacity: 0.52,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
       fog: false,
     })
   );
-  const fireGlowPool = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(7.4, 7.4)), fireGlowPoolMat);
+  const fireGlowPool = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(7.8, 7.8)), fireGlowPoolMat);
   fireGlowPool.rotation.x = -Math.PI / 2;
   fireGlowPool.position.y = 0.025;
   campfireGroup.add(fireGlowPool);
 
-  // Multi-layered compact blazing faceted flames (Jewel-like Agrou campfire cluster — Images 1, 2, 4!)
-  const flameOuterMat = trackMat(
-    new THREE.MeshBasicMaterial({ color: 0xff7b14, transparent: true, opacity: 0.94, fog: false })
-  );
-  const flameMidMat = trackMat(
-    new THREE.MeshBasicMaterial({ color: 0xffcc3b, transparent: true, opacity: 0.96, fog: false })
-  );
-  const flameCoreMat = trackMat(new THREE.MeshBasicMaterial({ color: 0xfffce0, fog: false }));
-
-  const flameGroup = new THREE.Group();
-  flameGroup.position.y = 0.14;
-  campfireGroup.add(flameGroup);
-
-  const flameOuter = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.42, 0.72, 6)), flameOuterMat);
-  flameOuter.position.y = 0.34;
-  flameGroup.add(flameOuter);
-
-  const flameSide1 = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.24, 0.56, 5)), flameMidMat);
-  flameSide1.position.set(0.22, 0.24, 0.14);
-  flameSide1.rotation.z = -0.26;
-  flameGroup.add(flameSide1);
-
-  const flameSide2 = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.22, 0.52, 5)), flameMidMat);
-  flameSide2.position.set(-0.22, 0.23, -0.12);
-  flameSide2.rotation.z = 0.24;
-  flameGroup.add(flameSide2);
-
-  const flameSide3 = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.2, 0.48, 5)), flameOuterMat);
-  flameSide3.position.set(-0.1, 0.22, 0.22);
-  flameSide3.rotation.x = 0.22;
-  flameGroup.add(flameSide3);
-
-  const flameCore = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.24, 0.5, 5)), flameCoreMat);
-  flameCore.position.y = 0.26;
-  flameGroup.add(flameCore);
-
-  // Subtle faceted heat-smoke & rising spark cubes right above the fire (Image 4!)
-  const FIRE_SMOKE_COUNT = 22;
-  const smokeCubeGeo = trackGeo(new THREE.BoxGeometry(0.16, 0.16, 0.16));
-  const smokeCubeMat = trackMat(
+  // Volumetric Painterly Blazing Campfire Flames (Crossed luminous flame planes + soft glow core — ZERO blocky cones!)
+  const flameCardMat = trackMat(
     new THREE.MeshBasicMaterial({
-      color: 0xffcc66,
+      map: stylizedFlameTex,
+      color: 0xffb84d,
       transparent: true,
-      opacity: 0.48,
+      opacity: 0.88,
+      blending: THREE.AdditiveBlending,
       depthWrite: false,
+      side: THREE.DoubleSide,
       fog: false,
+      toneMapped: false,
     })
   );
-  const fireSmokeInst = new THREE.InstancedMesh(smokeCubeGeo, smokeCubeMat, FIRE_SMOKE_COUNT);
-  const fireSmokeData = Array.from({ length: FIRE_SMOKE_COUNT }, (_, i) => ({
-    x: (hash2(i, 1.2) - 0.5) * 0.65,
-    y: 0.4 + hash2(i, 2.8) * 1.9,
-    z: (hash2(i, 5.1) - 0.5) * 0.65,
-    vy: 0.55 + hash2(i, 8.4) * 0.55,
-    phase: hash2(i, 9.3) * Math.PI * 2,
+  const flameCoreMat = trackMat(
+    new THREE.MeshBasicMaterial({
+      map: stylizedFlameTex,
+      color: 0xffe8a3,
+      transparent: true,
+      opacity: 0.82,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      fog: false,
+      toneMapped: false,
+    })
+  );
+
+  const flameGroup = new THREE.Group();
+  flameGroup.position.y = 0.12;
+  campfireGroup.add(flameGroup);
+
+  const flamePlaneGeo = trackGeo(new THREE.PlaneGeometry(1.45, 1.75));
+  const flameOuter = new THREE.Group();
+  for (let p = 0; p < 3; p++) {
+    const card = new THREE.Mesh(flamePlaneGeo, flameCardMat);
+    card.position.y = 0.72;
+    card.rotation.y = (p / 3) * Math.PI;
+    flameOuter.add(card);
+  }
+  flameGroup.add(flameOuter);
+
+  const flameCore = new THREE.Group();
+  for (let p = 0; p < 2; p++) {
+    const coreCard = new THREE.Mesh(flamePlaneGeo, flameCoreMat);
+    coreCard.scale.set(0.68, 0.72, 0.68);
+    coreCard.position.y = 0.56;
+    coreCard.rotation.y = (p / 2) * Math.PI + 0.4;
+    flameCore.add(coreCard);
+  }
+  flameGroup.add(flameCore);
+
+  const flameSide1 = new THREE.Mesh(flamePlaneGeo, flameCardMat);
+  flameSide1.scale.set(0.65, 0.7, 0.65);
+  flameSide1.position.set(0.24, 0.55, 0.14);
+  flameSide1.rotation.set(0, 0.6, -0.18);
+  flameGroup.add(flameSide1);
+
+  const flameSide2 = new THREE.Mesh(flamePlaneGeo, flameCardMat);
+  flameSide2.scale.set(0.62, 0.66, 0.62);
+  flameSide2.position.set(-0.22, 0.52, -0.14);
+  flameSide2.rotation.set(0, -0.5, 0.18);
+  flameGroup.add(flameSide2);
+
+  // Soft Billowing Campfire Smoke Plume Sprites (matches reference painterly smoke!) + Tiny Rising Ember Sparks
+  const FIRE_SMOKE_COUNT = 16;
+  const smokeSprites: THREE.Sprite[] = [];
+  const smokeSpriteMats: THREE.SpriteMaterial[] = [];
+  const fireSmokeData = Array.from({ length: FIRE_SMOKE_COUNT }, (_, i) => {
+    const mat = trackMat(
+      new THREE.SpriteMaterial({
+        map: softSmokeTex,
+        color: 0xe8ded2,
+        transparent: true,
+        opacity: 0.36,
+        depthWrite: false,
+      })
+    );
+    const sp = new THREE.Sprite(mat);
+    scene.add(sp);
+    smokeSprites.push(sp);
+    smokeSpriteMats.push(mat);
+    return {
+      x: (hash2(i, 1.2) - 0.5) * 0.42,
+      y: 0.85 + (i / FIRE_SMOKE_COUNT) * 2.8,
+      z: (hash2(i, 5.1) - 0.5) * 0.42,
+      vy: 0.48 + hash2(i, 8.4) * 0.35,
+      phase: hash2(i, 9.3) * Math.PI * 2,
+    };
+  });
+
+  // Glowing rising tiny campfire ember sparks
+  const SPARK_COUNT = 24;
+  const sparkGeo = trackGeo(new THREE.OctahedronGeometry(0.042, 0));
+  const sparkMat = trackMat(
+    new THREE.MeshBasicMaterial({
+      color: 0xffd566,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+      toneMapped: false,
+    })
+  );
+  const fireSparkInst = new THREE.InstancedMesh(sparkGeo, sparkMat, SPARK_COUNT);
+  const fireSparkData = Array.from({ length: SPARK_COUNT }, (_, i) => ({
+    x: (hash2(i, 3.1) - 0.5) * 0.65,
+    y: 0.4 + hash2(i, 6.4) * 2.4,
+    z: (hash2(i, 9.7) - 0.5) * 0.65,
+    vy: 0.72 + hash2(i, 2.2) * 0.65,
+    phase: hash2(i, 4.9) * Math.PI * 2,
   }));
-  scene.add(fireSmokeInst);
+  scene.add(fireSparkInst);
 
   // Campfire Voting Abstention Ring (subtle during discussion, pulses during voting)
   const campfireVoteRingMat = trackMat(
@@ -962,37 +1246,35 @@ export function buildAgrouEnvironment(
   const redwoodCampGroup = new THREE.Group();
   scene.add(redwoodCampGroup);
 
-  // 5a. Giant Towering Redwood Trunks (34 massive dark trunks rising straight out of frame!)
+  // 5a. Giant Towering Redwood Trunks (40 massive bark-textured trunks rising gracefully around the glade!)
   const redwoodBarkMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x2a1d17,
-      roughness: 0.96,
-      flatShading: true,
+      color: 0x3b271c,
+      map: woodGrainTex,
+      roughness: 0.94,
     })
   );
   const redwoodCanopyMat = trackMat(
     new THREE.MeshStandardMaterial({
       color: 0x264c33,
-      roughness: 0.9,
-      flatShading: true,
+      roughness: 0.88,
     })
   );
   const redwoodCanopyHiMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x35643e,
-      roughness: 0.88,
-      flatShading: true,
+      color: 0x3a6e3e,
+      roughness: 0.85,
     })
   );
 
   const REDWOOD_COUNT = 40;
-  const trunkGeo = trackGeo(new THREE.CylinderGeometry(0.58, 1.12, 34, 8));
+  const trunkGeo = trackGeo(new THREE.CylinderGeometry(0.58, 1.12, 34, 12));
   const trunkInst = new THREE.InstancedMesh(trunkGeo, redwoodBarkMat, REDWOOD_COUNT);
   trunkInst.castShadow = !isSoftwareGl;
   trunkInst.receiveShadow = true;
 
   // Slender, graceful conifer spire tiers framing the distant forest horizon without ever obstructing panoramic/overhead camera views
-  const canopyConeGeo = trackGeo(new THREE.ConeGeometry(3.05, 4.6, 7));
+  const canopyConeGeo = trackGeo(new THREE.ConeGeometry(3.05, 4.6, 10));
   const canopyInst = new THREE.InstancedMesh(canopyConeGeo, redwoodCanopyMat, REDWOOD_COUNT * 3);
 
   for (let i = 0; i < REDWOOD_COUNT; i++) {
@@ -1067,13 +1349,13 @@ export function buildAgrouEnvironment(
     });
   });
 
-  // 5c. Stacked Cut Timber Log Pile near foreground clearing edge (Exact prop from Image 2!)
+  // 5c. Stacked Cut Timber Log Pile near foreground clearing edge
   const timberPile = new THREE.Group();
   const timberLogMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x4f3827, roughness: 0.92, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x5c3f2a, map: woodGrainTex, roughness: 0.9 })
   );
   const timberEndMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x9c7b55, roughness: 0.9, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0xa8865c, roughness: 0.88 })
   );
   const logRows = [
     [-0.58, 0.25], [0, 0.25], [0.58, 0.25],
@@ -1082,7 +1364,7 @@ export function buildAgrouEnvironment(
   ];
   for (const [lx, ly] of logRows) {
     const tLog = new THREE.Mesh(
-      trackGeo(new THREE.CylinderGeometry(0.27, 0.29, 4.6, 7)),
+      trackGeo(new THREE.CylinderGeometry(0.27, 0.29, 4.6, 10)),
       [timberLogMat, timberEndMat, timberEndMat]
     );
     tLog.rotation.x = Math.PI / 2;
@@ -1098,10 +1380,10 @@ export function buildAgrouEnvironment(
 
   // 5d. Expedition Camp Props: Supply Barrels, Banded Chest, Camp Table with Bottles, Hide Drying Rack!
   const barrelWoodMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x5c3e26, roughness: 0.88, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x6b472c, map: woodGrainTex, roughness: 0.86 })
   );
   const darkIronMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x262b30, roughness: 0.55, metalness: 0.55, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x2a3036, roughness: 0.5, metalness: 0.58 })
   );
   const createBarrel = (x: number, z: number) => {
     const bg = new THREE.Group();
@@ -1180,32 +1462,53 @@ export function buildAgrouEnvironment(
   redwoodCampGroup.add(dryingRack);
   redwoodObstacles.push({ kind: 'obb', x: -11.6, z: 3.8, hx: 0.82, hz: 0.3, rotY: 0.95 });
 
-  // 5e. Mossy Stepped Rock Ledges & Giant Fallen Hollow Logs framing the outer glade
+  // 5e. Smooth Weathered Mossy Rock Ledges & Foreground Boulders framing the glade
   const mossyRockMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x505960, roughness: 0.94, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x676f73, map: stoneTex, roughness: 0.88 })
   );
   const mossCapMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x4c7c32, roughness: 0.92, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x52842e, roughness: 0.9 })
   );
   const rockLedges = [
     { x: -16.5, z: -19.0, sx: 4.8, sy: 2.7, sz: 3.6 },
     { x: -3.5, z: -21.5, sx: 5.2, sy: 3.0, sz: 3.8 },
     { x: 11.8, z: -20.5, sx: 5.4, sy: 3.3, sz: 4.0 },
     { x: 19.2, z: -13.5, sx: 4.2, sy: 2.4, sz: 3.4 },
+    // Foreground framing mossy boulders near clearing edge
+    { x: -11.4, z: 5.2, sx: 1.5, sy: 0.95, sz: 1.25 },
+    { x: 11.6, z: 8.8, sx: 1.55, sy: 0.95, sz: 1.3 },
+    { x: 11.2, z: -6.2, sx: 1.35, sy: 0.88, sz: 1.15 },
   ];
-  for (const rl of rockLedges) {
+  for (let rli = 0; rli < rockLedges.length; rli++) {
+    const rl = rockLedges[rli];
     const lg = new THREE.Group();
-    const baseRock = new THREE.Mesh(trackGeo(new THREE.DodecahedronGeometry(1.0, 0)), mossyRockMat);
-    baseRock.scale.set(rl.sx, rl.sy, rl.sz);
-    baseRock.position.y = rl.sy * 0.45;
-    lg.add(baseRock);
+    const isLargeLedge = rl.sx > 3.0;
+    const subRocks = isLargeLedge
+      ? [
+          { ox: 0, oy: 0.42, oz: 0, sx: 0.76, sy: 0.85, sz: 0.78, ry: 0.4 },
+          { ox: -rl.sx * 0.46, oy: 0.28, oz: rl.sz * 0.16, sx: 0.54, sy: 0.62, sz: 0.56, ry: 1.3 },
+          { ox: rl.sx * 0.44, oy: 0.3, oz: -rl.sz * 0.14, sx: 0.56, sy: 0.66, sz: 0.58, ry: 2.2 },
+        ]
+      : [
+          { ox: 0, oy: 0.38, oz: 0, sx: 0.92, sy: 0.86, sz: 0.88, ry: rli * 0.9 },
+          { ox: rl.sx * 0.35, oy: 0.22, oz: rl.sz * 0.2, sx: 0.48, sy: 0.52, sz: 0.46, ry: rli * 1.7 },
+        ];
+    for (const sr of subRocks) {
+      const baseRock = new THREE.Mesh(trackGeo(new THREE.DodecahedronGeometry(1.0, 1)), mossyRockMat);
+      baseRock.scale.set(rl.sx * sr.sx, rl.sy * sr.sy, rl.sz * sr.sz);
+      baseRock.position.set(sr.ox, rl.sy * sr.oy, sr.oz);
+      baseRock.rotation.set(0.15, sr.ry, 0.1);
+      baseRock.castShadow = !isSoftwareGl;
+      baseRock.receiveShadow = true;
+      lg.add(baseRock);
 
-    const mossTop = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.84, 0.96, 0.42, 7)), mossCapMat);
-    mossTop.scale.set(rl.sx * 0.82, 1, rl.sz * 0.78);
-    mossTop.position.y = rl.sy * 1.18;
-    lg.add(mossTop);
+      const mossTop = new THREE.Mesh(trackGeo(new THREE.IcosahedronGeometry(0.84, 1)), mossCapMat);
+      mossTop.scale.set(rl.sx * sr.sx * 0.88, Math.max(0.24, rl.sy * sr.sy * 0.22), rl.sz * sr.sz * 0.82);
+      mossTop.position.set(sr.ox, rl.sy * (sr.oy + sr.sy * 0.68), sr.oz);
+      lg.add(mossTop);
+    }
 
-    lg.position.set(rl.x, sampleTerrainHeight(rl.x, rl.z, 'forest') - 0.5, rl.z);
+    lg.position.set(rl.x, sampleTerrainHeight(rl.x, rl.z, 'forest') - 0.35, rl.z);
     redwoodCampGroup.add(lg);
     redwoodObstacles.push({ kind: 'circle', x: rl.x, z: rl.z, r: Math.max(rl.sx, rl.sz) * 0.82 });
   }
@@ -1276,83 +1579,144 @@ export function buildAgrouEnvironment(
   const meadowCampGroup = new THREE.Group();
   scene.add(meadowCampGroup);
 
-  // 6a. Winding Shimmering Blue River Ribbon
-  const riverGeo = trackGeo(new THREE.PlaneGeometry(108, 5.2, 48, 4));
+  // 6a. Winding Shimmering Sky-Blue River Ribbon (Animated hand-painted water ripples!)
+  const riverGeo = trackGeo(new THREE.PlaneGeometry(108, 5.2, 56, 6));
   riverGeo.rotateX(-Math.PI / 2);
   const rPos = riverGeo.attributes.position as THREE.BufferAttribute;
   for (let i = 0; i < rPos.count; i++) {
     const rx = rPos.getX(i);
     const rzLocal = rPos.getZ(i);
     rPos.setZ(i, getRiverCenterZ(rx) + rzLocal);
-    rPos.setY(i, -0.24 + Math.sin(rx * 0.4 + rzLocal) * 0.03);
+    rPos.setY(i, -0.22 + Math.sin(rx * 0.35 + rzLocal) * 0.02);
   }
   rPos.needsUpdate = true;
   riverGeo.computeVertexNormals();
 
   const riverMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x3b92de,
-      emissive: 0x113358,
-      emissiveIntensity: 0.35,
-      roughness: 0.16,
-      metalness: 0.25,
+      color: 0x8fd0f2,
+      map: waterRippleTex,
+      emissive: 0x265c85,
+      emissiveIntensity: 0.38,
+      roughness: 0.12,
+      metalness: 0.22,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.9,
       depthWrite: false,
-      flatShading: true,
     })
   );
   const riverMesh = new THREE.Mesh(riverGeo, riverMat);
   riverMesh.renderOrder = 1;
   meadowCampGroup.add(riverMesh);
 
-  // Shimmering foam / water highlight strips along the river
+  // Shimmering white foam / water highlight strips along the river
   const shimmerMat = trackMat(
-    new THREE.MeshBasicMaterial({ color: 0xbce6ff, transparent: true, opacity: 0.45, depthWrite: false })
+    new THREE.MeshBasicMaterial({ color: 0xebfbff, transparent: true, opacity: 0.55, depthWrite: false })
   );
   const shimmerStrips: THREE.Mesh[] = [];
-  for (let s = 0; s < 14; s++) {
-    const sx = -26 + s * 4.1;
-    const sz = getRiverCenterZ(sx) + (s % 2 === 0 ? -0.45 : 0.45);
-    const strip = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(2.1, 0.22)), shimmerMat);
+  for (let s = 0; s < 16; s++) {
+    const sx = -26 + s * 3.6;
+    const sz = getRiverCenterZ(sx) + (s % 2 === 0 ? -0.55 : 0.45);
+    const strip = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(2.4, 0.16)), shimmerMat);
     strip.rotation.x = -Math.PI / 2;
-    strip.position.set(sx, -0.19, sz);
+    strip.position.set(sx, -0.18, sz);
     strip.renderOrder = 2;
     meadowCampGroup.add(strip);
     shimmerStrips.push(strip);
   }
 
-  // 6b. Riverside Boulders & Cattail Reeds lining both banks (Exact detail from Image 1!)
+  // 6b. Smooth Moss-Draped Riverside & Foreground Boulders + Cattail Reeds + Flowering Meadow Shrubs
   const riverRockMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x737b80, roughness: 0.9, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x9aa09c, map: stoneTex, roughness: 0.84 })
+  );
+  const meadowMossMat = trackMat(
+    new THREE.MeshStandardMaterial({ color: 0x528229, roughness: 0.88 })
   );
   const riverBoulderPositions = [
-    { x: -3.2, dz: -1.65, s: 1.55 },
-    { x: -1.6, dz: -1.85, s: 0.95 },
-    { x: 11.5, dz: 1.55, s: 1.2 },
-    { x: -13.4, dz: 1.65, s: 1.15 },
-    { x: 6.2, dz: -1.9, s: 0.85 },
+    { x: -3.2, z: getRiverCenterZ(-3.2) - 1.55, s: 1.45, mossy: true },
+    { x: -1.4, z: getRiverCenterZ(-1.4) - 1.75, s: 0.88, mossy: false },
+    { x: 10.6, z: getRiverCenterZ(10.6) + 1.55, s: 1.25, mossy: true },
+    { x: -12.8, z: getRiverCenterZ(-12.8) + 1.65, s: 1.2, mossy: true },
+    { x: 6.2, z: getRiverCenterZ(6.2) - 1.8, s: 0.85, mossy: true },
+    // Foreground left & right framing mossy boulders (matches bottom-left and bottom-right of reference!)
+    { x: -11.4, z: 4.6, s: 1.35, mossy: true },
+    { x: -10.2, z: 6.2, s: 0.85, mossy: true },
+    { x: 11.4, z: 8.6, s: 1.38, mossy: true },
+    { x: 11.8, z: -4.2, s: 1.18, mossy: true },
   ];
   for (const rb of riverBoulderPositions) {
-    const bx = rb.x;
-    const bz = getRiverCenterZ(bx) + rb.dz;
-    const rock = new THREE.Mesh(trackGeo(new THREE.DodecahedronGeometry(rb.s, 0)), riverRockMat);
-    rock.scale.set(1.45, 0.72, 1.05);
-    rock.position.set(bx, -0.05, bz);
-    rock.rotation.y = bx * 0.7;
-    meadowCampGroup.add(rock);
-    meadowObstacles.push({ kind: 'circle', x: bx, z: bz, r: rb.s * 1.12 });
+    const rockGroup = new THREE.Group();
+    const rock = new THREE.Mesh(trackGeo(new THREE.DodecahedronGeometry(rb.s, 1)), riverRockMat);
+    rock.scale.set(1.38, 0.72, 1.08);
+    rock.castShadow = !isSoftwareGl;
+    rock.receiveShadow = true;
+    rockGroup.add(rock);
+
+    if (rb.mossy) {
+      const mossPatch = new THREE.Mesh(trackGeo(new THREE.IcosahedronGeometry(rb.s * 0.76, 1)), meadowMossMat);
+      mossPatch.scale.set(1.22, 0.34, 0.92);
+      mossPatch.position.set(0.08, rb.s * 0.44, 0.05);
+      rockGroup.add(mossPatch);
+    }
+
+    const by = sampleTerrainHeight(rb.x, rb.z, 'autumn');
+    rockGroup.position.set(rb.x, by + rb.s * 0.14, rb.z);
+    rockGroup.rotation.y = rb.x * 0.7;
+    meadowCampGroup.add(rockGroup);
+    meadowObstacles.push({ kind: 'circle', x: rb.x, z: rb.z, r: rb.s * 1.1 });
+  }
+
+  // Flowering Storybook Shrubs around clearing rim & beneath the right oak tree (Matches reference floral bushes!)
+  const shrubLeafDarkMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x355c1d, roughness: 0.88 }));
+  const shrubLeafLightMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x528228, roughness: 0.84 }));
+  const shrubRoseMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xe6495c, roughness: 0.65 }));
+  const shrubButtercupMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xfde047, roughness: 0.65 }));
+  const shrubWhiteMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xfffbeb, roughness: 0.68 }));
+  const shrubSpecs = [
+    { x: 11.6, z: -2.2, s: 0.95, rose: true },
+    { x: 12.6, z: -0.6, s: 0.82, rose: true },
+    { x: 10.2, z: 7.4, s: 0.85, rose: false },
+    { x: -10.8, z: 3.2, s: 0.9, rose: false },
+    { x: -9.6, z: 7.6, s: 0.88, rose: true },
+    { x: -12.4, z: -3.2, s: 0.92, rose: false },
+    { x: 12.8, z: 4.5, s: 0.96, rose: false },
+  ];
+  const shrubBlobGeo = trackGeo(new THREE.IcosahedronGeometry(0.55, 1));
+  const shrubBloomGeo = trackGeo(new THREE.IcosahedronGeometry(0.11, 0));
+  for (let si = 0; si < shrubSpecs.length; si++) {
+    const sp = shrubSpecs[si];
+    const sg = new THREE.Group();
+    for (let b = 0; b < 4; b++) {
+      const ba = (b / 4) * Math.PI * 2 + si;
+      const blob = new THREE.Mesh(shrubBlobGeo, b % 2 === 0 ? shrubLeafDarkMat : shrubLeafLightMat);
+      blob.scale.set(1.0 + (b % 2) * 0.25, 0.72 + (b === 0 ? 0.24 : 0), 0.95);
+      blob.position.set(Math.cos(ba) * 0.34, 0.28 + (b === 0 ? 0.14 : 0), Math.sin(ba) * 0.34);
+      sg.add(blob);
+    }
+    for (let fl = 0; fl < 6; fl++) {
+      const fa = (fl / 6) * Math.PI * 2 + si * 0.7;
+      const bloom = new THREE.Mesh(
+        shrubBloomGeo,
+        sp.rose ? (fl % 2 === 0 ? shrubRoseMat : shrubWhiteMat) : fl % 2 === 0 ? shrubButtercupMat : shrubWhiteMat
+      );
+      bloom.scale.set(1.2, 0.65, 1.2);
+      bloom.position.set(Math.cos(fa) * 0.56, 0.44 + (fl % 3) * 0.14, Math.sin(fa) * 0.56);
+      sg.add(bloom);
+    }
+    sg.position.set(sp.x, sampleTerrainHeight(sp.x, sp.z, 'autumn') - 0.04, sp.z);
+    sg.scale.setScalar(sp.s);
+    meadowCampGroup.add(sg);
   }
 
   // Instanced Cattail Reeds along riverbanks
-  const REED_COUNT = 68;
-  const reedStalkGeo = trackGeo(new THREE.CylinderGeometry(0.022, 0.032, 1.35, 4));
+  const REED_COUNT = 82;
+  const reedStalkGeo = trackGeo(new THREE.CylinderGeometry(0.022, 0.032, 1.45, 5));
   const reedStalkMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x3b6329, roughness: 0.9, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x3b6624, roughness: 0.86 })
   );
-  const reedHeadGeo = trackGeo(new THREE.CylinderGeometry(0.052, 0.052, 0.28, 5));
+  const reedHeadGeo = trackGeo(new THREE.CylinderGeometry(0.052, 0.052, 0.28, 6));
   const reedHeadMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x3b2618, roughness: 0.95, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x452b18, roughness: 0.92 })
   );
   const reedStalkInst = new THREE.InstancedMesh(reedStalkGeo, reedStalkMat, REED_COUNT);
   const reedHeadInst = new THREE.InstancedMesh(reedHeadGeo, reedHeadMat, REED_COUNT);
@@ -1363,15 +1727,15 @@ export function buildAgrouEnvironment(
     const rz = getRiverCenterZ(rx) + side * (1.75 + hash2(i, 4.3) * 0.85);
     const ry = sampleTerrainHeight(rx, rz, 'autumn');
     const tilt = (hash2(i, 6.6) - 0.5) * 0.22;
-    const hScale = 0.78 + hash2(i, 8.9) * 0.52;
+    const hScale = 0.78 + hash2(i, 8.9) * 0.55;
 
-    dummy.position.set(rx, ry + 0.62 * hScale, rz);
+    dummy.position.set(rx, ry + 0.65 * hScale, rz);
     dummy.rotation.set(tilt, hash2(i, 2.5) * Math.PI, tilt * 0.8);
     dummy.scale.set(1, hScale, 1);
     dummy.updateMatrix();
     reedStalkInst.setMatrixAt(i, dummy.matrix);
 
-    dummy.position.set(rx + tilt * 0.2, ry + 1.08 * hScale, rz);
+    dummy.position.set(rx + tilt * 0.2, ry + 1.14 * hScale, rz);
     dummy.scale.set(1, 1, 1);
     dummy.updateMatrix();
     reedHeadInst.setMatrixAt(i, dummy.matrix);
@@ -1381,18 +1745,22 @@ export function buildAgrouEnvironment(
   meadowCampGroup.add(reedStalkInst);
   meadowCampGroup.add(reedHeadInst);
 
-  // 6c. 3 Monumental Ancient Gnarled Hilltop Oak Trees positioned so FULL trunks + wide umbrella canopies frame the blue sky (Exact match to Image 1 & 3!)
+  // 6c. Hero Gnarled Storybook Oak Trees (Right foreground framing oak + rolling hilltop oaks matching reference!)
   const oakSpecs = [
-    { x: 10.6, z: -32.0, scale: 1.08, rotY: 0.4 },   // Giant Hero Oak on right-center hill (Image 1!)
-    { x: -3.2, z: -38.0, scale: 0.78, rotY: 2.1 },   // Distant mid-hill oak (Image 1!)
-    { x: -24.5, z: -29.5, scale: 1.02, rotY: 4.3 },  // Left hillside oak (Image 3!)
+    { x: 14.5, z: -6.4, scale: 0.82, rotY: -1.1 },  // Framing right-side foreground oak (Matches right side of reference!)
+    { x: -3.2, z: -31.5, scale: 1.05, rotY: 2.1 },  // Central sunlit hilltop oak behind stream
+    { x: 14.8, z: -33.0, scale: 0.92, rotY: 0.4 },  // Right-back hillside oak
+    { x: -23.5, z: -28.0, scale: 0.98, rotY: 4.3 }, // Left hillside oak
   ];
   for (const os of oakSpecs) {
-    const oak = createAncientOakTree(os.scale);
+    const oak = createAncientOakTree(os.scale, woodGrainTex);
     const oy = sampleTerrainHeight(os.x, os.z, 'autumn');
-    oak.position.set(os.x, oy - 0.55, os.z);
+    oak.position.set(os.x, oy - 0.35, os.z);
     oak.rotation.y = os.rotY;
     meadowCampGroup.add(oak);
+    if (Math.hypot(os.x, os.z) < 22) {
+      meadowObstacles.push({ kind: 'circle', x: os.x, z: os.z, r: 1.35 * os.scale });
+    }
   }
 
   // =========================================================================
@@ -1464,14 +1832,14 @@ export function buildAgrouEnvironment(
       redwoodCampGroup.visible = biomeKey !== 'autumn';
       meadowCampGroup.visible = biomeKey === 'autumn';
 
-      // Frostpeak snow tint on canopies, rocks & ferns
+      // Frostpeak snow tint on canopies, rocks & ferns (matte alpine snow with zero glare!)
       if (biomeKey === 'frostpeak') {
-        redwoodCanopyMat.color.setHex(isDay ? 0x628596 : 0x263f4d);
-        redwoodCanopyHiMat.color.setHex(isDay ? 0xd2e6f5 : 0x5d7a94);
-        mossCapMat.color.setHex(isDay ? 0xe4f0f8 : 0x627c94);
-        fernMat.color.setHex(isDay ? 0xd2e4ef : 0x587488);
+        redwoodCanopyMat.color.setHex(isDay ? 0x547587 : 0x243b48);
+        redwoodCanopyHiMat.color.setHex(isDay ? 0xa5bfd1 : 0x536e86);
+        mossCapMat.color.setHex(isDay ? 0xb9cddc : 0x5a738a);
+        fernMat.color.setHex(isDay ? 0x9ab3c4 : 0x4f697d);
         for (let fi = 0; fi < FERN_COUNT; fi++) {
-          cTmp.setHex(fi % 2 === 0 ? 0xcfe4f0 : 0x8eb0c4);
+          cTmp.setHex(fi % 2 === 0 ? 0xaec5d6 : 0x7c9cb0);
           fernInst.setColorAt(fi, cTmp);
         }
         if (fernInst.instanceColor) fernInst.instanceColor.needsUpdate = true;
@@ -1487,7 +1855,7 @@ export function buildAgrouEnvironment(
         if (fernInst.instanceColor) fernInst.instanceColor.needsUpdate = true;
       }
 
-      riverMat.color.setHex(isDay ? 0x3b92de : 0x163c66);
+      riverMat.color.setHex(isDay ? 0x8fd0f2 : 0x26527d);
       particleMat.color.setHex(AGROU_BIOMES[biomeKey].ambientParticleColor);
     }
 
@@ -1508,13 +1876,14 @@ export function buildAgrouEnvironment(
       }
     }
 
-    // Subtle river shimmer drift in Riverside Meadow
+    // Smooth animated river flow & shimmer drift in Riverside Meadow
     if (meadowCampGroup.visible) {
+      waterRippleTex.offset.x = (elapsed * 0.085) % 1;
       for (let s = 0; s < shimmerStrips.length; s++) {
         const st = shimmerStrips[s];
-        const sx = ((st.position.x + simDt * 0.65 + 28) % 56) - 28;
+        const sx = ((st.position.x + simDt * 0.8 + 28) % 56) - 28;
         st.position.x = sx;
-        st.position.z = getRiverCenterZ(sx) + (s % 2 === 0 ? -0.45 : 0.45);
+        st.position.z = getRiverCenterZ(sx) + (s % 2 === 0 ? -0.55 : 0.45);
       }
     }
 
@@ -1523,12 +1892,16 @@ export function buildAgrouEnvironment(
       redwoodCampGroup.visible = false;
       meadowCampGroup.visible = false;
       grassInst.visible = false;
+      flowerInst.visible = false;
       pebbleInst.visible = false;
+      leafInst.visible = false;
     } else {
       redwoodCampGroup.visible = biomeKey !== 'autumn';
       meadowCampGroup.visible = biomeKey === 'autumn';
       grassInst.visible = true;
+      flowerInst.visible = biomeKey !== 'frostpeak';
       pebbleInst.visible = true;
+      leafInst.visible = biomeKey !== 'frostpeak';
     }
 
     // Shared Coherent Wind Vector driving flames, smoke drift, tent flaps & alpine snowfall slant
@@ -1541,38 +1914,46 @@ export function buildAgrouEnvironment(
 
     // Campfire Flame, Ground Light Pool & Dynamic PointLight Dance
     const flicker = Math.sin(elapsed * 11.5) * 0.11 + Math.cos(elapsed * 17.3) * 0.07;
-    const baseScale = isNightBlindfolded ? 0.92 : isDay && !isTitleScreen ? 0.92 : 1.08;
-    flameGroup.rotation.z = -windX * 0.14;
-    flameGroup.rotation.x = windZ * 0.14;
+    const baseScale = isNightBlindfolded ? 0.92 : isDay && !isTitleScreen ? 1.0 : 1.12;
+    flameGroup.rotation.z = -windX * 0.11;
+    flameGroup.rotation.x = windZ * 0.11;
     flameOuter.scale.set(
-      baseScale * (1 + flicker * 0.35),
-      baseScale * (1 + flicker * 0.95),
-      baseScale * (1 + flicker * 0.35)
+      baseScale * (1 + flicker * 0.3),
+      baseScale * (1 + flicker * 0.85),
+      baseScale * (1 + flicker * 0.3)
     );
     flameCore.scale.set(
-      baseScale * (1 - flicker * 0.25),
-      baseScale * (1 + flicker * 1.1),
-      baseScale * (1 - flicker * 0.25)
+      baseScale * (1 - flicker * 0.22),
+      baseScale * (1 + flicker * 0.95),
+      baseScale * (1 - flicker * 0.22)
     );
-    flameSide1.scale.setScalar(baseScale * (0.95 + flicker * 0.5));
-    flameSide2.scale.setScalar(baseScale * (0.95 - flicker * 0.45));
+    flameSide1.scale.set(
+      0.65 * baseScale * (0.95 + flicker * 0.45),
+      0.7 * baseScale * (0.95 + flicker * 0.75),
+      0.65 * baseScale
+    );
+    flameSide2.scale.set(
+      0.62 * baseScale * (0.95 - flicker * 0.4),
+      0.66 * baseScale * (0.95 - flicker * 0.65),
+      0.62 * baseScale
+    );
 
     fireGlowPoolMat.opacity = isNightBlindfolded
-      ? 0.84 + flicker * 0.14
-      : (isDay ? 0.78 : 0.96) + flicker * 0.14;
-    const poolScale = (isNightBlindfolded ? 0.82 : 1) + flicker * 0.12;
+      ? 0.48 + flicker * 0.08
+      : (isDay ? 0.42 : 0.58) + flicker * 0.09;
+    const poolScale = (isNightBlindfolded ? 0.82 : 1) + flicker * 0.1;
     fireGlowPool.scale.set(poolScale, poolScale, 1);
 
     fireLight.position.set(
       Math.sin(elapsed * 9.3) * 0.08,
-      1.55 + Math.cos(elapsed * 13.7) * 0.05,
+      1.65 + Math.cos(elapsed * 13.7) * 0.05,
       Math.cos(elapsed * 11.1) * 0.08
     );
     fireLight.color.lerpColors(fireWarmLow, fireWarmHigh, THREE.MathUtils.clamp(0.5 + flicker * 2.6, 0, 1));
     fireLight.intensity =
-      (isNightBlindfolded ? 10.5 : isDay ? 12.5 : 18.5) +
-      flicker * (isNightBlindfolded ? 2.4 : 4.2);
-    fireLight.distance = isNightBlindfolded ? 9.5 : 34;
+      (isNightBlindfolded ? 8.5 : isDay ? 10.5 : 13.5) +
+      flicker * (isNightBlindfolded ? 1.8 : 2.8);
+    fireLight.distance = isNightBlindfolded ? 10.5 : 32;
 
     // Flutter expedition tent entrance flaps with the shared wind
     if (redwoodCampGroup.visible) {
@@ -1583,29 +1964,52 @@ export function buildAgrouEnvironment(
       }
     }
 
-    // Rising faceted heat-smoke & ember cubes right above campfire (drifting downwind!)
+    // Soft rising billowing painterly campfire smoke puffs (drifting gently downwind!)
     for (let i = 0; i < FIRE_SMOKE_COUNT; i++) {
       const sp = fireSmokeData[i];
       sp.y += sp.vy * simDt;
-      if (sp.y > 2.45) {
-        sp.y = 0.32;
-        sp.x = (hash2(i, Math.floor(elapsed * 3) + 1) - 0.5) * 0.55;
-        sp.z = (hash2(i, Math.floor(elapsed * 3) + 7) - 0.5) * 0.55;
+      if (sp.y > 3.85) {
+        sp.y = 0.85;
+        sp.x = (hash2(i, Math.floor(elapsed * 2) + 1) - 0.5) * 0.35;
+        sp.z = (hash2(i, Math.floor(elapsed * 2) + 7) - 0.5) * 0.35;
       }
-      const rise = sp.y - 0.32;
-      const life = 1 - rise / 2.13;
-      const sc = Math.max(0.15, life * (isNightBlindfolded ? 0.72 : 1.15));
-      dummy.position.set(
-        sp.x + windX * rise * 0.28 + Math.sin(elapsed * 3.8 + sp.phase) * 0.1,
+      const rise = sp.y - 0.85;
+      const tLife = THREE.MathUtils.clamp(rise / 3.0, 0, 1);
+      const fadeIn = THREE.MathUtils.smoothstep(tLife, 0.0, 0.18);
+      const fadeOut = 1 - THREE.MathUtils.smoothstep(tLife, 0.45, 1.0);
+      const sz = (0.65 + tLife * 1.45) * (isNightBlindfolded ? 0.72 : 1.0);
+      const sprite = smokeSprites[i];
+      sprite.position.set(
+        sp.x + windX * rise * 0.22 + Math.sin(elapsed * 1.8 + sp.phase) * 0.14,
         sp.y,
-        sp.z + windZ * rise * 0.28 + Math.cos(elapsed * 3.2 + sp.phase) * 0.1
+        sp.z + windZ * rise * 0.22 + Math.cos(elapsed * 1.5 + sp.phase) * 0.14
       );
-      dummy.rotation.set(elapsed * 1.5 + sp.phase, elapsed * 2.1, 0);
-      dummy.scale.setScalar(sc);
-      dummy.updateMatrix();
-      fireSmokeInst.setMatrixAt(i, dummy.matrix);
+      sprite.scale.set(sz, sz, 1);
+      smokeSpriteMats[i].opacity = fadeIn * fadeOut * (isDay ? 0.34 : 0.24);
     }
-    fireSmokeInst.instanceMatrix.needsUpdate = true;
+
+    // Tiny glowing rising campfire ember sparks
+    for (let i = 0; i < SPARK_COUNT; i++) {
+      const sk = fireSparkData[i];
+      sk.y += sk.vy * simDt;
+      if (sk.y > 3.2) {
+        sk.y = 0.35;
+        sk.x = (hash2(i, Math.floor(elapsed * 4) + 3) - 0.5) * 0.55;
+        sk.z = (hash2(i, Math.floor(elapsed * 4) + 9) - 0.5) * 0.55;
+      }
+      const rise = sk.y - 0.35;
+      const life = Math.max(0.1, 1 - rise / 2.85);
+      dummy.position.set(
+        sk.x + windX * rise * 0.3 + Math.sin(elapsed * 4.5 + sk.phase) * 0.14,
+        sk.y,
+        sk.z + windZ * rise * 0.3 + Math.cos(elapsed * 3.8 + sk.phase) * 0.14
+      );
+      dummy.rotation.set(elapsed * 2 + sk.phase, elapsed * 3, 0);
+      dummy.scale.setScalar(life * 0.95);
+      dummy.updateMatrix();
+      fireSparkInst.setMatrixAt(i, dummy.matrix);
+    }
+    fireSparkInst.instanceMatrix.needsUpdate = true;
 
     // Campfire Voting Abstention Ring Pulse
     campfireVoteRingMat.color.setHex(

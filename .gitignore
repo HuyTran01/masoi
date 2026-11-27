@@ -8,6 +8,8 @@ coverage/
 !.env.example
 .accounts_db.json
 .accounts_db.json.tmp.*
+.masoi-rooms-snapshot.json
+.masoi-rooms-snapshot.json.*.tmp
 .session_secret
 .idea/
 .netlify/

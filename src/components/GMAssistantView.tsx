@@ -190,7 +190,7 @@ function saveStoredGMHostSecret(code: string, secret: string): void {
   }
 }
 
-function buildInitialSeats(count: number, mode: GMDeckMode): GMPlayerSeat[] {
+function buildInitialSeats(count: number, mode: GMDeckMode, lang: Language = 'vi'): GMPlayerSeat[] {
   const clamped = Math.max(4, Math.min(20, count));
   const roles = mode === 'virtual_deck' ? generateBalancedRoster(clamped) : [];
   return Array.from({ length: clamped }).map((_, i) => {
@@ -198,7 +198,7 @@ function buildInitialSeats(count: number, mode: GMDeckMode): GMPlayerSeat[] {
     return {
       id: `p_${i + 1}`,
       seatNumber: i + 1,
-      name: DEFAULT_PLAYERS[i] || `Người Chơi #${i + 1}`,
+      name: DEFAULT_PLAYERS[i] || (lang === 'vi' ? `Người Chơi #${i + 1}` : `Player #${i + 1}`),
       avatar: SEAT_AVATARS[i % SEAT_AVATARS.length],
       roleId,
       roleSource: roleId ? 'auto_dealt' : 'unassigned',
@@ -224,7 +224,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   );
   const [deckMode, setDeckMode] = useState<GMDeckMode>(initialDeckMode);
   const [seats, setSeats] = useState<GMPlayerSeat[]>(() =>
-    buildInitialSeats(initialPlayerCount, initialDeckMode)
+    buildInitialSeats(initialPlayerCount, initialDeckMode, lang)
   );
   const [newNameInput, setNewNameInput] = useState<string>('');
   const [setupWarning, setSetupWarning] = useState<string>('');
@@ -257,9 +257,12 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   const [players, setPlayers] = useState<Player[]>([]);
   const [wolfPupFrenzy, setWolfPupFrenzy] = useState<boolean>(false);
   const [elderSealActive, setElderSealActive] = useState<boolean>(false);
-  const [activeCalloutBanner, setActiveCalloutBanner] = useState<string>(
-    'Bấm các nút Âm Hiệu bên dưới để phát tiếng Sói Hú, Phù Thủy Ma Mị hoặc Thợ Săn "Tao có súng đó nha!"'
-  );
+  const defaultCalloutHint =
+    lang === 'vi'
+      ? 'Bấm các nút Âm Hiệu bên dưới để phát tiếng Sói Hú, Phù Thủy Ma Mị hoặc Thợ Săn "Tao có súng đó nha!"'
+      : 'Tap the soundboard buttons below to play Wolf Howl, Witch Chime, or Hunter callouts!';
+  const [activeCalloutBanner, setActiveCalloutBanner] = useState<string>('');
+  const [lynchCascadeBanner, setLynchCascadeBanner] = useState<string | null>(null);
 
   const [copyToast, setCopyToast] = useState<string>('');
   const [hideRolesForPrivacy, setHideRolesForPrivacy] = useState<boolean>(false);
@@ -480,7 +483,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       navigator.clipboard.writeText(roomId).catch(() => {});
     }
     setCopiedType('code');
-    showToast(`Đã sao chép mã phòng ${roomId}`);
+    showToast(lang === 'vi' ? `Đã sao chép mã phòng ${roomId}` : `Copied room code ${roomId}`);
     setTimeout(() => setCopiedType('none'), 2000);
   };
 
@@ -490,7 +493,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
       navigator.clipboard.writeText(joinUrl).catch(() => {});
     }
     setCopiedType('link');
-    showToast('Đã sao chép link phòng');
+    showToast(lang === 'vi' ? 'Đã sao chép link phòng' : 'Copied room invite link');
     setTimeout(() => setCopiedType('none'), 2000);
   };
 
@@ -506,6 +509,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setElderSealActive(false);
     setUndoStack([]);
     setConfirmReset(false);
+    setLynchCascadeBanner(null);
     setLastNightSummary([]);
     setLastNightResult(null);
     setSelectedLynchTargetId('');
@@ -568,7 +572,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
         next.push({
           id: `p_${Date.now().toString(36)}_${idx + 1}`,
           seatNumber: idx + 1,
-          name: DEFAULT_PLAYERS[idx] || `Người Chơi #${idx + 1}`,
+          name: DEFAULT_PLAYERS[idx] || (lang === 'vi' ? `Người Chơi #${idx + 1}` : `Player #${idx + 1}`),
           avatar: SEAT_AVATARS[idx % SEAT_AVATARS.length],
           roleId: null,
           roleSource: 'unassigned',
@@ -681,26 +685,34 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   const handleStartGame = () => {
     const missingSeats = seats.filter((s) => !s.roleId);
     if (missingSeats.length > 0) {
+      const sampleNames = `${missingSeats
+        .map((s) => s.name)
+        .slice(0, 3)
+        .join(', ')}${missingSeats.length > 3 ? '...' : ''}`;
       setSetupWarning(
-        `Còn ${missingSeats.length} người chơi chưa có vai trò (${missingSeats
-          .map((s) => s.name)
-          .slice(0, 3)
-          .join(', ')}${missingSeats.length > 3 ? '...' : ''}). Hãy chờ họ tự nhập bài trên máy hoặc Quản Trò chọn hộ trước khi bắt đầu Đêm 1!`
+        lang === 'vi'
+          ? `Còn ${missingSeats.length} người chơi chưa có vai trò (${sampleNames}). Hãy chờ họ tự nhập bài trên máy hoặc Quản Trò chọn hộ trước khi bắt đầu Đêm 1!`
+          : `${missingSeats.length} player(s) still have no role (${sampleNames}). Wait for them to self-pick on their phone or assign roles before starting Night 1!`
       );
       return;
     }
 
     const hasWolf = seats.some((s) => s.roleId === 'werewolf' || s.roleId === 'wolf_pup');
     if (!hasWolf) {
-      setSetupWarning('Ván đấu cần có ít nhất 1 Ma Sói (hoặc Sói Con) để bắt đầu Đêm 1!');
+      setSetupWarning(
+        lang === 'vi'
+          ? 'Ván đấu cần có ít nhất 1 Ma Sói (hoặc Sói Con) để bắt đầu Đêm 1!'
+          : 'The match needs at least 1 Werewolf (or Wolf Pup) before starting Night 1!'
+      );
       return;
     }
 
     setSetupWarning('');
+    setLynchCascadeBanner(null);
     sound.playNightBell();
     const initialPlayers: Player[] = seats.map((s) => ({
       id: s.id,
-      name: s.name.trim() || `Người Chơi #${s.seatNumber}`,
+      name: s.name.trim() || (lang === 'vi' ? `Người Chơi #${s.seatNumber}` : `Player #${s.seatNumber}`),
       avatar: s.avatar,
       roleId: s.roleId || 'villager',
       isAlive: true,
@@ -763,9 +775,15 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     nightSteps.push({
       id: 'doppelganger',
       roleId: 'doppelganger',
-      title: 'Nhân Bản Thức Dậy',
-      description: 'Quản trò gọi: "Nhân Bản thức dậy, chọn 1 người làm hình mẫu."',
-      prompt: 'Quản trò ghi nhớ người được chọn.',
+      title: lang === 'vi' ? 'Nhân Bản Thức Dậy' : 'Doppelganger Wakes Up',
+      description:
+        lang === 'vi'
+          ? 'Quản trò gọi: "Nhân Bản thức dậy, chọn 1 người làm hình mẫu."'
+          : 'GM calls: "Doppelganger, wake up and choose 1 player as your role model."',
+      prompt:
+        lang === 'vi'
+          ? 'Quản trò ghi nhớ người được chọn.'
+          : 'GM records the chosen player.',
     });
   }
 
@@ -773,9 +791,15 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     nightSteps.push({
       id: 'cupid',
       roleId: 'cupid',
-      title: 'Cupid (Thần Tình Yêu) Thức Dậy',
-      description: 'Quản trò gọi: "Cupid thức dậy, chọn 2 người làm tình nhân."',
-      prompt: 'Sau đó quản trò cho Cupid đi ngủ và chạm vai 2 tình nhân để họ biết nhau.',
+      title: lang === 'vi' ? 'Cupid (Thần Tình Yêu) Thức Dậy' : 'Cupid Wakes Up',
+      description:
+        lang === 'vi'
+          ? 'Quản trò gọi: "Cupid thức dậy, chọn 2 người làm tình nhân."'
+          : 'GM calls: "Cupid, wake up and link 2 players as Lovers."',
+      prompt:
+        lang === 'vi'
+          ? 'Sau đó quản trò cho Cupid đi ngủ và chạm vai 2 tình nhân để họ biết nhau.'
+          : 'Then put Cupid to sleep and tap the 2 Lovers on the shoulder so they recognize each other.',
     });
   }
 
@@ -783,9 +807,15 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     nightSteps.push({
       id: 'bodyguard',
       roleId: 'bodyguard',
-      title: 'Bảo Vệ Thức Dậy',
-      description: 'Quản trò gọi: "Bảo Vệ thức dậy, chọn 1 người để che chở đêm nay."',
-      prompt: 'Lưu ý: Không được bảo vệ cùng 1 người 2 đêm liên tiếp!',
+      title: lang === 'vi' ? 'Bảo Vệ Thức Dậy' : 'Bodyguard Wakes Up',
+      description:
+        lang === 'vi'
+          ? 'Quản trò gọi: "Bảo Vệ thức dậy, chọn 1 người để che chở đêm nay."'
+          : 'GM calls: "Bodyguard, wake up and choose 1 player to protect tonight."',
+      prompt:
+        lang === 'vi'
+          ? 'Lưu ý: Không được bảo vệ cùng 1 người 2 đêm liên tiếp!'
+          : 'Note: Cannot protect the same player two nights in a row!',
     });
   }
 
@@ -793,11 +823,15 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     nightSteps.push({
       id: 'hunter',
       roleId: 'hunter',
-      title: 'Thợ Săn Thức Dậy (Ghim Đạn)',
+      title: lang === 'vi' ? 'Thợ Săn Thức Dậy (Ghim Đạn)' : 'Hunter Wakes Up (Night Aim)',
       description:
-        'Quản trò gọi: "Thợ Săn thức dậy, chỉ 1 người để ghim đạn hoặc lắc đầu Không ghim."',
+        lang === 'vi'
+          ? 'Quản trò gọi: "Thợ Săn thức dậy, chỉ 1 người để ghim đạn hoặc lắc đầu Không ghim."'
+          : 'GM calls: "Hunter, wake up and mark 1 target, or shake your head for No Mark."',
       prompt:
-        'Nếu Thợ Săn chết đêm nay hoặc bị treo cổ ngày mai, người bị ghim chết theo (xuyên Bảo Vệ & Bình Cứu).',
+        lang === 'vi'
+          ? 'Nếu Thợ Săn chết đêm nay hoặc bị treo cổ ngày mai, người bị ghim chết theo (xuyên Bảo Vệ & Bình Cứu).'
+          : 'If the Hunter dies tonight or is executed tomorrow, the marked target falls with them (pierces Guard & Heal).',
     });
   }
 
@@ -805,22 +839,38 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     id: 'werewolves',
     roleId: 'werewolf',
     title: wolfPupFrenzy
-      ? 'Đàn Ma Sói Cuồng Nộ (Cắn 2 Nạn Nhân)'
-      : 'Đàn Ma Sói & Sói Con Thức Dậy',
-    description: 'Quản trò gọi: "Ma sói thức dậy, cùng thống nhất chọn nạn nhân (có thể tự cắn Sói để hack não)."',
+      ? lang === 'vi'
+        ? 'Đàn Ma Sói Cuồng Nộ (Cắn 2 Nạn Nhân)'
+        : 'Werewolf Pack Frenzy (Bite 2 Victims)'
+      : lang === 'vi'
+      ? 'Đàn Ma Sói & Sói Con Thức Dậy'
+      : 'Werewolves & Wolf Pup Wake Up',
+    description:
+      lang === 'vi'
+        ? 'Quản trò gọi: "Ma sói thức dậy, cùng thống nhất chọn nạn nhân (có thể tự cắn Sói để hack não)."'
+        : 'GM calls: "Werewolves, wake up and agree on a victim tonight."',
     prompt: wolfPupFrenzy
-      ? 'Sói Con đã chết vòng trước! Chọn tới 2 nạn nhân bị cắn đêm nay:'
-      : 'Chọn người bị bầy sói thống nhất cắn đêm nay:',
+      ? lang === 'vi'
+        ? 'Sói Con đã chết vòng trước! Chọn tới 2 nạn nhân bị cắn đêm nay:'
+        : 'The Wolf Pup fell last round! Pick up to 2 victims tonight:'
+      : lang === 'vi'
+      ? 'Chọn người bị bầy sói thống nhất cắn đêm nay:'
+      : 'Select the player bitten by the Werewolf pack tonight:',
   });
 
   if (players.some((p) => p.roleId === 'witch' && p.isAlive && !p.hasUsedPower)) {
     nightSteps.push({
       id: 'witch',
       roleId: 'witch',
-      title: 'Phù Thủy Thức Dậy',
+      title: lang === 'vi' ? 'Phù Thủy Thức Dậy' : 'Witch Wakes Up',
       description:
-        'Quản trò gọi: "Phù Thủy thức dậy, người này bị sói cắn. Có cứu không? Có đầu độc ai không?"',
-      prompt: 'Ghi nhận quyết định dùng bình Cứu / bình Độc (mỗi bình 1 lần):',
+        lang === 'vi'
+          ? 'Quản trò gọi: "Phù Thủy thức dậy, người này bị sói cắn. Có cứu không? Có đầu độc ai không?"'
+          : 'GM calls: "Witch, wake up — this player was bitten. Use Heal? Use Poison?"',
+      prompt:
+        lang === 'vi'
+          ? 'Ghi nhận quyết định dùng bình Cứu / bình Độc (mỗi bình 1 lần):'
+          : 'Record Heal / Poison potion usage (1 use each per match):',
     });
   }
 
@@ -828,9 +878,15 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     nightSteps.push({
       id: 'seer',
       roleId: 'seer',
-      title: 'Tiên Tri Thức Dậy',
-      description: 'Quản trò gọi: "Tiên Tri thức dậy, chọn 1 người muốn soi."',
-      prompt: 'Quản trò ra dấu: Ngón cái lên = Dân Làng, Chỉ xuống = Ma Sói:',
+      title: lang === 'vi' ? 'Tiên Tri Thức Dậy' : 'Seer Wakes Up',
+      description:
+        lang === 'vi'
+          ? 'Quản trò gọi: "Tiên Tri thức dậy, chọn 1 người muốn soi."'
+          : 'GM calls: "Seer, wake up and point to 1 player to inspect."',
+      prompt:
+        lang === 'vi'
+          ? 'Quản trò ra dấu: Ngón cái lên = Dân Làng, Chỉ xuống = Ma Sói:'
+          : 'GM signals: Thumbs up = Villager, Thumbs down = Werewolf:',
     });
   }
 
@@ -876,8 +932,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setTimerSeconds(undoSnapshot.timerSeconds);
     setIsTimerRunning(false);
     setGameResult(null);
+    setLynchCascadeBanner(null);
     setUndoStack((stack) => stack.slice(0, -1));
-    showToast(`Đã hoàn tác: ${undoSnapshot.label}`);
+    showToast(lang === 'vi' ? `Đã hoàn tác: ${undoSnapshot.label}` : `Undid: ${undoSnapshot.label}`);
   };
 
   const recordVictory = (
@@ -905,7 +962,8 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   };
 
   const handleResolveNight = () => {
-    pushUndoSnapshot(`Kết thúc Đêm ${roundNumber}`);
+    pushUndoSnapshot(lang === 'vi' ? `Kết thúc Đêm ${roundNumber}` : `End of Night ${roundNumber}`);
+    setLynchCascadeBanner(null);
     sound.playDayGong();
     const { updatedPlayers, result } = resolveNightActions(players, nightActions, {
       wolfPupTriggered: wolfPupFrenzy,
@@ -924,7 +982,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
     const winCheck = checkWinCondition(updatedPlayers);
     if (winCheck.isOver) {
-      recordVictory(winCheck, updatedPlayers, 'Quản Trò Vận Hành');
+      recordVictory(winCheck, updatedPlayers, lang === 'vi' ? 'Quản Trò Vận Hành' : 'Game Master');
     }
   };
 
@@ -934,7 +992,11 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     const target = players.find((p) => p.id === selectedLynchTargetId);
     if (!target) return;
 
-    pushUndoSnapshot(`Treo cổ ${target.name} (Ngày ${roundNumber})`);
+    pushUndoSnapshot(
+      lang === 'vi'
+        ? `Treo cổ ${target.name} (Ngày ${roundNumber})`
+        : `Execute ${target.name} (Day ${roundNumber})`
+    );
     sound.playGavel();
 
     const {
@@ -958,9 +1020,12 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     const alsoFallen = updatedPlayers
       .filter((p) => !p.isAlive && p.id !== target.id && players.find((b) => b.id === p.id)?.isAlive)
       .map((p) => p.name);
-    if (alsoFallen.length > 0) {
-      showToast(`💀 Đọc to: ${target.name} bị treo cổ, cũng tử trận theo: ${alsoFallen.join(', ')}`);
-    }
+    const cascadeNotice =
+      alsoFallen.length > 0
+        ? lang === 'vi'
+          ? `💀 Đọc to cho cả làng: ${target.name} bị treo cổ — đồng thời tử trận theo: ${alsoFallen.join(', ')} (không nêu nguyên nhân ẩn).`
+          : `💀 Read aloud to the village: ${target.name} was executed — also eliminated: ${alsoFallen.join(', ')} (keep hidden cause secret).`
+        : null;
 
     setPlayers(updatedPlayers);
     const lynchedId = selectedLynchTargetId;
@@ -970,6 +1035,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     if (target.roleId === 'tanner') {
       const tannerWin = checkWinCondition(updatedPlayers, lynchedId);
       if (tannerWin.isOver) {
+        setLynchCascadeBanner(cascadeNotice);
         recordVictory(tannerWin, updatedPlayers, target.name);
         return;
       }
@@ -977,15 +1043,20 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
     const winCheck = checkWinCondition(updatedPlayers, lynchedId);
     if (winCheck.isOver) {
+      setLynchCascadeBanner(cascadeNotice);
       recordVictory(winCheck, updatedPlayers, target.name);
     } else {
-      handleNextNight();
+      handleNextNight({ preserveLynchBanner: Boolean(cascadeNotice) });
+      setLynchCascadeBanner(cascadeNotice);
     }
   };
 
-  const handleNextNight = () => {
+  const handleNextNight = (options?: { preserveLynchBanner?: boolean }) => {
     sound.playNightBell();
     setSelectedLynchTargetId('');
+    if (!options?.preserveLynchBanner) {
+      setLynchCascadeBanner(null);
+    }
     setRoundNumber((r) => r + 1);
     setCurrentPhase('night');
     setNightStep(0);
@@ -1167,6 +1238,28 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
         </div>
       )}
 
+      {lynchCascadeBanner && (
+        <div
+          role="alert"
+          data-testid="gm-lynch-cascade-banner"
+          className="px-4 py-3 rounded-2xl bg-rose-950/90 border-2 border-rose-400/80 text-xs sm:text-sm font-extrabold text-rose-100 shadow-xl flex items-start justify-between gap-3"
+        >
+          <div className="flex items-start gap-2 leading-snug">
+            <AlertTriangle className="w-4 h-4 text-amber-300 shrink-0 mt-0.5" />
+            <span>{lynchCascadeBanner}</span>
+          </div>
+          <button
+            type="button"
+            data-testid="gm-dismiss-lynch-banner-btn"
+            aria-label={lang === 'vi' ? 'Đóng thông báo' : 'Dismiss banner'}
+            onClick={() => setLynchCascadeBanner(null)}
+            className="p-1 rounded-lg bg-rose-900/80 hover:bg-rose-800 text-rose-100 shrink-0 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Soundboard & Role Voice Callouts Bar for Real-Life GM */}
       <div className="bg-[#090d18] border border-amber-600/40 rounded-2xl p-3.5 space-y-2.5">
         <div className="flex items-center justify-between gap-2">
@@ -1178,7 +1271,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
 
         <div className="px-3 py-2 rounded-xl bg-rose-950/40 border border-rose-800/50 text-xs text-amber-200 font-medium flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-          <span>{activeCalloutBanner}</span>
+          <span>{activeCalloutBanner || defaultCalloutHint}</span>
         </div>
 
         <div className="flex flex-wrap gap-1.5">
@@ -1397,14 +1490,18 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       {isJoined && (
                         <span
                           className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-600/50 font-bold"
-                          title="Người chơi đã mở thẻ trên điện thoại"
+                          title={
+                            lang === 'vi'
+                              ? 'Người chơi đã mở thẻ trên điện thoại'
+                              : 'Player has opened their card on mobile'
+                          }
                         >
-                          📱 Đã vào
+                          {lang === 'vi' ? '📱 Đã vào' : '📱 Joined'}
                         </span>
                       )}
                       {seat.roleSource === 'self_input' && (
                         <span className="text-[9px] px-1.5 py-0.5 rounded bg-sky-950 text-sky-300 border border-sky-600/50 font-bold">
-                          ✍️ Tự nhập
+                          {lang === 'vi' ? '✍️ Tự nhập' : '✍️ Self-pick'}
                         </span>
                       )}
                     </div>
@@ -1413,8 +1510,8 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       onClick={() => handleRemovePlayer(idx)}
                       disabled={seats.length <= 4}
                       className="text-slate-500 hover:text-rose-400 disabled:opacity-30 p-1 rounded cursor-pointer"
-                      title="Xóa người này"
-                      aria-label={`Xóa ${seat.name}`}
+                      title={lang === 'vi' ? 'Xóa người này' : 'Remove player'}
+                      aria-label={lang === 'vi' ? `Xóa ${seat.name}` : `Remove ${seat.name}`}
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
@@ -1425,7 +1522,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       type="text"
                       value={seat.name}
                       onChange={(e) => handleUpdatePlayerName(idx, e.target.value)}
-                      aria-label={`Tên người chơi #${idx + 1}`}
+                      aria-label={
+                        lang === 'vi' ? `Tên người chơi #${idx + 1}` : `Player #${idx + 1} name`
+                      }
                       className={`w-full bg-slate-950/90 border focus:border-amber-500 rounded-lg px-2 py-1 font-semibold text-xs text-slate-100 focus:outline-none ${
                         isDuplicateName ? 'border-amber-400' : 'border-slate-800'
                       }`}
@@ -1624,7 +1723,10 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   <div className="bg-rose-950/40 border border-rose-900/50 rounded-xl p-3 text-xs text-rose-200 space-y-1">
                     <p className="font-semibold">{activeNightStep.description}</p>
                     <p className="text-amber-300 italic">
-                      🎙️ Thoại mẫu: "{ROLE_CALLOUT_LINES[activeNightStep.roleId]?.quote}"
+                      🎙️ {lang === 'vi' ? 'Thoại mẫu' : 'Sample callout'}: &ldquo;
+                      {ROLE_CALLOUT_LINES[activeNightStep.roleId]?.quotes?.[lang] ||
+                        ROLE_CALLOUT_LINES[activeNightStep.roleId]?.quote}
+                      &rdquo;
                     </p>
                     <p className="text-slate-300 mt-1">{activeNightStep.prompt}</p>
                   </div>
@@ -1749,7 +1851,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                               </span>
                               {isWolfAlly && !hideRolesForPrivacy && (
                                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-950 text-rose-300 border border-rose-700/50">
-                                  Sói
+                                  {lang === 'vi' ? 'Sói' : 'Wolf'}
                                 </span>
                               )}
                             </button>
@@ -1788,11 +1890,17 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                             }`}
                           >
                             {healUsed
-                              ? 'Đã Dùng Hết Bình Cứu'
+                              ? lang === 'vi'
+                                ? 'Đã Dùng Hết Bình Cứu'
+                                : 'Heal Potion Used'
                               : nightActions.witchHealTargetId === nightActions.wolfTargetId &&
                                 nightActions.wolfTargetId
-                              ? `Đã Cứu: ${primaryVictim?.name || 'Nạn nhân 1'}`
-                              : `Dùng Bình Cứu (${primaryVictim?.name || 'Chưa có nạn nhân'})`}
+                              ? lang === 'vi'
+                                ? `Đã Cứu: ${primaryVictim?.name || 'Nạn nhân 1'}`
+                                : `Healed: ${primaryVictim?.name || 'Victim 1'}`
+                              : lang === 'vi'
+                              ? `Dùng Bình Cứu (${primaryVictim?.name || 'Chưa có nạn nhân'})`
+                              : `Use Heal Potion (${primaryVictim?.name || 'No victim yet'})`}
                           </button>
 
                           {wolfPupFrenzy && secondaryVictim && !healUsed && (
@@ -1813,8 +1921,12 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                               }`}
                             >
                               {nightActions.witchHealTargetId === secondaryVictim.id
-                                ? `Đã Cứu: ${secondaryVictim.name}`
-                                : `Cứu Nạn Nhân 2 (${secondaryVictim.name})`}
+                                ? lang === 'vi'
+                                  ? `Đã Cứu: ${secondaryVictim.name}`
+                                  : `Healed: ${secondaryVictim.name}`
+                                : lang === 'vi'
+                                ? `Cứu Nạn Nhân 2 (${secondaryVictim.name})`
+                                : `Heal Victim 2 (${secondaryVictim.name})`}
                             </button>
                           )}
 
@@ -1830,13 +1942,19 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                             className="bg-slate-900 border border-slate-700 text-xs rounded-lg px-3 py-1.5 text-slate-200 disabled:opacity-40"
                           >
                             <option value="">
-                              {poisonUsed ? 'Đã Dùng Hết Bình Độc' : 'Không dùng bình độc'}
+                              {poisonUsed
+                                ? lang === 'vi'
+                                  ? 'Đã Dùng Hết Bình Độc'
+                                  : 'Poison Potion Used'
+                                : lang === 'vi'
+                                ? 'Không dùng bình độc'
+                                : 'Do not use poison'}
                             </option>
                             {players
                               .filter((p) => p.isAlive)
                               .map((p) => (
                                 <option key={p.id} value={p.id}>
-                                  Đầu độc: {p.name}
+                                  {lang === 'vi' ? `Đầu độc: ${p.name}` : `Poison: ${p.name}`}
                                 </option>
                               ))}
                           </select>
@@ -1916,7 +2034,11 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                               }`}
                             >
                               <span>{p.name}</span>
-                              {wasGuarded && <span className="text-[10px] text-amber-400">Đêm trước</span>}
+                              {wasGuarded && (
+                                <span className="text-[10px] text-amber-400">
+                                  {lang === 'vi' ? 'Đêm trước' : 'Last night'}
+                                </span>
+                              )}
                             </button>
                           );
                         })}
@@ -1956,7 +2078,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                         onClick={() => setNightActions({ ...nightActions, hunterTargetId: null })}
                         className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 cursor-pointer"
                       >
-                        🚫 Không ghim
+                        {lang === 'vi' ? '🚫 Không ghim' : '🚫 No Mark'}
                       </button>
                     </div>
                   )}
@@ -2019,10 +2141,12 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 >
                   <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
                     <span className="text-[10px] font-mono uppercase tracking-widest px-2 py-0.5 rounded bg-amber-500 text-slate-950 font-black">
-                      📢 Phần 1: Lời Quản Trò Đọc To Cho Cả Làng Khi Thức Dậy
+                      {lang === 'vi'
+                        ? '📢 Phần 1: Lời Quản Trò Đọc To Cho Cả Làng Khi Thức Dậy'
+                        : '📢 Part 1: Game Master Dawn Announcement (Read Aloud)'}
                     </span>
                     <span className="text-xs font-mono font-bold text-amber-300">
-                      Sáng Ngày Thứ {roundNumber}
+                      {lang === 'vi' ? `Sáng Ngày Thứ ${roundNumber}` : `Morning — Day ${roundNumber}`}
                     </span>
                   </div>
 
@@ -2031,22 +2155,45 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   lastNightResult.killedDetails.length > 0 ? (
                     <div className="space-y-3">
                       <h4 className="text-sm sm:text-base font-black text-rose-200 leading-snug">
-                        🌅 "Trời đã sáng, cả làng thức dậy! Đêm qua có{' '}
-                        <span className="text-amber-300 underline">
-                          {lastNightResult.killedDetails.length} người
-                        </span>{' '}
-                        đã thiệt mạng là:{' '}
-                        <span className="text-white">
-                          {[...lastNightResult.killedDetails]
-                            .sort(
-                              (a, b) =>
-                                players.findIndex((p) => p.id === a.playerId) -
-                                players.findIndex((p) => p.id === b.playerId)
-                            )
-                            .map((d) => d.name)
-                            .join(', ')}
-                        </span>
-                        !"
+                        {lang === 'vi' ? (
+                          <>
+                            🌅 &ldquo;Trời đã sáng, cả làng thức dậy! Đêm qua có{' '}
+                            <span className="text-amber-300 underline">
+                              {lastNightResult.killedDetails.length} người
+                            </span>{' '}
+                            đã thiệt mạng là:{' '}
+                            <span className="text-white">
+                              {[...lastNightResult.killedDetails]
+                                .sort(
+                                  (a, b) =>
+                                    players.findIndex((p) => p.id === a.playerId) -
+                                    players.findIndex((p) => p.id === b.playerId)
+                                )
+                                .map((d) => d.name)
+                                .join(', ')}
+                            </span>
+                            !&rdquo;
+                          </>
+                        ) : (
+                          <>
+                            🌅 &ldquo;Dawn breaks — everyone wake up! Last night,{' '}
+                            <span className="text-amber-300 underline">
+                              {lastNightResult.killedDetails.length} villager(s)
+                            </span>{' '}
+                            perished:{' '}
+                            <span className="text-white">
+                              {[...lastNightResult.killedDetails]
+                                .sort(
+                                  (a, b) =>
+                                    players.findIndex((p) => p.id === a.playerId) -
+                                    players.findIndex((p) => p.id === b.playerId)
+                                )
+                                .map((d) => d.name)
+                                .join(', ')}
+                            </span>
+                            !&rdquo;
+                          </>
+                        )}
                       </h4>
 
                       {/* Public Victim Cards — STRICT ZERO-LEAK: NO death causes (Cupid/Witch/Wolf) & NO secret roles */}
@@ -2070,7 +2217,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                                   <span>{victim.name}</span>
                                 </span>
                                 <span className="px-2 py-0.5 rounded-md bg-rose-950/90 border border-rose-700/60 text-[10px] font-extrabold text-rose-200">
-                                  💀 Tử trận đêm qua
+                                  {lang === 'vi' ? '💀 Tử trận đêm qua' : '💀 Fallen last night'}
                                 </span>
                               </div>
                             );
@@ -2078,14 +2225,18 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       </div>
 
                       <p className="text-[11px] text-amber-200/90 font-semibold">
-                        🔒 Đúng luật Ma Sói: Quản Trò chỉ công bố tên người chết, KHÔNG công bố nguyên nhân chết (Sói cắn, Bình Độc, Cupid...) hay vai trò!
+                        {lang === 'vi'
+                          ? '🔒 Đúng luật Ma Sói: Quản Trò chỉ công bố tên người chết, KHÔNG công bố nguyên nhân chết (Sói cắn, Bình Độc, Cupid...) hay vai trò!'
+                          : '🔒 Official Werewolf Rule: Only announce who died — NEVER reveal the hidden cause of death (Wolf bite, Poison, Cupid...) or secret roles!'}
                       </p>
                     </div>
                   ) : (
                     <div className="flex items-center gap-2.5 text-emerald-300">
                       <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
                       <h4 className="text-sm sm:text-base font-black">
-                        🌅 "Trời đã sáng, cả làng thức dậy! Đêm qua là một đêm bình yên — KHÔNG AI CHẾT!"
+                        {lang === 'vi'
+                          ? '🌅 "Trời đã sáng, cả làng thức dậy! Đêm qua là một đêm bình yên — KHÔNG AI CHẾT!"'
+                          : '🌅 "Dawn breaks — everyone wake up! Last night was peaceful — NOBODY DIED!"'}
                       </h4>
                     </div>
                   )}
@@ -2100,7 +2251,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     <span className="text-xs font-extrabold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                       <Info className="w-4 h-4 text-amber-400" />
                       <span>
-                        🧠 Phần 2: Sổ Tay Bí Mật Quản Trò (Nguyên Nhân & Logic — Ẩn Với Người Chơi)
+                        {lang === 'vi'
+                          ? '🧠 Phần 2: Sổ Tay Bí Mật Quản Trò (Nguyên Nhân & Logic — Ẩn Với Người Chơi)'
+                          : '🧠 Part 2: Secret GM Notebook (Causes & Logic — Hidden from Players)'}
                       </span>
                     </span>
                     <button
@@ -2111,7 +2264,13 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                     >
                       <Eye className="w-3.5 h-3.5 text-amber-400" />
                       <span>
-                        {showSecretGMLog ? 'Ẩn Chi Tiết Bí Mật' : 'Mở Chi Tiết Bí Mật (Chỉ Quản Trò)'}
+                        {showSecretGMLog
+                          ? lang === 'vi'
+                            ? 'Ẩn Chi Tiết Bí Mật'
+                            : 'Hide Secret Details'
+                          : lang === 'vi'
+                          ? 'Mở Chi Tiết Bí Mật (Chỉ Quản Trò)'
+                          : 'Reveal Secret Details (GM Only)'}
                       </span>
                     </button>
                   </div>
@@ -2119,8 +2278,12 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   {!showSecretGMLog || hideRolesForPrivacy ? (
                     <p className="text-xs text-slate-400 italic">
                       {hideRolesForPrivacy
-                        ? '••• (Đã ẩn — Chế độ chống nhìn trộm đang bật)'
-                        : '🔒 Nguyên nhân chết (Sói cắn, Phù Thủy, Cupid...) và vai trò thật đang được che để tránh lộ thông tin cho người chơi. Bấm nút trên nếu Quản Trò cần đối chiếu riêng.'}
+                        ? lang === 'vi'
+                          ? '••• (Đã ẩn — Chế độ chống nhìn trộm đang bật)'
+                          : '••• (Hidden — Anti-peek privacy mode is enabled)'
+                        : lang === 'vi'
+                        ? '🔒 Nguyên nhân chết (Sói cắn, Phù Thủy, Cupid...) và vai trò thật đang được che để tránh lộ thông tin cho người chơi. Bấm nút trên nếu Quản Trò cần đối chiếu riêng.'
+                        : '🔒 Hidden death causes (Werewolf bite, Witch, Cupid...) and true roles are masked to prevent leaks. Click above if the GM needs private verification.'}
                     </p>
                   ) : (
                     <>
@@ -2137,7 +2300,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                                 <div className="flex items-center justify-between gap-2 text-xs font-bold">
                                   <span className="text-rose-200">{victim.name}</span>
                                   <span className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-[10px] text-amber-300">
-                                    Vai: {roleDef.name[lang] || roleDef.name.vi}
+                                    {lang === 'vi' ? 'Vai' : 'Role'}: {roleDef.name[lang] || roleDef.name.en}
                                   </span>
                                 </div>
                                 <div className="flex flex-wrap gap-1">
@@ -2178,7 +2341,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                               >
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className="px-2 py-0.5 rounded bg-black/50 border border-white/15 text-[10px] font-mono font-extrabold text-amber-300">
-                                    Bước logic #{idx + 1} · {step.badge}
+                                    {lang === 'vi' ? `Bước logic #${idx + 1}` : `Logic step #${idx + 1}`} · {step.badge}
                                   </span>
                                   <span className="font-extrabold text-white">{step.title}</span>
                                 </div>
@@ -2195,7 +2358,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                         </ul>
                       ) : (
                         <p className="text-xs text-slate-400">
-                          Không có hành động đặc biệt nào được ghi nhận trong đêm qua.
+                          {lang === 'vi'
+                            ? 'Không có hành động đặc biệt nào được ghi nhận trong đêm qua.'
+                            : 'No special night actions were recorded last night.'}
                         </p>
                       )}
 
@@ -2203,7 +2368,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                       {lastNightSummary.length > 0 && (
                         <div className="pt-2 border-t border-slate-800/80">
                           <span className="text-[10px] font-bold uppercase text-slate-400 block mb-1">
-                            Tóm tắt nhật ký hệ thống:
+                            {lang === 'vi' ? 'Tóm tắt nhật ký hệ thống:' : 'System log summary:'}
                           </span>
                           <ul className="space-y-0.5 text-[11px] text-slate-300">
                             {lastNightSummary.map((msg, i) => (
@@ -2318,12 +2483,12 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-2">
-                  <button
-                    onClick={handleNextNight}
-                    className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 cursor-pointer"
-                  >
-                    {t.gmSkipLynchBtn}
-                  </button>
+                <button
+                  onClick={() => handleNextNight()}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-300 cursor-pointer"
+                >
+                  {t.gmSkipLynchBtn}
+                </button>
                   <button
                     disabled={!selectedLynchTargetId}
                     onClick={handleExecuteLynch}
@@ -2458,7 +2623,17 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              Màn hình này che kín hoàn toàn danh sách vai trò. Người chơi có thể giơ camera quét trực tiếp hoặc nhập mã <strong className="text-amber-300 font-mono">{roomId}</strong>.
+              {lang === 'vi' ? (
+                <>
+                  Màn hình này che kín hoàn toàn danh sách vai trò. Người chơi có thể giơ camera quét trực tiếp hoặc nhập mã{' '}
+                  <strong className="text-amber-300 font-mono">{roomId}</strong>.
+                </>
+              ) : (
+                <>
+                  This screen completely hides the role list. Players can scan the QR code directly or enter room code{' '}
+                  <strong className="text-amber-300 font-mono">{roomId}</strong>.
+                </>
+              )}
             </p>
 
             <div className="flex items-center gap-2">

@@ -231,6 +231,27 @@ export class GMRoomManager {
     this.playerTokens.set(code, new Map(Object.entries(snapshot.playerTokens || {})));
   }
 
+  exportAllSnapshots(): StoredGMRoomSnapshot[] {
+    const out: StoredGMRoomSnapshot[] = [];
+    for (const code of this.rooms.keys()) {
+      const snap = this.exportSnapshot(code);
+      if (snap) out.push(snap);
+    }
+    return out;
+  }
+
+  importAllSnapshots(snapshots: StoredGMRoomSnapshot[], now = Date.now()): number {
+    let loaded = 0;
+    if (!Array.isArray(snapshots)) return 0;
+    for (const snap of snapshots) {
+      if (!snap?.room?.code || !snap.hostSecret) continue;
+      if (now - (snap.room.updatedAt || 0) > IDLE_ROOM_TTL_MS) continue;
+      this.importSnapshot(snap);
+      loaded += 1;
+    }
+    return loaded;
+  }
+
   /**
    * Creates or synchronizes a GM room from the Game Master host console.
    * Preserves claimedByUserId and player self-input roles unless the host explicitly changed that seat's role.

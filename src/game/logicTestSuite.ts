@@ -34,19 +34,20 @@ export const LOGIC_TEST_SCENARIOS: LogicTestScenario[] = [
   {
     id: 'test-01-roster-6p',
     category: 'Roster & Setup',
-    title: 'Phân chia vai cân bằng bàn 6 người (1 Sói vs 5 Dân)',
+    title: 'Phân chia vai cân bằng bàn 6 người (2 Sói vs 4 Dân)',
     description:
-      'Kiểm tra bàn 6 người chỉ có đúng 1 Ma Sói để tránh Sói thắng ngay ngày 1, khớp với mô tả Tooltip độ khó.',
-    expectedSummary: '6 người: 1 Ma Sói, 1 Tiên Tri, 1 Bảo Vệ, 1 Phù Thủy, 1 Thợ Săn, 1 Dân Làng',
+      'Kiểm tra bàn 6 người đúng tỷ lệ 2 Ma Sói vs 4 Dân Làng (Tiên Tri, Bảo Vệ, 2 Dân Làng), khớp với mô tả Tooltip độ khó.',
+    expectedSummary: '6 người: 2 Ma Sói, 1 Tiên Tri, 1 Bảo Vệ, 2 Dân Làng',
     run: () => {
       const r6 = generateBalancedRoster(6);
       const wolves = r6.filter((r) => r === 'werewolf' || r === 'wolf_pup');
+      const villagers = r6.filter((r) => r === 'villager');
       const passed =
         r6.length === 6 &&
-        wolves.length === 1 &&
+        wolves.length === 2 &&
         r6.includes('seer') &&
         r6.includes('bodyguard') &&
-        r6.includes('witch');
+        villagers.length === 2;
       return {
         passed,
         actualSummary: `${r6.length} người: ${wolves.length} Sói (${r6.join(', ')})`,
@@ -443,14 +444,14 @@ export const LOGIC_TEST_SCENARIOS: LogicTestScenario[] = [
     },
   },
 
-  // 14. Night-Aim Hunter lynched -> pre-marked bullet auto-fires (Lover who is Wolf Pup)
+  // 14. Night-Aim Hunter dies at night -> pre-marked bullet auto-fires (Lover who is Wolf Pup); day lynch does NOT fire
   {
     id: 'test-14-hunter-shot-cascade',
     category: 'Special Roles & Cascades',
-    title: 'Thợ Săn bị treo cổ tự bắn mục tiêu đã ghim, kéo theo Sói Con chết & kích hoạt Cuồng Nộ',
+    title: 'Thợ Săn chết ban đêm tự bắn mục tiêu đã ghim, kéo theo Sói Con chết & kích hoạt Cuồng Nộ',
     description:
-      'Thợ Săn đã ghim p2 (đang yêu p3 là Sói Con). Khi Thợ Săn bị treo cổ, phát đạn ghim tự nổ: cả p2 và p3 đều chết, đồng thời kích hoạt wolfPupTriggeredNextNight!',
-    expectedSummary: 'p2 chết, p3 (Sói Con) chết theo, wolfPupTriggeredNextNight=true',
+      'Thợ Săn đã ghim p2 (đang yêu p3 là Sói Con). Khi Thợ Săn chết trong đêm, phát đạn ghim tự nổ kéo theo p2 và p3 và kích hoạt wolfPupTriggeredNextNight; còn bị treo cổ ban ngày thì không bắn.',
+    expectedSummary: 'Chết đêm: p2 & p3 chết, frenzy=true; Treo cổ ngày: p2 sống, hunterShots=0',
     run: () => {
       const players: Player[] = [
         { id: 'p1', name: 'Thợ Săn', avatar: '🎯', roleId: 'hunter', isAlive: true, hunterMarkId: 'p2' },
@@ -458,18 +459,22 @@ export const LOGIC_TEST_SCENARIOS: LogicTestScenario[] = [
         { id: 'p3', name: 'Sói Con', avatar: '🔥', roleId: 'wolf_pup', isAlive: true, loverId: 'p2' },
         { id: 'p4', name: 'Sói Chúa', avatar: '🐺', roleId: 'werewolf', isAlive: true },
       ];
-      const res = applyDayLynch(players, 'p1');
-      const p2 = res.updatedPlayers.find((p: Player) => p.id === 'p2')!;
-      const p3 = res.updatedPlayers.find((p: Player) => p.id === 'p3')!;
+      const dayRes = applyDayLynch(players, 'p1');
+      const dayP2 = dayRes.updatedPlayers.find((p: Player) => p.id === 'p2')!;
+      const nightRes = resolveNightActions(players, { wolfTargetId: 'p1', hunterTargetId: 'p2' });
+      const p2 = nightRes.updatedPlayers.find((p: Player) => p.id === 'p2')!;
+      const p3 = nightRes.updatedPlayers.find((p: Player) => p.id === 'p3')!;
       const passed =
+        dayP2.isAlive &&
+        dayRes.hunterShots.length === 0 &&
         !p2.isAlive &&
         !p3.isAlive &&
-        res.hunterShots.length === 1 &&
-        res.hunterShots[0].targetId === 'p2' &&
-        res.wolfPupTriggeredNextNight === true;
+        nightRes.result.hunterShots.length === 1 &&
+        nightRes.result.hunterShots[0].targetId === 'p2' &&
+        nightRes.result.wolfPupTriggeredNextNight === true;
       return {
         passed,
-        actualSummary: `p2.isAlive=${p2.isAlive}, p3.isAlive=${p3.isAlive}, frenzy=${res.wolfPupTriggeredNextNight}`,
+        actualSummary: `dayP2.isAlive=${dayP2.isAlive}, nightP2.isAlive=${p2.isAlive}, p3.isAlive=${p3.isAlive}, frenzy=${nightRes.result.wolfPupTriggeredNextNight}`,
       };
     },
   },
@@ -650,13 +655,13 @@ export const LOGIC_TEST_SCENARIOS: LogicTestScenario[] = [
   {
     id: 'test-22-all-13-roles-i18n',
     category: 'Roster & Setup',
-    title: 'Kiểm định toàn vẹn dữ liệu 13 Vai Trò & 5 Ngôn Ngữ',
+    title: 'Kiểm định toàn vẹn dữ liệu 13 Vai Trò & 2 Ngôn Ngữ',
     description:
-      'Đảm bảo đủ 13 vai trò (Dân, Sói, Tiên Tri, Bảo Vệ, Phù Thủy, Thợ Săn, Cupid, Sói Con, Chán Đời, Già Làng, Nhân Bản, Bán Sói, Phản Bội) có đủ bản dịch 5 ngôn ngữ và hướng dẫn người mới.',
-    expectedSummary: '13 vai trò hợp lệ, đủ 5 ngôn ngữ (vi, en, fr, es, ja)',
+      'Đảm bảo đủ 13 vai trò (Dân, Sói, Tiên Tri, Bảo Vệ, Phù Thủy, Thợ Săn, Cupid, Sói Con, Chán Đời, Già Làng, Nhân Bản, Bán Sói, Phản Bội) có đủ bản dịch 2 ngôn ngữ (vi, en) và hướng dẫn người mới.',
+    expectedSummary: '13 vai trò hợp lệ, đủ 2 ngôn ngữ (vi, en)',
     run: () => {
       const roleList = Object.values(ROLES);
-      const langs = ['vi', 'en', 'fr', 'es', 'ja'] as const;
+      const langs = ['vi', 'en'] as const;
       const allValid =
         roleList.length === 13 &&
         roleList.every((r) =>
@@ -670,7 +675,7 @@ export const LOGIC_TEST_SCENARIOS: LogicTestScenario[] = [
         );
       return {
         passed: allValid,
-        actualSummary: `${roleList.length} vai trò kiểm tra thành công trên 5 ngôn ngữ`,
+        actualSummary: `${roleList.length} vai trò kiểm tra thành công trên 2 ngôn ngữ`,
       };
     },
   },

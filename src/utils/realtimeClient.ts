@@ -10,6 +10,7 @@ import type {
   OnlineNightActionType,
   OnlinePlayerMatchView,
 } from '../server/onlineMatchEngine';
+import type { Language } from '../types/game';
 
 export type TransportMode = 'ws' | 'http';
 
@@ -39,6 +40,7 @@ interface RoomJoinParams {
   timerConfig?: Partial<RealtimeTimerConfig>;
   createIfMissing?: boolean;
   authToken?: string;
+  lang?: Language;
 }
 
 type ActiveGmSub =
@@ -518,6 +520,7 @@ class WerewolfRealtimeClient {
       const qs = new URLSearchParams({
         userId,
         since: String(this.lastRoomUpdatedAt),
+        ...(this.activeRoomJoin.lang ? { lang: this.activeRoomJoin.lang } : {}),
       });
       const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/state?${qs.toString()}`, {
         headers: { 'x-room-player-secret': secret },
@@ -743,6 +746,9 @@ class WerewolfRealtimeClient {
             : {}
         );
         break;
+      case 'room:set_lang':
+        void this.sendRoomActionHttp(code, 'set_lang', { lang: payload.lang });
+        break;
       case 'gm:subscribe_host':
       case 'gm:subscribe_player':
         this.startGmHttpPolling();
@@ -854,6 +860,17 @@ class WerewolfRealtimeClient {
       code,
       ...(typeof expectedStepIndex === 'number' ? { expectedStepIndex } : {}),
     });
+  }
+
+  setLanguage(code: string, lang: Language) {
+    const cleanCode = normalizeClientCode(code);
+    if (
+      this.activeRoomJoin &&
+      normalizeClientCode(this.activeRoomJoin.code) === cleanCode
+    ) {
+      this.activeRoomJoin = { ...this.activeRoomJoin, lang };
+    }
+    this.send({ type: 'room:set_lang', code: cleanCode, lang });
   }
 
   subscribeGMHost(code: string, hostSecret?: string) {

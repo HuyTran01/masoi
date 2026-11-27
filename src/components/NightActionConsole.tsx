@@ -215,12 +215,24 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
                 .join(', ')}
             </span>
           ) : (
-            <span
-              data-testid="ghost-no-living-actor"
-              className="text-slate-400 italic font-semibold"
-            >
-              {t.ghostNoLivingActor}
-            </span>
+            (() => {
+              const hasLivingHolder = players.some(
+                (p) =>
+                  p.isAlive &&
+                  (currentNightStep.key === 'werewolf'
+                    ? p.roleId === 'werewolf' || p.roleId === 'wolf_pup'
+                    : p.roleId === currentNightStep.roleId)
+              );
+              return (
+                <span
+                  data-testid="ghost-no-living-actor"
+                  data-ghost-reason={hasLivingHolder ? 'power_spent' : 'all_dead'}
+                  className="text-slate-300 italic font-semibold"
+                >
+                  {hasLivingHolder ? t.ghostActorPowerSpent : t.ghostActorAllDead}
+                </span>
+              );
+            })()
           )}
         </div>
 
@@ -252,6 +264,16 @@ export const NightActionConsole: React.FC<NightActionConsoleProps> = ({
         <span className="text-[10px] font-mono font-bold text-[#fde7c3] shrink-0">
           ⏳ {Math.round(timerSeconds)}s
         </span>
+        {canAdvanceBotStep && (
+          <button
+            type="button"
+            data-testid="auto-gm-skip-step-btn"
+            onClick={() => (onSkipStepFast ? onSkipStepFast() : onAdvanceBotStep())}
+            className="ml-1 px-2 py-0.5 rounded-lg bg-[#b84b10] hover:bg-[#d15916] border border-[#fbc266]/70 text-white text-[10px] sm:text-[11px] font-black cursor-pointer shrink-0 transition-colors"
+          >
+            {t.skipNightStepBtn}
+          </button>
+        )}
       </div>
     );
   }

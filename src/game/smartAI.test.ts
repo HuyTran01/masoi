@@ -16,6 +16,7 @@ import {
   generateGallowsDefenseBeat,
   generateHumanChatResponses,
   adjustPublicSuspicion,
+  buildAiChatServerPayload,
 } from './smartAI.ts';
 import {
   DEFAULT_TIMER_CONFIG,
@@ -49,7 +50,7 @@ function makeRoster(specs: Array<[string, string, RoleId, Partial<Player>?]>): P
   }));
 }
 
-test('[SmartAI #0] STORYLINE_CATALOG covers all 8 storylines x 5 languages and applyStorylineRoleSetup enforces required roles while respecting preferredRole', () => {
+test('[SmartAI #0] STORYLINE_CATALOG covers all 8 storylines x 2 languages and applyStorylineRoleSetup enforces required roles while respecting preferredRole', () => {
   const expectedIds: StorylineId[] = [
     'random_dramatic',
     'classic_deduction',
@@ -60,7 +61,7 @@ test('[SmartAI #0] STORYLINE_CATALOG covers all 8 storylines x 5 languages and a
     'silent_night_paranoia',
     'mayor_coup',
   ];
-  const langs: Language[] = ['vi', 'en', 'fr', 'es', 'ja'];
+  const langs: Language[] = ['vi', 'en'];
 
   assert.equal(STORYLINE_LIST.length, 8);
   for (const id of expectedIds) {
@@ -445,7 +446,7 @@ test('[SmartAI #7] generateHumanChatResponses responds to Vietnamese accusation,
   );
 });
 
-test('[SmartAI #8] Ghost Spectator timer (>= 4.5s active, 1.8s inactive), prepareNightStartForHuman & buildNightSkillCutsceneForStep', () => {
+test('[SmartAI #8] Uniform Ghost Spectator timer (nightActionSec for active & inactive), prepareNightStartForHuman & buildNightSkillCutsceneForStep', () => {
   const players = makeRoster([
     ['u1', 'Bạn', 'villager', { isAlive: false }],
     ['bg', 'Bảo Vệ', 'bodyguard'],
@@ -461,27 +462,30 @@ test('[SmartAI #8] Ghost Spectator timer (>= 4.5s active, 1.8s inactive), prepar
   assert.equal(activeStep.hasLivingActor, true);
   assert.equal(inactiveStep.hasLivingActor, false);
 
-  // Supports both (step, myIdx, currIdx, isGhost) and (step, round, timerConfig, isGhost)
-  assert.ok(
-    getStepInitialTimerSeconds(activeStep, -1, 0, true) >= 4.5,
-    'Ghost spectator must get >= 4.5s for active steps'
+  // Wave 0: uniform night step duration (nightActionSec) across active & inactive steps, no role-death leak
+  assert.equal(
+    getStepInitialTimerSeconds(activeStep, -1, 0, true),
+    DEFAULT_TIMER_CONFIG.nightActionSec,
+    'Ghost spectator must get uniform nightActionSec for active steps'
   );
-  assert.ok(
-    getStepInitialTimerSeconds(activeStep, 2, DEFAULT_TIMER_CONFIG, true) >= 4.5,
-    'Ghost spectator must get >= 4.5s when passing timerConfig'
+  assert.equal(
+    getStepInitialTimerSeconds(activeStep, 2, DEFAULT_TIMER_CONFIG, true),
+    DEFAULT_TIMER_CONFIG.nightActionSec,
+    'Ghost spectator must get uniform nightActionSec when passing timerConfig'
   );
   assert.equal(
     getStepInitialTimerSeconds(inactiveStep, -1, 0, true),
-    1.8,
-    'Ghost spectator must get 1.8s for inactive steps'
+    DEFAULT_TIMER_CONFIG.nightActionSec,
+    'Ghost spectator must get uniform nightActionSec for inactive steps'
   );
 
-  // prepareNightStartForHuman when human is dead Ghost uses Ghost timer
+  // prepareNightStartForHuman when human is dead Ghost uses uniform nightActionSec
   const preparedGhost = prepareNightStartForHuman(players, 2, DEFAULT_TIMER_CONFIG, 'u1');
   assert.equal(preparedGhost.initialStepIndex, 0);
-  assert.ok(
-    preparedGhost.initialTimerSec >= 4.5,
-    `Expected Ghost initialTimerSec >= 4.5s, got ${preparedGhost.initialTimerSec}`
+  assert.equal(
+    preparedGhost.initialTimerSec,
+    DEFAULT_TIMER_CONFIG.nightActionSec,
+    `Expected Ghost initialTimerSec=${DEFAULT_TIMER_CONFIG.nightActionSec}s, got ${preparedGhost.initialTimerSec}`
   );
 
   // buildNightSkillCutsceneForStep emits BOTH witch_heal and witch_poison when Witch uses both!
@@ -728,3 +732,107 @@ test('[W3-AI] A Wolf bot that publicly claimed Seer never replies "I am just a V
   assert.ok(text.includes('Tiên Tri'), text);
   assert.ok(!text.includes('Dân Làng'), text);
 });
+
+test('[Wave 2] Human-like AI chat: seat targeting (#N, số N), reason queries, game-state queries, anti-repetition & vote-chat consistency', () => {
+  const players = makeRoster([
+    ['u1', 'Bạn', 'seer'],
+    ['b1', 'Minh Hoàng', 'werewolf'],
+    ['b2', 'Thảo My', 'bodyguard'],
+    ['b3', 'Tuấn Kiệt', 'witch'],
+    ['b4', 'Bảo Châu', 'villager'],
+    ['b5', 'Gia Bảo', 'villager', { isAlive: false }],
+  ]);
+
+  const rng = makeSeededRng(2027);
+  const brain = createAIMatchBrain(players, 'classic_deduction', 'u1', rng);
+  recordRoundPublicOutcome(brain, {
+    round: 1,
+    votes: [
+      { voterId: 'u1', targetId: 'b4' },
+      { voterId: 'b1', targetId: 'b4' },
+    ],
+    lynchedId: 'b5',
+    lynchedRoleId: 'villager',
+  });
+  brain.dawnDeathHistory.push({ round: 2, victimIds: ['b5'] });
+  adjustPublicSuspicion(brain, 'u1', 35);
+  adjustPublicSuspicion(brain, 'b1', 40);
+
+  // 1. Seat targeting "#2 thấy #5 thế nào?" -> #2 (Minh Hoàng, b1) responds about #5 (Bảo Châu, b4)
+  const seatAsk = generateHumanChatResponses(brain, '#2 thấy #5 thế nào?', players, 2, 'vi', rng);
+  assert.ok(seatAsk.length >= 1);
+  assert.equal(seatAsk[0].speakerId, 'b1', '#2 (Minh Hoàng) should answer when directly addressed');
+  assert.ok(
+    seatAsk[0].text.includes('Bảo Châu') || seatAsk[0].text.includes('#5'),
+    `Expected reply to reference #5 Bảo Châu, got: ${seatAsk[0].text}`
+  );
+
+  // 2. "bạn số 3 là sói" targets seat #3 (Thảo My, b2)
+  const vnSeatAccuse = generateHumanChatResponses(brain, 'Mình nghi bạn số 3 là sói', players, 2, 'vi', rng);
+  assert.equal(vnSeatAccuse[0].speakerId, 'b2', 'Seat #3 Thảo My must answer "bạn số 3"');
+
+  // 3. Game-state query: "đêm qua ai chết" cites Gia Bảo (#6)
+  const deadQuery = generateHumanChatResponses(brain, 'Đêm qua ai chết vậy mọi người?', players, 2, 'vi', rng);
+  assert.ok(deadQuery.length >= 1);
+  assert.ok(
+    deadQuery[0].text.includes('Gia Bảo'),
+    `Expected last Dawn death Gia Bảo to be mentioned, got: ${deadQuery[0].text}`
+  );
+
+  // 4. Reason query: "sao vote tao" / "vì sao nghi tao" cites real public evidence (voteHistory / suspicion)
+  const whyQuery = generateHumanChatResponses(brain, 'Sao nghi tao vậy, bằng chứng đâu?', players, 2, 'vi', rng);
+  assert.ok(whyQuery.length >= 1);
+  assert.ok(whyQuery[0].text.length > 20, `Expected reasoned response, got: ${whyQuery[0].text}`);
+
+  // 5. Unique role pushback: Human claims Bodyguard -> real bot Bodyguard (#3 Thảo My) counter-claims!
+  const bgPushback = generateHumanChatResponses(brain, 'Tôi là bảo vệ đây mọi người', players, 2, 'vi', rng);
+  assert.equal(bgPushback[0].speakerId, 'b2', 'Real bot Bodyguard must counter-claim human Bodyguard claim');
+
+  // 6. Vote-chat consistency: asking "vote ai" records statedVoteTargetByBot and computeSmartBotVotes follows it
+  const voteAsk = generateHumanChatResponses(brain, 'Hôm nay vote ai đây mọi người?', players, 2, 'vi', rng);
+  assert.ok(voteAsk.length >= 1);
+  const statedEntry = brain.statedVoteTargetByBot[voteAsk[0].speakerId];
+  assert.ok(statedEntry && statedEntry.round === 2, 'Answering "vote ai" should record statedVoteTargetByBot');
+  const dayVotes = computeSmartBotVotes(brain, players, { round: 2, rng });
+  const speakerVote = dayVotes.find((v) => v.voterId === voteAsk[0].speakerId);
+  assert.equal(
+    speakerVote?.targetId,
+    statedEntry.targetId,
+    'Bot day vote must stay consistent with the target it publicly named in chat'
+  );
+
+  // 7. Anti-repetition: asking "hello" twice in same round yields distinct responses
+  const hi1 = generateHumanChatResponses(brain, 'hello mọi người', players, 2, 'vi', rng);
+  const hi2 = generateHumanChatResponses(brain, 'hello mọi người', players, 2, 'vi', rng);
+  assert.notEqual(hi1[0].text, hi2[0].text, 'Bot must not repeat the exact same line in the same round');
+
+  // 8. English "who died last night?" works cleanly
+  const enDead = generateHumanChatResponses(brain, 'Who died last night?', players, 2, 'en', rng);
+  assert.ok(enDead[0].text.includes('Gia Bảo'), enDead[0].text);
+});
+
+test('[Wave 2] buildAiChatServerPayload strictly enforces zero-leak (no human role, no other living bots secret roles)', () => {
+  const players = makeRoster([
+    ['u1', 'Bạn', 'seer'],
+    ['b1', 'Minh Hoàng', 'villager'],
+    ['b2', 'Thảo My', 'werewolf'],
+    ['b3', 'Tuấn Kiệt', 'witch'],
+    ['b4', 'Bảo Châu', 'hunter', { isAlive: false }],
+  ]);
+
+  const brain = createAIMatchBrain(players, 'classic_deduction', 'u1', makeSeededRng(12));
+  brain.revealedRoles.b4 = 'hunter';
+  const payload = buildAiChatServerPayload(brain, players[1], players, 2, 'vi', 'Ai là sói?');
+  const serialized = JSON.stringify(payload);
+
+  // Replying bot is b1 (villager): must see its own role only, and dead player's publicly revealedRole (hunter), NEVER human's 'seer' or living bots' 'werewolf'/'witch'!
+  assert.equal(payload.bot.roleId, 'villager');
+  assert.equal(serialized.includes('"seer"'), false, 'Human secret role "seer" must NEVER leak in /api/ai-chat payload');
+  assert.equal(serialized.includes('"werewolf"'), false, 'Living wolf role must NEVER leak to Villager bot payload');
+  assert.equal(serialized.includes('"witch"'), false, 'Living witch role must NEVER leak in /api/ai-chat payload');
+  const deadEntry = payload.publicState.players.find((p) => p.name === 'Bảo Châu');
+  assert.equal(deadEntry?.revealedRole, 'hunter', 'Dead player public revealedRole is allowed');
+  const humanEntry = payload.publicState.players.find((p) => p.name === 'Bạn');
+  assert.equal(humanEntry?.revealedRole, undefined, 'Living human must have no revealedRole');
+});
+

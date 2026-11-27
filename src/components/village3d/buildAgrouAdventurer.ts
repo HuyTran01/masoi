@@ -1,5 +1,14 @@
 import * as THREE from 'three';
 import { AgrouEmoteId, AgrouHatId } from '../../game/agrouMechanics';
+import {
+  createArcaneRuneTexture,
+  createGoldenGroundRingTexture,
+  createSpectralGhostShaderMaterial,
+  createSpectralMistRibbonTexture,
+  createStoneTexture,
+  createTombstonePortraitTexture,
+  createWoodGrainTexture,
+} from './stylizedAssets';
 
 export interface AgrouSeatVisual {
   group: THREE.Group;
@@ -24,6 +33,8 @@ export interface AgrouSeatVisual {
   ghostRightArm: THREE.Group;
   ghostMotesGroup: THREE.Group;
   ghostCloakMat: THREE.MeshStandardMaterial;
+  ghostShaderMats: THREE.ShaderMaterial[];
+  ghostGroundRune: THREE.Mesh;
   ghostEyeMat: THREE.MeshBasicMaterial;
   ghostWolfEarsGroup: THREE.Group;
   ghostHatVariants: Record<AgrouHatId, THREE.Group>;
@@ -40,6 +51,10 @@ export interface AgrouSeatVisual {
   eyeLeftMat: THREE.MeshBasicMaterial;
   eyeRightMat: THREE.MeshBasicMaterial;
   tombstoneGroup: THREE.Group;
+  tombstoneRuneRing: THREE.Mesh;
+  tombstoneMistMesh: THREE.Mesh;
+  tombstoneHatVariants: Record<AgrouHatId, THREE.Group>;
+  syncTombstonePortrait: (cloakHex: number, hat: AgrouHatId) => void;
   shieldRing: THREE.Mesh;
   loverHeart: THREE.Mesh;
   wolfEarsGroup: THREE.Group;
@@ -186,7 +201,22 @@ export function buildAgrouAdventurerPool(
 ): { seats: AgrouSeatVisual[]; dispose: () => void } {
   const disposableGeos: THREE.BufferGeometry[] = [];
   const disposableMats: THREE.Material[] = [];
+  const disposableTex: THREE.Texture[] = [];
+
   const shadowTex = createSoftShadowTexture();
+  const woodGrainTex = createWoodGrainTexture();
+  const stoneTex = createStoneTexture();
+  const goldenRingTex = createGoldenGroundRingTexture();
+  const arcaneRuneTex = createArcaneRuneTexture();
+  const spectralMistTex = createSpectralMistRibbonTexture();
+  disposableTex.push(
+    shadowTex,
+    woodGrainTex,
+    stoneTex,
+    goldenRingTex,
+    arcaneRuneTex,
+    spectralMistTex
+  );
 
   const trackGeo = <T extends THREE.BufferGeometry>(g: T): T => {
     disposableGeos.push(g);
@@ -197,47 +227,44 @@ export function buildAgrouAdventurerPool(
     return m;
   };
 
-  // Shared stylized low-poly materials for crisp Agrou adventurer look (Images 3 & 4!)
+  // Shared handcrafted storybook materials (smooth warm shading + procedural wood/stone grain!)
   const stoolWoodMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x4d3623, roughness: 0.92, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x6b472b, map: woodGrainTex, roughness: 0.86 })
   );
   const darkLeatherMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x2d221c, roughness: 0.85, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x38281f, roughness: 0.8 })
   );
   const strapLeatherMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x5c3c24, roughness: 0.84, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x6b4428, roughness: 0.78 })
   );
   const bedrollMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x8f8a7f, roughness: 0.92, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0xaca496, roughness: 0.88 })
   );
   const steelArmorMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0x67727e,
-      roughness: 0.42,
-      metalness: 0.56,
-      flatShading: true,
+      color: 0x768392,
+      roughness: 0.36,
+      metalness: 0.54,
     })
   );
   const brightSteelMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0xaab4bf,
-      roughness: 0.35,
-      metalness: 0.65,
-      flatShading: true,
+      color: 0xb6c1cc,
+      roughness: 0.3,
+      metalness: 0.62,
     })
   );
   const goldAccentMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0xe5a928,
-      emissive: 0x5c3700,
-      emissiveIntensity: 0.25,
-      roughness: 0.32,
-      metalness: 0.72,
-      flatShading: true,
+      color: 0xf4bc35,
+      emissive: 0x804d04,
+      emissiveIntensity: 0.35,
+      roughness: 0.28,
+      metalness: 0.7,
     })
   );
   const pantsMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x35312d, roughness: 0.9, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x3b3530, roughness: 0.86 })
   );
   const contactShadowMat = trackMat(
     new THREE.MeshBasicMaterial({
@@ -247,31 +274,90 @@ export function buildAgrouAdventurerPool(
     })
   );
   const musketWoodMat = trackMat(
-    new THREE.MeshStandardMaterial({ color: 0x734222, roughness: 0.82, flatShading: true })
+    new THREE.MeshStandardMaterial({ color: 0x7a4824, map: woodGrainTex, roughness: 0.78 })
   );
   const musketSmokeMat = trackMat(
     new THREE.MeshStandardMaterial({
-      color: 0xedf2f7,
-      roughness: 1.0,
+      color: 0xf1f5f9,
+      roughness: 0.95,
       transparent: true,
       opacity: 0.82,
-      flatShading: true,
     })
   );
+  const tombStoneMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x9aa2a8,
+      map: stoneTex,
+      roughness: 0.88,
+      metalness: 0.04,
+    })
+  );
+  const tombPlinthMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x7f888f,
+      map: stoneTex,
+      roughness: 0.92,
+      metalness: 0.04,
+    })
+  );
+  const tombFrameMat = trackMat(
+    new THREE.MeshStandardMaterial({
+      color: 0x586069,
+      roughness: 0.86,
+    })
+  );
+  const tombMossDarkMat = trackMat(
+    new THREE.MeshStandardMaterial({ color: 0x4b7a24, roughness: 0.9 })
+  );
+  const tombMossLightMat = trackMat(
+    new THREE.MeshStandardMaterial({ color: 0x6ba032, roughness: 0.86 })
+  );
+  const tombFlowerYellowMat = trackMat(
+    new THREE.MeshStandardMaterial({ color: 0xfde047, emissive: 0x6b4f00, emissiveIntensity: 0.25, roughness: 0.65 })
+  );
+  const tombFlowerWhiteMat = trackMat(
+    new THREE.MeshStandardMaterial({ color: 0xfffdf2, roughness: 0.68 })
+  );
+  const tombStemMat = trackMat(
+    new THREE.MeshStandardMaterial({ color: 0x3f6e20, roughness: 0.88 })
+  );
 
-  // Shared Geometries
-  const stoolTopGeo = trackGeo(new THREE.CylinderGeometry(0.32, 0.29, 0.085, 8));
-  const stoolLegGeo = trackGeo(new THREE.CylinderGeometry(0.036, 0.028, 0.5, 5));
-  const shadowDiscGeo = trackGeo(new THREE.PlaneGeometry(1.42, 1.42));
-  const haloRingGeo = trackGeo(new THREE.RingGeometry(0.68, 0.8, 24));
+  // Sculpted Arched Gravestone ExtrudeGeometry (shared across seats)
+  const tombArchShape = new THREE.Shape();
+  tombArchShape.moveTo(-0.31, 0);
+  tombArchShape.lineTo(0.31, 0);
+  tombArchShape.lineTo(0.33, 0.52);
+  tombArchShape.quadraticCurveTo(0.32, 0.82, 0, 0.88);
+  tombArchShape.quadraticCurveTo(-0.32, 0.82, -0.33, 0.52);
+  tombArchShape.closePath();
+  const tombArchGeo = trackGeo(
+    new THREE.ExtrudeGeometry(tombArchShape, {
+      depth: 0.18,
+      bevelEnabled: true,
+      bevelThickness: 0.04,
+      bevelSize: 0.032,
+      bevelSegments: 3,
+      curveSegments: 14,
+    })
+  );
+  tombArchGeo.center();
+
+  // Shared Smooth Stylized Geometries
+  const stoolTopGeo = trackGeo(new THREE.CylinderGeometry(0.34, 0.31, 0.088, 14));
+  const stoolLegGeo = trackGeo(new THREE.CylinderGeometry(0.038, 0.028, 0.5, 8));
+  const shadowDiscGeo = trackGeo(new THREE.PlaneGeometry(1.48, 1.48));
+  const haloRingGeo = trackGeo(new THREE.PlaneGeometry(1.86, 1.86));
+  const arcaneRuneGeo = trackGeo(new THREE.PlaneGeometry(2.12, 2.12));
+  const ghostRuneGeo = trackGeo(new THREE.PlaneGeometry(1.94, 1.94));
+  const spectralMistGeo = trackGeo(new THREE.CylinderGeometry(0.78, 0.86, 1.32, 20, 1, true));
   const thighGeo = trackGeo(new THREE.BoxGeometry(0.16, 0.38, 0.16));
   const shinGeo = trackGeo(new THREE.BoxGeometry(0.145, 0.36, 0.155));
   const bootGeo = trackGeo(new THREE.BoxGeometry(0.175, 0.15, 0.29));
-  const kneePadGeo = trackGeo(new THREE.DodecahedronGeometry(0.102, 0));
-  const torsoGeo = trackGeo(new THREE.CylinderGeometry(0.24, 0.21, 0.58, 7));
-  const pauldronGeo = trackGeo(new THREE.DodecahedronGeometry(0.18, 0));
-  const spikeGeo = trackGeo(new THREE.ConeGeometry(0.04, 0.11, 4));
-  const headGeo = trackGeo(new THREE.DodecahedronGeometry(0.245, 0));
+  const kneePadGeo = trackGeo(new THREE.IcosahedronGeometry(0.102, 1));
+  const torsoGeo = trackGeo(new THREE.CylinderGeometry(0.24, 0.21, 0.58, 12));
+  const pauldronGeo = trackGeo(new THREE.IcosahedronGeometry(0.18, 2));
+  const spikeGeo = trackGeo(new THREE.ConeGeometry(0.04, 0.11, 6));
+  const headGeo = trackGeo(new THREE.IcosahedronGeometry(0.245, 2));
   const armUpperGeo = trackGeo(new THREE.BoxGeometry(0.125, 0.28, 0.125));
   const armForeGeo = trackGeo(new THREE.BoxGeometry(0.11, 0.26, 0.11));
   const handGeo = trackGeo(new THREE.BoxGeometry(0.1, 0.11, 0.11));
@@ -283,49 +369,53 @@ export function buildAgrouAdventurerPool(
     const group = new THREE.Group();
     group.visible = false;
 
+    const skinHex = SKIN_TONES[i % SKIN_TONES.length];
+    const hairHex = HAIR_COLORS[i % HAIR_COLORS.length];
+
     const skinMat = trackMat(
       new THREE.MeshStandardMaterial({
-        color: SKIN_TONES[i % SKIN_TONES.length],
-        roughness: 0.78,
-        flatShading: true,
+        color: skinHex,
+        roughness: 0.72,
       })
     );
     const hairMat = trackMat(
       new THREE.MeshStandardMaterial({
-        color: HAIR_COLORS[i % HAIR_COLORS.length],
-        roughness: 0.9,
-        flatShading: true,
+        color: hairHex,
+        roughness: 0.84,
       })
     );
     const cloakMat = trackMat(
       new THREE.MeshStandardMaterial({
         color: 0xc83737,
-        roughness: 0.82,
-        flatShading: true,
+        roughness: 0.76,
       })
     );
 
-    // 1. Soft Contact Shadow Disc on Sandy Clearing
+    // 1. Soft Contact Shadow Disc on Earthy Clearing
     const shadowDisc = new THREE.Mesh(shadowDiscGeo, contactShadowMat);
     shadowDisc.rotation.x = -Math.PI / 2;
     shadowDisc.position.y = 0.016;
     group.add(shadowDisc);
 
-    // 2. Selection / Role Halo Ring (subtle unless selected/hovered/mayor)
+    // 2. Luminous Golden Ground Ring (Signature warm floor halo under every living seated villager!)
     const haloMat = trackMat(
       new THREE.MeshBasicMaterial({
-        color: 0xd6bfa2,
+        map: goldenRingTex,
+        color: 0xf5b83d,
         transparent: true,
-        opacity: 0.2,
+        opacity: 0.55,
+        blending: THREE.NormalBlending,
+        depthWrite: false,
         side: THREE.DoubleSide,
       })
     );
     const haloRing = new THREE.Mesh(haloRingGeo, haloMat);
     haloRing.rotation.x = -Math.PI / 2;
-    haloRing.position.y = 0.022;
+    haloRing.position.y = 0.024;
+    haloRing.renderOrder = 2;
     group.add(haloRing);
 
-    // 3. Stationary Seat Anchor Group (4-Legged Wooden Camp Stool + Tombstone stay anchored at homePos!)
+    // 3. Stationary Seat Anchor Group (4-Legged Wooden Camp Stool + Sculpted Tombstone stay anchored at homePos!)
     const seatAnchorGroup = new THREE.Group();
     seatAnchorGroup.visible = false;
     const stoolGroup = new THREE.Group();
@@ -551,23 +641,23 @@ export function buildAgrouAdventurerPool(
       }
     }
 
-    // Distinct Low-Poly Hairstyles (varied per seat)
+    // Distinct Smooth Hairstyles (varied per seat)
     const hairStyle = i % 4;
-    const hairCap = new THREE.Mesh(trackGeo(new THREE.DodecahedronGeometry(0.255, 0)), hairMat);
+    const hairCap = new THREE.Mesh(trackGeo(new THREE.IcosahedronGeometry(0.255, 2)), hairMat);
     hairCap.scale.set(1.02, 0.72, 1.04);
     hairCap.position.set(0, 0.12, -0.03);
     headGroup.add(hairCap);
 
     if (hairStyle === 0) {
-      // High Warrior Ponytail (exact match to foreground adventurer in Image 3!)
-      const bun = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.11, 0.28, 6)), hairMat);
+      // High Warrior Ponytail
+      const bun = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.11, 0.28, 10)), hairMat);
       bun.position.set(0, 0.25, -0.17);
       bun.rotation.x = -0.85;
       headGroup.add(bun);
     } else if (hairStyle === 1) {
       // Side-swept adventurer hair + headband
       const headband = new THREE.Mesh(
-        trackGeo(new THREE.CylinderGeometry(0.245, 0.245, 0.055, 8)),
+        trackGeo(new THREE.CylinderGeometry(0.245, 0.245, 0.055, 14)),
         strapLeatherMat
       );
       headband.position.set(0, 0.13, 0);
@@ -579,13 +669,12 @@ export function buildAgrouAdventurerPool(
       headGroup.add(backHair);
     }
 
-    // Distinct Beards & Mustaches (varied per seat, matching Image 3!)
+    // Distinct Beards & Mustaches (varied per seat)
     if (i % 3 !== 2) {
       const mustache = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.2, 0.055, 0.08)), hairMat);
       mustache.position.set(0, -0.075, 0.2);
       headGroup.add(mustache);
       if (i % 3 === 0) {
-        // Full chiseled adventurer beard
         const beard = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.24, 0.16, 0.16)), hairMat);
         beard.position.set(0, -0.15, 0.13);
         headGroup.add(beard);
@@ -622,13 +711,11 @@ export function buildAgrouAdventurerPool(
     const rHand = new THREE.Mesh(handGeo, skinMat);
     rHand.position.set(0, -0.5, 0.07);
     rightArm.add(rHand);
-    // Extended pointing finger aligned along -Y so raising arm (rotation.x = -PI/2) points straight forward!
     const pointFinger = new THREE.Mesh(fingerGeo, skinMat);
     pointFinger.position.set(0, -0.61, 0.07);
     rightArm.add(pointFinger);
-    // Subtle pointing tip highlight visible ONLY when actively pointing to vote
     const pointGlowMesh = new THREE.Mesh(
-      trackGeo(new THREE.ConeGeometry(0.055, 0.24, 5)),
+      trackGeo(new THREE.ConeGeometry(0.055, 0.24, 8)),
       trackMat(
         new THREE.MeshBasicMaterial({
           color: 0xf59e0b,
@@ -642,7 +729,7 @@ export function buildAgrouAdventurerPool(
     pointGlowMesh.visible = false;
     rightArm.add(pointGlowMesh);
 
-    // 10. Low-Poly Wooden Flintlock Musket + White Muzzle Smoke Puff (Matches Image 4!)
+    // 10. Wooden Flintlock Musket + White Muzzle Smoke Puff
     const musketGroup = new THREE.Group();
     musketGroup.position.set(0.18, 0.42, 0.34);
     musketGroup.visible = false;
@@ -651,11 +738,11 @@ export function buildAgrouAdventurerPool(
     const stock = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.08, 0.12, 0.85)), musketWoodMat);
     stock.position.set(0, 0, 0.22);
     musketGroup.add(stock);
-    const barrel = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.032, 0.04, 1.05, 6)), brightSteelMat);
+    const barrel = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.032, 0.04, 1.05, 8)), brightSteelMat);
     barrel.rotation.x = Math.PI / 2;
     barrel.position.set(0, 0.06, 0.56);
     musketGroup.add(barrel);
-    const brassBand = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.046, 0.046, 0.08, 6)), goldAccentMat);
+    const brassBand = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.046, 0.046, 0.08, 8)), goldAccentMat);
     brassBand.rotation.x = Math.PI / 2;
     brassBand.position.set(0, 0.055, 0.82);
     musketGroup.add(brassBand);
@@ -664,7 +751,7 @@ export function buildAgrouAdventurerPool(
     musketSmoke.position.set(0, 0.06, 1.18);
     for (let s = 0; s < 5; s++) {
       const puff = new THREE.Mesh(
-        trackGeo(new THREE.DodecahedronGeometry(0.14 + (s % 2) * 0.06, 0)),
+        trackGeo(new THREE.IcosahedronGeometry(0.14 + (s % 2) * 0.06, 1)),
         musketSmokeMat
       );
       puff.position.set((s - 2) * 0.07, ((s % 3) - 1) * 0.06, s * 0.07);
@@ -672,7 +759,7 @@ export function buildAgrouAdventurerPool(
     }
     musketGroup.add(musketSmoke);
 
-    // 11. All 7 Customizable Agrou Locker Hats (mounted on headGroup!)
+    // 11. All 7 Customizable Stylized Hats (Smooth curved brims & crowns!)
     const hatVariants: Record<AgrouHatId, THREE.Group> = {
       none: new THREE.Group(),
       witch: new THREE.Group(),
@@ -683,67 +770,63 @@ export function buildAgrouAdventurerPool(
       crown: new THREE.Group(),
     };
 
-    // Witch Hat
-    const witchMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x321c4a, roughness: 0.88, flatShading: true }));
-    const witchBrim = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.4, 0.42, 0.045, 9)), witchMat);
-    witchBrim.position.y = 0.2;
-    hatVariants.witch.add(witchBrim);
-    const witchCone = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.24, 0.52, 7)), witchMat);
-    witchCone.position.set(0, 0.44, -0.02);
-    witchCone.rotation.x = -0.14;
-    hatVariants.witch.add(witchCone);
-    const witchBand = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.23, 0.25, 0.06, 8)), goldAccentMat);
-    witchBand.position.y = 0.24;
-    hatVariants.witch.add(witchBand);
+    const witchMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x4b2a74, roughness: 0.78 }));
+    const strawMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xe3ba5f, roughness: 0.88 }));
+    const antlerMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x734d2c, roughness: 0.86 }));
+    const pirateMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x22252b, roughness: 0.82 }));
+    const plumeMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xd13939, roughness: 0.76 }));
 
-    // Knight Helm
-    const helmDome = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.24, 0.26, 0.34, 8)), steelArmorMat);
-    helmDome.position.y = 0.14;
-    hatVariants.knight.add(helmDome);
-    const helmPlume = new THREE.Mesh(
-      trackGeo(new THREE.BoxGeometry(0.06, 0.18, 0.32)),
-      trackMat(new THREE.MeshStandardMaterial({ color: 0xc83737, roughness: 0.8, flatShading: true }))
-    );
-    helmPlume.position.set(0, 0.35, -0.02);
-    hatVariants.knight.add(helmPlume);
+    const populateStylizedHats = (target: Record<AgrouHatId, THREE.Group>) => {
+      // Witch Hat (rich violet + bright golden band)
+      const witchBrim = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.42, 0.44, 0.048, 16)), witchMat);
+      witchBrim.position.y = 0.2;
+      const witchCone = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.24, 0.56, 14)), witchMat);
+      witchCone.position.set(0, 0.46, -0.02);
+      witchCone.rotation.x = -0.18;
+      const witchBand = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.23, 0.255, 0.068, 14)), goldAccentMat);
+      witchBand.position.y = 0.245;
+      target.witch.add(witchBrim, witchCone, witchBand);
 
-    // Straw Hat
-    const strawMat = trackMat(new THREE.MeshStandardMaterial({ color: 0xdcb45c, roughness: 0.94, flatShading: true }));
-    const strawBrim = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.42, 0.46, 0.045, 10)), strawMat);
-    strawBrim.position.y = 0.19;
-    hatVariants.straw.add(strawBrim);
-    const strawTop = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.21, 0.25, 0.18, 8)), strawMat);
-    strawTop.position.y = 0.29;
-    hatVariants.straw.add(strawTop);
+      // Knight Helm
+      const helmDome = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.24, 0.26, 0.34, 14)), steelArmorMat);
+      helmDome.position.y = 0.14;
+      const helmPlume = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.06, 0.18, 0.32)), plumeMat);
+      helmPlume.position.set(0, 0.35, -0.02);
+      target.knight.add(helmDome, helmPlume);
 
-    // Forest Antlers
-    const antlerMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x6e4a2b, roughness: 0.9, flatShading: true }));
-    for (const sx of [-1, 1]) {
-      const mainAntler = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.025, 0.04, 0.42, 5)), antlerMat);
-      mainAntler.position.set(sx * 0.2, 0.36, 0);
-      mainAntler.rotation.z = -sx * 0.45;
-      hatVariants.antlers.add(mainAntler);
-      const tine = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.018, 0.026, 0.2, 5)), antlerMat);
-      tine.position.set(sx * 0.28, 0.46, 0.04);
-      tine.rotation.z = sx * 0.32;
-      hatVariants.antlers.add(tine);
-    }
+      // Straw Hat
+      const strawBrim = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.43, 0.47, 0.045, 16)), strawMat);
+      strawBrim.position.y = 0.19;
+      const strawTop = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.21, 0.25, 0.18, 14)), strawMat);
+      strawTop.position.y = 0.29;
+      target.straw.add(strawBrim, strawTop);
 
-    // Pirate Captain Tricorne
-    const pirateMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x202226, roughness: 0.88, flatShading: true }));
-    const tricorne = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.36, 0.28, 0.18, 3)), pirateMat);
-    tricorne.position.y = 0.25;
-    tricorne.rotation.y = Math.PI;
-    hatVariants.pirate.add(tricorne);
-    const skullPin = new THREE.Mesh(trackGeo(new THREE.OctahedronGeometry(0.055, 0)), goldAccentMat);
-    skullPin.position.set(0, 0.28, 0.2);
-    hatVariants.pirate.add(skullPin);
+      // Forest Antlers
+      for (const sx of [-1, 1]) {
+        const mainAntler = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.025, 0.04, 0.42, 8)), antlerMat);
+        mainAntler.position.set(sx * 0.2, 0.36, 0);
+        mainAntler.rotation.z = -sx * 0.45;
+        const tine = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.018, 0.026, 0.2, 7)), antlerMat);
+        tine.position.set(sx * 0.28, 0.46, 0.04);
+        tine.rotation.z = sx * 0.32;
+        target.antlers.add(mainAntler, tine);
+      }
 
-    // Royal Crown Hat
-    const crownRing = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.24, 0.22, 0.14, 7)), goldAccentMat);
-    crownRing.position.y = 0.25;
-    hatVariants.crown.add(crownRing);
+      // Pirate Captain Tricorne
+      const tricorne = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.36, 0.28, 0.18, 3)), pirateMat);
+      tricorne.position.y = 0.25;
+      tricorne.rotation.y = Math.PI;
+      const skullPin = new THREE.Mesh(trackGeo(new THREE.OctahedronGeometry(0.055, 0)), goldAccentMat);
+      skullPin.position.set(0, 0.28, 0.2);
+      target.pirate.add(tricorne, skullPin);
 
+      // Royal Crown Hat
+      const crownRing = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.24, 0.22, 0.14, 12)), goldAccentMat);
+      crownRing.position.y = 0.25;
+      target.crown.add(crownRing);
+    };
+
+    populateStylizedHats(hatVariants);
     (Object.keys(hatVariants) as AgrouHatId[]).forEach((hk) => {
       hatVariants[hk].visible = false;
       headGroup.add(hatVariants[hk]);
@@ -780,8 +863,8 @@ export function buildAgrouAdventurerPool(
 
     // 14. Bodyguard Shield Ring, Cupid Lover Heart, Anger/Happy Auras & Tombstone
     const shieldRing = new THREE.Mesh(
-      trackGeo(new THREE.TorusGeometry(0.58, 0.035, 6, 20)),
-      trackMat(new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.78 }))
+      trackGeo(new THREE.TorusGeometry(0.56, 0.022, 6, 20)),
+      trackMat(new THREE.MeshBasicMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.42 }))
     );
     shieldRing.position.y = 0.72;
     shieldRing.visible = false;
@@ -819,321 +902,383 @@ export function buildAgrouAdventurerPool(
     }
     bodyGroup.add(happyAuraGroup);
 
-    // Tombstone (shown when eliminated)
+    // 14B. Sculpted Mossy Storybook Tombstone with Portrait, Tilted Hat, Wildflowers, Arcane Rune Circle & Spectral Mist!
     const tombstoneGroup = new THREE.Group();
     tombstoneGroup.visible = false;
-    const tombMat = trackMat(new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.94, flatShading: true }));
-    const slab = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.56, 0.85, 0.16)), tombMat);
-    slab.position.set(0, 0.42, 0.18);
-    tombstoneGroup.add(slab);
-    const crossV = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.08, 0.38, 0.05)), darkLeatherMat);
-    crossV.position.set(0, 0.5, 0.27);
-    tombstoneGroup.add(crossV);
-    const crossH = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.24, 0.08, 0.05)), darkLeatherMat);
-    crossH.position.set(0, 0.57, 0.27);
-    tombstoneGroup.add(crossH);
+
+    // Stepped stone plinth base
+    const plinthBottom = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.92, 0.14, 0.56)), tombPlinthMat);
+    plinthBottom.position.set(0, 0.07, 0.16);
+    plinthBottom.castShadow = !isSoftwareGl;
+    plinthBottom.receiveShadow = true;
+    tombstoneGroup.add(plinthBottom);
+
+    const plinthMid = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.76, 0.12, 0.44)), tombStoneMat);
+    plinthMid.position.set(0, 0.19, 0.16);
+    plinthMid.castShadow = !isSoftwareGl;
+    plinthMid.receiveShadow = true;
+    tombstoneGroup.add(plinthMid);
+
+    // Beveled arched stone headstone
+    const archSlab = new THREE.Mesh(tombArchGeo, tombStoneMat);
+    archSlab.position.set(0, 0.65, 0.16);
+    archSlab.castShadow = !isSoftwareGl;
+    archSlab.receiveShadow = true;
+    tombstoneGroup.add(archSlab);
+
+    // Carved recessed portrait frame + charming villager portrait plaque (front & back so foreground seats show portrait too!)
+    const portraitFrame = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.38, 0.4, 0.05)), tombFrameMat);
+    portraitFrame.position.set(0, 0.66, 0.27);
+    tombstoneGroup.add(portraitFrame);
+
+    const portraitFrameBack = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.38, 0.4, 0.05)), tombFrameMat);
+    portraitFrameBack.position.set(0, 0.66, 0.05);
+    tombstoneGroup.add(portraitFrameBack);
+
+    let currentPortraitKey = `init:${i}`;
+    let currentPortraitTex: THREE.CanvasTexture = createTombstonePortraitTexture(
+      skinHex,
+      hairHex,
+      0xc83737,
+      'witch'
+    );
+    disposableTex.push(currentPortraitTex);
+    const portraitMat = trackMat(
+      new THREE.MeshStandardMaterial({
+        map: currentPortraitTex,
+        roughness: 0.72,
+      })
+    );
+    const portraitPlaque = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(0.32, 0.34)), portraitMat);
+    portraitPlaque.position.set(0, 0.66, 0.302);
+    tombstoneGroup.add(portraitPlaque);
+
+    const portraitPlaqueBack = new THREE.Mesh(trackGeo(new THREE.PlaneGeometry(0.32, 0.34)), portraitMat);
+    portraitPlaqueBack.position.set(0, 0.66, 0.018);
+    portraitPlaqueBack.rotation.y = Math.PI;
+    tombstoneGroup.add(portraitPlaqueBack);
+
+    const syncTombstonePortrait = (cloakHex: number, hat: AgrouHatId) => {
+      const nextKey = `${cloakHex}:${hat}`;
+      if (nextKey === currentPortraitKey) return;
+      currentPortraitKey = nextKey;
+      const nextTex = createTombstonePortraitTexture(skinHex, hairHex, cloakHex, hat);
+      const oldTex = currentPortraitTex;
+      currentPortraitTex = nextTex;
+      portraitMat.map = nextTex;
+      portraitMat.needsUpdate = true;
+      const idxTex = disposableTex.indexOf(oldTex);
+      if (idxTex >= 0) disposableTex.splice(idxTex, 1);
+      disposableTex.push(nextTex);
+      oldTex.dispose();
+    };
+
+    // Draped green moss cushions hugging the base and corners of the headstone (front & back!)
+    const mossSpecs = [
+      { x: -0.26, y: 0.26, z: 0.33, sx: 0.22, sy: 0.11, sz: 0.14, light: false },
+      { x: -0.34, y: 0.36, z: 0.24, sx: 0.14, sy: 0.14, sz: 0.12, light: true },
+      { x: -0.18, y: 0.14, z: 0.4, sx: 0.24, sy: 0.09, sz: 0.15, light: true },
+      { x: 0.28, y: 0.14, z: 0.36, sx: 0.18, sy: 0.08, sz: 0.12, light: false },
+      { x: -0.22, y: 0.46, z: 0.27, sx: 0.1, sy: 0.09, sz: 0.06, light: true },
+      { x: -0.24, y: 0.25, z: -0.02, sx: 0.21, sy: 0.1, sz: 0.13, light: true },
+      { x: 0.24, y: 0.15, z: -0.05, sx: 0.18, sy: 0.08, sz: 0.12, light: false },
+    ];
+    for (const ms of mossSpecs) {
+      const mossBlob = new THREE.Mesh(
+        trackGeo(new THREE.IcosahedronGeometry(0.65, 1)),
+        ms.light ? tombMossLightMat : tombMossDarkMat
+      );
+      mossBlob.scale.set(ms.sx, ms.sy, ms.sz);
+      mossBlob.position.set(ms.x, ms.y, ms.z);
+      tombstoneGroup.add(mossBlob);
+    }
+
+    // Delicate multi-petal wildflowers blooming naturally in the moss at the tombstone base
+    const tombFlowers = [
+      { x: -0.22, y: 0.17, z: 0.43, yellow: true },
+      { x: -0.12, y: 0.16, z: 0.45, yellow: false },
+      { x: -0.29, y: 0.15, z: 0.4, yellow: false },
+      { x: 0.18, y: 0.15, z: 0.42, yellow: true },
+      { x: 0.26, y: 0.14, z: 0.38, yellow: false },
+    ];
+    const petalGeo = trackGeo(new THREE.IcosahedronGeometry(0.016, 0));
+    const budGeo = trackGeo(new THREE.IcosahedronGeometry(0.011, 0));
+    for (const tf of tombFlowers) {
+      const stem = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.005, 0.007, 0.08, 5)), tombStemMat);
+      stem.position.set(tf.x, tf.y - 0.02, tf.z);
+      tombstoneGroup.add(stem);
+      const flowerCluster = new THREE.Group();
+      flowerCluster.position.set(tf.x, tf.y + 0.02, tf.z);
+      flowerCluster.rotation.set(0.28, tf.x * 3.1, 0);
+      const petalMat = tf.yellow ? tombFlowerYellowMat : tombFlowerWhiteMat;
+      const centerMat = tf.yellow ? tombFlowerWhiteMat : tombFlowerYellowMat;
+      for (let p = 0; p < 5; p++) {
+        const pa = (p / 5) * Math.PI * 2;
+        const petal = new THREE.Mesh(petalGeo, petalMat);
+        petal.scale.set(1.15, 0.45, 0.85);
+        petal.position.set(Math.cos(pa) * 0.018, 0, Math.sin(pa) * 0.018);
+        petal.rotation.y = -pa;
+        flowerCluster.add(petal);
+      }
+      const centerBud = new THREE.Mesh(budGeo, centerMat);
+      centerBud.scale.set(1, 0.6, 1);
+      centerBud.position.y = 0.004;
+      flowerCluster.add(centerBud);
+      tombstoneGroup.add(flowerCluster);
+    }
+
+    // Playful Tilted Hat Perched on Top-Right Corner of Arched Tombstone (Matches reference!)
+    const tombHatAnchor = new THREE.Group();
+    tombHatAnchor.position.set(0.22, 0.96, 0.18);
+    tombHatAnchor.rotation.set(0.14, 0.32, -0.34);
+    tombHatAnchor.scale.setScalar(0.92);
+    const tombstoneHatVariants: Record<AgrouHatId, THREE.Group> = {
+      none: new THREE.Group(),
+      witch: new THREE.Group(),
+      knight: new THREE.Group(),
+      straw: new THREE.Group(),
+      antlers: new THREE.Group(),
+      pirate: new THREE.Group(),
+      crown: new THREE.Group(),
+    };
+    populateStylizedHats(tombstoneHatVariants);
+    (Object.keys(tombstoneHatVariants) as AgrouHatId[]).forEach((hk) => {
+      tombstoneHatVariants[hk].visible = false;
+      tombHatAnchor.add(tombstoneHatVariants[hk]);
+    });
+    tombstoneGroup.add(tombHatAnchor);
+
+    // Tombstone stands cleanly on natural earth/snow without ground halo rings
+    const tombstoneRuneMat = trackMat(
+      new THREE.MeshBasicMaterial({
+        map: arcaneRuneTex,
+        color: 0x6ee7ff,
+        transparent: true,
+        opacity: 0.0,
+        depthWrite: false,
+      })
+    );
+    const tombstoneRuneRing = new THREE.Mesh(arcaneRuneGeo, tombstoneRuneMat);
+    tombstoneRuneRing.rotation.x = -Math.PI / 2;
+    tombstoneRuneRing.position.set(0, 0.026, 0.16);
+    tombstoneRuneRing.visible = false;
+    tombstoneGroup.add(tombstoneRuneRing);
+
+    const tombstoneMistMat = trackMat(
+      new THREE.MeshBasicMaterial({
+        map: spectralMistTex,
+        color: 0x5ce1ff,
+        transparent: true,
+        opacity: 0.0,
+        depthWrite: false,
+      })
+    );
+    const tombstoneMistMesh = new THREE.Mesh(spectralMistGeo, tombstoneMistMat);
+    tombstoneMistMesh.position.set(0, 0.68, 0.16);
+    tombstoneMistMesh.visible = false;
+    tombstoneGroup.add(tombstoneMistMesh);
+
     seatAnchorGroup.add(tombstoneGroup);
 
-    // 15. Personalized Spectral Ghost Adventurer (matches this exact deceased player's look, hair, beard, pauldrons, backpack, cloak tint & hat!)
+    // 15. Radiant Fresnel Rim-Lit Spectral Ghost Adventurer (Luminous icy-cyan/white spirit matching reference!)
     const ghostGroup = new THREE.Group();
     ghostGroup.visible = false;
     ghostGroup.userData = { seatIndex: i, playerId: '' };
 
-    const baseSkinCol = new THREE.Color(SKIN_TONES[i % SKIN_TONES.length]);
-    const baseHairCol = new THREE.Color(HAIR_COLORS[i % HAIR_COLORS.length]);
-    const spectralCyan = new THREE.Color(0x7ee8fa);
-    const spectralIce = new THREE.Color(0xcffafe);
-
+    // Keep ghostCloakMat intact for state/debug sync compatibility
     const ghostCloakMat = trackMat(
       new THREE.MeshStandardMaterial({
-        color: spectralCyan.clone(),
-        emissive: 0x0e7490,
-        emissiveIntensity: 0.34,
-        roughness: 0.36,
-        metalness: 0.14,
+        color: 0x62d6f8,
+        emissive: 0x168bb0,
+        emissiveIntensity: 0.55,
+        roughness: 0.3,
         transparent: true,
-        opacity: 0.68,
+        opacity: 0.72,
         depthWrite: true,
-        flatShading: true,
-      })
-    );
-    const ghostSkinMat = trackMat(
-      new THREE.MeshStandardMaterial({
-        color: baseSkinCol.clone().lerp(spectralIce, 0.44),
-        emissive: 0x155e75,
-        emissiveIntensity: 0.24,
-        roughness: 0.42,
-        transparent: true,
-        opacity: 0.7,
-        depthWrite: true,
-        flatShading: true,
-      })
-    );
-    const ghostHairMat = trackMat(
-      new THREE.MeshStandardMaterial({
-        color: baseHairCol.clone().lerp(spectralCyan, 0.28),
-        emissive: 0x0c4a6e,
-        emissiveIntensity: 0.22,
-        roughness: 0.52,
-        transparent: true,
-        opacity: 0.74,
-        depthWrite: true,
-        flatShading: true,
-      })
-    );
-    const ghostArmorMat = trackMat(
-      new THREE.MeshStandardMaterial({
-        color: new THREE.Color(i % 2 === 0 ? 0x67758a : 0x5c3e26).lerp(spectralCyan, 0.32),
-        emissive: 0x0e7490,
-        emissiveIntensity: 0.26,
-        roughness: 0.32,
-        metalness: 0.38,
-        transparent: true,
-        opacity: 0.66,
-        depthWrite: true,
-        flatShading: true,
-      })
-    );
-    const ghostWispMat = trackMat(
-      new THREE.MeshStandardMaterial({
-        color: 0x67e8f9,
-        emissive: 0x22d3ee,
-        emissiveIntensity: 0.95,
-        roughness: 0.25,
-        transparent: true,
-        opacity: 0.36,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        flatShading: true,
-      })
-    );
-    const ghostEyeMat = trackMat(
-      new THREE.MeshBasicMaterial({
-        color: 0xe0f2fe,
       })
     );
 
-    // 15A. Ethereal Lower Spectral Tail & Ectoplasmic Aura (replaces boots so it unmistakably reads as a floating spirit!)
+    const ghostBodyShaderMat = trackMat(
+      createSpectralGhostShaderMaterial({
+        baseColor: 0x2994c8,
+        rimColor: 0xb8f2ff,
+        opacity: 0.72,
+        rimPower: 2.25,
+        depthWrite: true,
+        additive: false,
+      })
+    );
+    const ghostSkinShaderMat = trackMat(
+      createSpectralGhostShaderMaterial({
+        baseColor: 0x3da8d8,
+        rimColor: 0xcff8ff,
+        opacity: 0.76,
+        rimPower: 2.15,
+        depthWrite: true,
+        additive: false,
+      })
+    );
+    const ghostHatShaderMat = trackMat(
+      createSpectralGhostShaderMaterial({
+        baseColor: 0x2482b8,
+        rimColor: 0xb0eeff,
+        opacity: 0.78,
+        rimPower: 2.2,
+        depthWrite: true,
+        additive: false,
+      })
+    );
+    const ghostWispShaderMat = trackMat(
+      createSpectralGhostShaderMaterial({
+        baseColor: 0x2299cc,
+        rimColor: 0x99ebff,
+        opacity: 0.42,
+        rimPower: 2.0,
+        depthWrite: false,
+        additive: true,
+      })
+    );
+    const ghostShaderMats = [
+      ghostBodyShaderMat,
+      ghostSkinShaderMat,
+      ghostHatShaderMat,
+      ghostWispShaderMat,
+    ];
+
+    const ghostEyeMat = trackMat(
+      new THREE.MeshBasicMaterial({
+        color: 0xd8f8ff,
+        toneMapped: false,
+      })
+    );
+
+    // 15A. Radiant Ethereal Lower Spectral Tail & Orbiting Spirit Motes
     const ghostTailGroup = new THREE.Group();
     ghostTailGroup.position.y = 0.52;
     ghostGroup.add(ghostTailGroup);
 
     const tailOuterCone = new THREE.Mesh(
-      trackGeo(new THREE.ConeGeometry(0.32, 0.86, 7, 1, true)),
-      ghostWispMat
+      trackGeo(new THREE.ConeGeometry(0.36, 0.92, 16, 1, true)),
+      ghostWispShaderMat
     );
     tailOuterCone.rotation.x = Math.PI;
     tailOuterCone.position.y = -0.34;
     ghostTailGroup.add(tailOuterCone);
 
     const tailInnerCore = new THREE.Mesh(
-      trackGeo(new THREE.ConeGeometry(0.19, 0.72, 6)),
-      ghostCloakMat
+      trackGeo(new THREE.ConeGeometry(0.24, 0.78, 14)),
+      ghostBodyShaderMat
     );
     tailInnerCore.rotation.x = Math.PI;
-    tailInnerCore.position.y = -0.24;
+    tailInnerCore.position.y = -0.22;
     ghostTailGroup.add(tailInnerCore);
 
-    // 3 Trailing Ethereal Wisps curving below the waist
     for (let w = 0; w < 3; w++) {
       const wa = (w / 3) * Math.PI * 2 + 0.4;
-      const wisp = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.08, 0.52, 5)), ghostWispMat);
-      wisp.rotation.x = Math.PI + 0.18;
-      wisp.position.set(Math.cos(wa) * 0.14, -0.58 - (w % 2) * 0.1, Math.sin(wa) * 0.14);
+      const wisp = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.085, 0.54, 10)), ghostWispShaderMat);
+      wisp.rotation.x = Math.PI + 0.16;
+      wisp.position.set(Math.cos(wa) * 0.15, -0.58 - (w % 2) * 0.1, Math.sin(wa) * 0.15);
       ghostTailGroup.add(wisp);
     }
 
-    // Orbiting Spirit Motes Halo
     const ghostMotesGroup = new THREE.Group();
     ghostMotesGroup.position.y = 0.88;
-    const ghostAuraRing = new THREE.Mesh(
-      trackGeo(new THREE.TorusGeometry(0.46, 0.018, 5, 18)),
-      ghostWispMat
-    );
-    ghostAuraRing.rotation.x = Math.PI / 2;
-    ghostAuraRing.position.y = -0.36;
-    ghostMotesGroup.add(ghostAuraRing);
     for (let m = 0; m < 4; m++) {
       const ma = (m / 4) * Math.PI * 2;
-      const mote = new THREE.Mesh(trackGeo(new THREE.OctahedronGeometry(0.048, 0)), ghostWispMat);
-      mote.position.set(Math.cos(ma) * 0.52, (m % 2 === 0 ? 0.12 : -0.18), Math.sin(ma) * 0.52);
+      const mote = new THREE.Mesh(trackGeo(new THREE.IcosahedronGeometry(0.036, 1)), ghostWispShaderMat);
+      mote.position.set(Math.cos(ma) * 0.52, m % 2 === 0 ? 0.18 : -0.14, Math.sin(ma) * 0.52);
       ghostMotesGroup.add(mote);
     }
     ghostGroup.add(ghostMotesGroup);
 
-    // 15B. Spectral Upper Torso, Backpack, Bedroll & Pauldrons matching Seat i
+    // 15B. Radiant Spectral Upper Torso, Backpack & Smooth Rounded Pauldrons
     const ghostTorsoGroup = new THREE.Group();
     ghostTorsoGroup.position.set(0, 0.52, 0);
     ghostGroup.add(ghostTorsoGroup);
 
-    const gTorso = new THREE.Mesh(torsoGeo, ghostCloakMat);
+    const gTorso = new THREE.Mesh(torsoGeo, ghostBodyShaderMat);
     gTorso.position.y = 0.3;
     ghostTorsoGroup.add(gTorso);
 
-    const gChest = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.38, 0.34, 0.28)), ghostArmorMat);
+    const gChest = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.38, 0.34, 0.28)), ghostBodyShaderMat);
     gChest.position.set(0, 0.35, 0.06);
     ghostTorsoGroup.add(gChest);
 
-    const gBelt = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.225, 0.23, 0.09, 7)), ghostArmorMat);
-    gBelt.position.y = 0.08;
-    ghostTorsoGroup.add(gBelt);
-
-    const gCollar = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.21, 0.24, 0.11, 7)), ghostArmorMat);
+    const gCollar = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.21, 0.24, 0.11, 12)), ghostBodyShaderMat);
     gCollar.position.y = 0.58;
     ghostTorsoGroup.add(gCollar);
 
-    // Matching Traveler Backpack & Bedroll (Ghost Version)
-    const gPack = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.38, 0.42, 0.22)), ghostArmorMat);
-    gPack.position.set(0, 0.34, -0.25);
+    const gPack = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.36, 0.4, 0.2)), ghostWispShaderMat);
+    gPack.position.set(0, 0.34, -0.24);
     ghostTorsoGroup.add(gPack);
-    const gBedroll = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.115, 0.115, 0.48, 8)), ghostWispMat);
-    gBedroll.rotation.z = Math.PI / 2;
-    gBedroll.position.set(0, 0.61, -0.26);
-    ghostTorsoGroup.add(gBedroll);
 
-    // Matching Shoulder Pauldrons & Spikes (if warrior seat i % 2 === 0)
     for (const side of [-1, 1]) {
-      const gPauldron = new THREE.Mesh(pauldronGeo, i % 2 === 0 ? ghostArmorMat : ghostCloakMat);
-      gPauldron.scale.set(1.05, 0.88, 1.15);
+      const gPauldron = new THREE.Mesh(pauldronGeo, ghostBodyShaderMat);
+      gPauldron.scale.set(1.06, 0.9, 1.12);
       gPauldron.position.set(side * 0.31, 0.54, 0.0);
       ghostTorsoGroup.add(gPauldron);
-      if (i % 2 === 0) {
-        for (let sp = 0; sp < 2; sp++) {
-          const gSpike = new THREE.Mesh(spikeGeo, ghostArmorMat);
-          gSpike.position.set(side * (0.41 + sp * 0.02), 0.58 - sp * 0.07, sp === 0 ? 0.06 : -0.06);
-          gSpike.rotation.z = -side * 1.1;
-          ghostTorsoGroup.add(gSpike);
-        }
-      }
     }
 
     // Floating Spectral Arms
     const ghostLeftArm = new THREE.Group();
     ghostLeftArm.position.set(-0.32, 0.49, 0.02);
     ghostTorsoGroup.add(ghostLeftArm);
-    const glUpper = new THREE.Mesh(armUpperGeo, ghostCloakMat);
+    const glUpper = new THREE.Mesh(armUpperGeo, ghostBodyShaderMat);
     glUpper.position.set(0, -0.14, 0);
-    const glFore = new THREE.Mesh(armForeGeo, ghostArmorMat);
+    const glFore = new THREE.Mesh(armForeGeo, ghostBodyShaderMat);
     glFore.position.set(0, -0.35, 0.09);
     glFore.rotation.x = -0.65;
-    const glHand = new THREE.Mesh(handGeo, ghostSkinMat);
+    const glHand = new THREE.Mesh(handGeo, ghostSkinShaderMat);
     glHand.position.set(0, -0.45, 0.2);
     ghostLeftArm.add(glUpper, glFore, glHand);
 
     const ghostRightArm = new THREE.Group();
     ghostRightArm.position.set(0.32, 0.49, 0.02);
     ghostTorsoGroup.add(ghostRightArm);
-    const grUpper = new THREE.Mesh(armUpperGeo, ghostCloakMat);
+    const grUpper = new THREE.Mesh(armUpperGeo, ghostBodyShaderMat);
     grUpper.position.set(0, -0.14, 0);
-    const grFore = new THREE.Mesh(armForeGeo, ghostArmorMat);
+    const grFore = new THREE.Mesh(armForeGeo, ghostBodyShaderMat);
     grFore.position.set(0, -0.35, 0.09);
     grFore.rotation.x = -0.65;
-    const grHand = new THREE.Mesh(handGeo, ghostSkinMat);
+    const grHand = new THREE.Mesh(handGeo, ghostSkinShaderMat);
     grHand.position.set(0, -0.45, 0.2);
     ghostRightArm.add(grUpper, grFore, grHand);
 
-    // 15C. Spectral Head with Exact Same Hairstyle, Beard/Mustache, War Paint, Wolf Ears & Customizable Hats!
+    // 15C. Spectral Head with Matching Hair, Luminous Eyes & Glowing Fresnel Hats!
     const ghostHeadGroup = new THREE.Group();
     ghostHeadGroup.position.set(0, 0.81, 0.03);
     ghostTorsoGroup.add(ghostHeadGroup);
 
-    const gHeadMesh = new THREE.Mesh(headGeo, ghostSkinMat);
-    gHeadMesh.scale.set(0.95, 1.08, 0.96);
+    const gHeadMesh = new THREE.Mesh(headGeo, ghostSkinShaderMat);
+    gHeadMesh.scale.set(0.96, 1.08, 0.96);
     ghostHeadGroup.add(gHeadMesh);
 
-    const gNose = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.055, 0.09, 0.07)), ghostSkinMat);
-    gNose.position.set(0, -0.01, 0.22);
-    ghostHeadGroup.add(gNose);
-
-    const gBrow = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.28, 0.055, 0.07)), ghostHairMat);
-    gBrow.position.set(0, 0.075, 0.195);
-    ghostHeadGroup.add(gBrow);
-
     const gEyeL = new THREE.Mesh(eyeGeo, ghostEyeMat);
-    gEyeL.position.set(-0.085, 0.03, 0.212);
+    gEyeL.position.set(-0.085, 0.03, 0.218);
     const gEyeR = new THREE.Mesh(eyeGeo, ghostEyeMat);
-    gEyeR.position.set(0.085, 0.03, 0.212);
+    gEyeR.position.set(0.085, 0.03, 0.218);
     ghostHeadGroup.add(gEyeL, gEyeR);
 
-    if (i % 3 === 0) {
-      const gPaintMat = trackMat(
-        new THREE.MeshBasicMaterial({
-          color: new THREE.Color(WAR_PAINT_COLORS[i % WAR_PAINT_COLORS.length]).lerp(spectralCyan, 0.45),
-          transparent: true,
-          opacity: 0.85,
-        })
-      );
-      for (const sx of [-0.12, 0.12]) {
-        const gStripe = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.065, 0.025, 0.04)), gPaintMat);
-        gStripe.position.set(sx, -0.025, 0.212);
-        ghostHeadGroup.add(gStripe);
-      }
-    }
-
-    const gHairCap = new THREE.Mesh(trackGeo(new THREE.DodecahedronGeometry(0.255, 0)), ghostHairMat);
+    const gHairCap = new THREE.Mesh(trackGeo(new THREE.IcosahedronGeometry(0.255, 2)), ghostBodyShaderMat);
     gHairCap.scale.set(1.02, 0.72, 1.04);
     gHairCap.position.set(0, 0.12, -0.03);
     ghostHeadGroup.add(gHairCap);
-
-    if (hairStyle === 0) {
-      const gBun = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.11, 0.28, 6)), ghostHairMat);
-      gBun.position.set(0, 0.25, -0.17);
-      gBun.rotation.x = -0.85;
-      ghostHeadGroup.add(gBun);
-    } else if (hairStyle === 1) {
-      const gHeadband = new THREE.Mesh(
-        trackGeo(new THREE.CylinderGeometry(0.245, 0.245, 0.055, 8)),
-        ghostArmorMat
-      );
-      gHeadband.position.set(0, 0.13, 0);
-      ghostHeadGroup.add(gHeadband);
-    } else if (hairStyle === 2) {
-      const gBackHair = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.36, 0.34, 0.14)), ghostHairMat);
-      gBackHair.position.set(0, -0.04, -0.18);
-      ghostHeadGroup.add(gBackHair);
-    }
-
-    if (i % 3 !== 2) {
-      const gMustache = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.2, 0.055, 0.08)), ghostHairMat);
-      gMustache.position.set(0, -0.075, 0.2);
-      ghostHeadGroup.add(gMustache);
-      if (i % 3 === 0) {
-        const gBeard = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.24, 0.16, 0.16)), ghostHairMat);
-        gBeard.position.set(0, -0.15, 0.13);
-        ghostHeadGroup.add(gBeard);
-      }
-    }
 
     // Spectral Wolf Ears (for revealed dead Werewolves!)
     const ghostWolfEarsGroup = new THREE.Group();
     ghostWolfEarsGroup.visible = false;
     for (const sx of [-0.15, 0.15]) {
-      const gEar = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.075, 0.24, 4)), ghostHairMat);
+      const gEar = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.075, 0.24, 8)), ghostHatShaderMat);
       gEar.position.set(sx, 0.29, 0.0);
       gEar.rotation.z = sx < 0 ? 0.25 : -0.25;
       ghostWolfEarsGroup.add(gEar);
     }
-    const gSnout = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.14, 0.11, 0.22)), ghostHairMat);
+    const gSnout = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.14, 0.11, 0.22)), ghostHatShaderMat);
     gSnout.position.set(0, -0.04, 0.27);
     ghostWolfEarsGroup.add(gSnout);
     ghostHeadGroup.add(ghostWolfEarsGroup);
 
-    // All 7 Spectral Hat Variants (live-synced to deceased player's actual equipped hat with distinct spectral hues!)
-    const makeGhostHatMat = (baseHex: number) => {
-      const baseCol = new THREE.Color(baseHex);
-      return trackMat(
-        new THREE.MeshStandardMaterial({
-          color: baseCol.clone().lerp(spectralCyan, 0.24),
-          emissive: baseCol.clone().lerp(spectralCyan, 0.45),
-          emissiveIntensity: 0.26,
-          roughness: 0.42,
-          transparent: true,
-          opacity: 0.74,
-          depthWrite: true,
-          flatShading: true,
-        })
-      );
-    };
+    // All 7 Radiant Spectral Hat Variants (smooth Fresnel silhouettes matching reference!)
     const ghostHatVariants: Record<AgrouHatId, THREE.Group> = {
       none: new THREE.Group(),
       witch: new THREE.Group(),
@@ -1144,50 +1289,41 @@ export function buildAgrouAdventurerPool(
       crown: new THREE.Group(),
     };
 
-    const gWitchMat = makeGhostHatMat(0x5b3588);
-    const gGoldMat = makeGhostHatMat(0xf5c84c);
-    const gWitchBrim = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.4, 0.42, 0.045, 9)), gWitchMat);
+    const gWitchBrim = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.45, 0.47, 0.048, 16)), ghostHatShaderMat);
     gWitchBrim.position.y = 0.2;
-    const gWitchCone = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.24, 0.52, 7)), gWitchMat);
-    gWitchCone.position.set(0, 0.44, -0.02);
-    gWitchCone.rotation.x = -0.14;
-    const gWitchBand = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.23, 0.25, 0.06, 8)), gGoldMat);
-    gWitchBand.position.y = 0.24;
-    ghostHatVariants.witch.add(gWitchBrim, gWitchCone, gWitchBand);
+    const gWitchCone = new THREE.Mesh(trackGeo(new THREE.ConeGeometry(0.25, 0.58, 14)), ghostHatShaderMat);
+    gWitchCone.position.set(0, 0.47, -0.02);
+    gWitchCone.rotation.x = -0.16;
+    ghostHatVariants.witch.add(gWitchBrim, gWitchCone);
 
-    const gHelmDome = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.24, 0.26, 0.34, 8)), ghostArmorMat);
+    const gHelmDome = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.24, 0.26, 0.34, 14)), ghostHatShaderMat);
     gHelmDome.position.y = 0.14;
-    const gHelmPlume = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.06, 0.18, 0.32)), makeGhostHatMat(0xe04f4f));
+    const gHelmPlume = new THREE.Mesh(trackGeo(new THREE.BoxGeometry(0.06, 0.18, 0.32)), ghostWispShaderMat);
     gHelmPlume.position.set(0, 0.35, -0.02);
     ghostHatVariants.knight.add(gHelmDome, gHelmPlume);
 
-    const gStrawMat = makeGhostHatMat(0xe6c36c);
-    const gStrawBrim = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.42, 0.46, 0.045, 10)), gStrawMat);
+    const gStrawBrim = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.44, 0.48, 0.045, 16)), ghostHatShaderMat);
     gStrawBrim.position.y = 0.19;
-    const gStrawTop = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.21, 0.25, 0.18, 8)), gStrawMat);
+    const gStrawTop = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.21, 0.25, 0.18, 14)), ghostHatShaderMat);
     gStrawTop.position.y = 0.29;
     ghostHatVariants.straw.add(gStrawBrim, gStrawTop);
 
-    const gAntlerMat = makeGhostHatMat(0x8a643d);
     for (const sx of [-1, 1]) {
-      const gMainAntler = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.025, 0.04, 0.42, 5)), gAntlerMat);
+      const gMainAntler = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.025, 0.04, 0.42, 8)), ghostHatShaderMat);
       gMainAntler.position.set(sx * 0.2, 0.36, 0);
       gMainAntler.rotation.z = -sx * 0.45;
-      const gTine = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.018, 0.026, 0.2, 5)), gAntlerMat);
+      const gTine = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.018, 0.026, 0.2, 7)), ghostHatShaderMat);
       gTine.position.set(sx * 0.28, 0.46, 0.04);
       gTine.rotation.z = sx * 0.32;
       ghostHatVariants.antlers.add(gMainAntler, gTine);
     }
 
-    const gPirateMat = makeGhostHatMat(0x374151);
-    const gTricorne = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.36, 0.28, 0.18, 3)), gPirateMat);
+    const gTricorne = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.36, 0.28, 0.18, 3)), ghostHatShaderMat);
     gTricorne.position.y = 0.25;
     gTricorne.rotation.y = Math.PI;
-    const gSkullPin = new THREE.Mesh(trackGeo(new THREE.OctahedronGeometry(0.055, 0)), gGoldMat);
-    gSkullPin.position.set(0, 0.28, 0.2);
-    ghostHatVariants.pirate.add(gTricorne, gSkullPin);
+    ghostHatVariants.pirate.add(gTricorne);
 
-    const gCrownRing = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.24, 0.22, 0.14, 7)), gGoldMat);
+    const gCrownRing = new THREE.Mesh(trackGeo(new THREE.CylinderGeometry(0.24, 0.22, 0.14, 12)), ghostHatShaderMat);
     gCrownRing.position.y = 0.25;
     ghostHatVariants.crown.add(gCrownRing);
 
@@ -1196,7 +1332,7 @@ export function buildAgrouAdventurerPool(
       ghostHeadGroup.add(ghostHatVariants[hk]);
     });
 
-    // Raycast Hitbox following the floating ghost spirit (BUG-32)
+    // Raycast Hitbox following the floating ghost spirit
     const ghostHitbox = new THREE.Mesh(
       trackGeo(new THREE.CylinderGeometry(0.58, 0.58, 1.85, 8)),
       trackMat(new THREE.MeshBasicMaterial({ visible: false }))
@@ -1207,6 +1343,21 @@ export function buildAgrouAdventurerPool(
     clickables.push(ghostHitbox);
 
     scene.add(ghostGroup);
+
+    // Ghosts float cleanly without ground halo rings
+    const ghostGroundRuneMat = trackMat(
+      new THREE.MeshBasicMaterial({
+        map: arcaneRuneTex,
+        color: 0x6ee7ff,
+        transparent: true,
+        opacity: 0.0,
+        depthWrite: false,
+      })
+    );
+    const ghostGroundRune = new THREE.Mesh(ghostRuneGeo, ghostGroundRuneMat);
+    ghostGroundRune.rotation.x = -Math.PI / 2;
+    ghostGroundRune.visible = false;
+    scene.add(ghostGroundRune);
 
     // 16. Raycast Hitbox
     const hitbox = new THREE.Mesh(
@@ -1243,6 +1394,8 @@ export function buildAgrouAdventurerPool(
       ghostRightArm,
       ghostMotesGroup,
       ghostCloakMat,
+      ghostShaderMats,
+      ghostGroundRune,
       ghostEyeMat,
       ghostWolfEarsGroup,
       ghostHatVariants,
@@ -1255,10 +1408,14 @@ export function buildAgrouAdventurerPool(
       haloMat,
       lanternMat,
       cloakMat,
-      baseCloakRoughness: 0.82,
+      baseCloakRoughness: 0.76,
       eyeLeftMat,
       eyeRightMat,
       tombstoneGroup,
+      tombstoneRuneRing,
+      tombstoneMistMesh,
+      tombstoneHatVariants,
+      syncTombstonePortrait,
       shieldRing,
       loverHeart,
       wolfEarsGroup,
@@ -1318,7 +1475,7 @@ export function buildAgrouAdventurerPool(
   const dispose = () => {
     for (const g of disposableGeos) g.dispose();
     for (const m of disposableMats) m.dispose();
-    shadowTex.dispose();
+    for (const t of disposableTex) t.dispose();
   };
 
   return { seats, dispose };

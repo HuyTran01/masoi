@@ -58,9 +58,6 @@ export const AgrouEmoteWheel: React.FC<AgrouEmoteWheelProps> = ({
           {{
             vi: '👻 Hồn Ma không thể dùng biểu cảm hoặc ném đạo cụ 3D.',
             en: '👻 Ghosts cannot use emotes or throw 3D props.',
-            fr: '👻 Les fantômes ne peuvent ni utiliser d’émotes ni lancer d’objets 3D.',
-            es: '👻 Los fantasmas no pueden usar gestos ni lanzar objetos 3D.',
-            ja: '👻 幽霊はエモートや3Dアイテムを使用できません。',
           }[lang]}
         </div>
       ) : (

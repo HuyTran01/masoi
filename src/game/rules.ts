@@ -66,8 +66,8 @@ export function generateBalancedRoster(playerCount: number, customSelection?: Ro
   } else if (playerCount === 5) {
     roles.push('werewolf', 'seer', 'bodyguard', 'witch', 'villager');
   } else if (playerCount === 6) {
-    // 1 Ma Sói vs 5 Dân Làng (matches 6-player balance & tooltip)
-    roles.push('werewolf', 'seer', 'bodyguard', 'witch', 'hunter', 'villager');
+    // 2 Ma Sói vs 4 Dân Làng (matches 6-player balance & tooltip)
+    roles.push('werewolf', 'werewolf', 'seer', 'bodyguard', 'villager', 'villager');
   } else if (playerCount === 7) {
     roles.push('werewolf', 'werewolf', 'seer', 'bodyguard', 'witch', 'hunter', 'villager');
   } else if (playerCount === 8) {
@@ -391,7 +391,7 @@ export function resolveNightActions(
       logicExplanations.push({
         badge: '🎯 Ghim Đạn Thợ Săn',
         title: `Thợ Săn ${hunter.name} ghim đạn vào ${markTarget.name}`,
-        detail: `Nếu ${hunter.name} chết đêm nay hoặc bị treo cổ ngày mai, phát đạn ghim sẽ tự động bắn hạ ${markTarget.name} (xuyên qua cả Khiên Bảo Vệ và Bình Cứu Phù Thủy).`,
+        detail: `Nếu ${hunter.name} chết trong đêm nay, phát đạn ghim sẽ tự động bắn hạ ${markTarget.name} (xuyên qua cả Khiên Bảo Vệ và Bình Cứu Phù Thủy).`,
         category: 'info',
       });
     } else {
@@ -729,18 +729,9 @@ export function applyDayLynch(
       cascadeMessages.push(`Sói Con ${victim.name} bị treo cổ! Đêm tới đàn Sói được cắn 2 mục tiêu!`);
     }
 
-    if (victim.roleId === 'hunter' && !victim.hasUsedPower) {
-      victim.hasUsedPower = true;
-      if (victim.hunterMarkId) {
-        const mark = updated.find((p) => p.id === victim.hunterMarkId);
-        if (mark && mark.isAlive && !processed.has(mark.id)) {
-          toKill.push(mark.id);
-          hunterShots.push({ hunterId: victim.id, targetId: mark.id });
-          cascadeMessages.push(
-            `🎯 Thợ Săn ${victim.name} bị hành hình và phát đạn ghim tự động bắn hạ ${mark.name}!`
-          );
-        }
-      }
+    if (victim.roleId === 'hunter') {
+      // Hunter's gun only triggers on night death; daytime execution/cascade clears the mark without firing.
+      victim.hunterMarkId = undefined;
     }
 
     const doppel = updated.find(

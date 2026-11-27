@@ -42,6 +42,7 @@ interface GameTopHudProps {
   showFactionHints: boolean;
   showFastForwardBtn: boolean;
   myRole: RoleDefinition;
+  myElderLives?: number | null;
   mayorName?: string | null;
   cameraPreset: CameraViewPreset;
   freeLook360: boolean;
@@ -77,6 +78,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
   showFactionHints,
   showFastForwardBtn,
   myRole,
+  myElderLives = null,
   mayorName,
   cameraPreset,
   freeLook360,
@@ -105,12 +107,6 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
       : phase === 'day_discussion'
       ? lang === 'vi'
         ? `Ngày ${round}`
-        : lang === 'fr'
-        ? `Jour ${round}`
-        : lang === 'es'
-        ? `Día ${round}`
-        : lang === 'ja'
-        ? `${round}日目`
         : `Day ${round}`
       : phase === 'day_voting'
       ? lang === 'vi'
@@ -330,6 +326,15 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
         >
           <Eye className="w-3.5 h-3.5 text-[#f5b82e] shrink-0" />
           <span className="max-w-[92px] sm:max-w-none truncate">{myRole.name[lang]}</span>
+          {myRole.id === 'elder' && !isDead && typeof myElderLives === 'number' && (
+            <span
+              data-testid="hud-elder-lives-badge"
+              className="ml-0.5 px-1 py-0.2 rounded bg-rose-950/90 border border-rose-400/60 text-rose-200 text-[9px] sm:text-[10px] font-mono font-black shrink-0"
+              title={lang === 'vi' ? `Số mạng Già Làng còn lại: ${myElderLives}/2` : `Elder lives remaining: ${myElderLives}/2`}
+            >
+              ❤️{myElderLives}/2
+            </span>
+          )}
         </button>
 
         <button
