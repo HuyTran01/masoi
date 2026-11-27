@@ -11,6 +11,9 @@ import {
 import { ROLES } from './roles';
 import { getDyingWolfVictimsForWitch } from './rules';
 
+// Pick the bot chat line for the current language (falls back to English).
+const tr = (lang: Language, m: Record<Language, string>) => m[lang] ?? m.en;
+
 export type ConcreteStorylineId = Exclude<StorylineId, 'random_dramatic'>;
 
 export interface StorylineMeta {
@@ -1445,63 +1448,105 @@ function personaTagline(
   targetName: string,
   rng: () => number
 ): string {
-  if (lang === 'vi') {
-    const map: Record<BotPersonaId, string[]> = {
-      detective: [
-        `Xâu chuỗi các dữ kiện từ đầu đến giờ, biểu hiện của ${targetName} có điểm vênh rất rõ — mọi người nên kiểm tra kỹ.`,
-        `Mình ghi chép lại nhịp bàn luận và thấy ${targetName} đang né trả lời trực diện.`,
-      ],
-      prosecutor: [
-        `Tôi nói thẳng luôn: ${targetName} đáng nghi nhất bàn lúc này, đừng chần chừ kẻo lỡ nhịp treo Sói!`,
-        `Không cần vòng vo — tôi đang nghi ${targetName} là Sói và muốn nghe họ giải trình ngay!`,
-      ],
-      observer: [
-        `Mình ngồi quan sát từ nãy giờ thấy thái độ của ${targetName} hơi khác thường, mọi người để ý thử xem.`,
-        `Chưa vội kết luận, nhưng ${targetName} cần nói rõ góc nhìn hơn trước khi chốt phiếu.`,
-      ],
-      manipulator: [
-        `Mọi người cẩn thận kẻo bị dắt mũi nhé — tôi thấy ${targetName} mới là người đáng nghi nhất ở đây.`,
-        `Đừng nhìn sai hướng! Nếu phân tích kỹ thì ${targetName} có động cơ rất lạ.`,
-      ],
-      protector: [
-        `Chúng ta phải bảo vệ phe Dân trước đã — ${targetName}, bạn giải thích rõ để cả làng khỏi vote nhầm đi.`,
-        `Đừng vội xé lẻ phiếu, nhưng tôi cần ${targetName} chứng minh mình thuộc phe Dân.`,
-      ],
-      wildcard: [
-        `Trực giác quanh lửa trại mách bảo tôi phải để mắt tới ${targetName} hôm nay — cảm giác lạ lắm!`,
-        `Bàn này căng thật đấy! Tôi đặt dấu hỏi lớn lên ${targetName} xem phản ứng ra sao.`,
-      ],
-    };
-    return pickFrom(map[persona], rng);
-  }
-
-  const enMap: Record<BotPersonaId, string[]> = {
+  const map: Record<BotPersonaId, Record<Language, string>[]> = {
     detective: [
-      `Connecting the clues so far, ${targetName}’s story doesn’t quite add up — let’s press them.`,
-      `Tracking the timeline carefully, ${targetName} has been dodging direct questions.`,
+      {
+        vi: `Xâu chuỗi các dữ kiện từ đầu đến giờ, biểu hiện của ${targetName} có điểm vênh rất rõ — mọi người nên kiểm tra kỹ.`,
+        en: `Connecting the clues so far, ${targetName}’s story doesn’t quite add up — let’s press them.`,
+        fr: `En recoupant les indices depuis le début, l’histoire de ${targetName} ne tient pas vraiment — mettons la pression à ${targetName}.`,
+        es: `Juntando las pistas hasta ahora, la historia de ${targetName} no termina de cuadrar — vamos a presionar a ${targetName}.`,
+        ja: `ここまでの手がかりをつなぐと、${targetName}の話はどうも辻褄が合わないね — 突っ込んでみよう。`,
+      },
+      {
+        vi: `Mình ghi chép lại nhịp bàn luận và thấy ${targetName} đang né trả lời trực diện.`,
+        en: `Tracking the timeline carefully, ${targetName} has been dodging direct questions.`,
+        fr: `En suivant bien la chronologie, ${targetName} esquive toutes les questions directes.`,
+        es: `Siguiendo bien la cronología, ${targetName} lleva rato esquivando las preguntas directas.`,
+        ja: `流れを追っていくと、${targetName}は直接の質問をずっとかわしてるよ。`,
+      },
     ],
     prosecutor: [
-      `Let’s be direct: ${targetName} looks like our top Wolf suspect right now — explain yourself!`,
-      `No stalling — I suspect ${targetName} is a Werewolf and want answers before votes lock.`,
+      {
+        vi: `Tôi nói thẳng luôn: ${targetName} đáng nghi nhất bàn lúc này, đừng chần chừ kẻo lỡ nhịp treo Sói!`,
+        en: `Let’s be direct: ${targetName} looks like our top Wolf suspect right now — explain yourself!`,
+        fr: `Soyons directs : ${targetName} est notre suspect n°1 pour le Loup-Garou en ce moment — explique-toi !`,
+        es: `Vamos al grano: ${targetName} es el principal sospechoso de ser Lobo ahora mismo — ¡explícate!`,
+        ja: `ハッキリ言うよ：今いちばん人狼っぽいのは${targetName}だ — ちゃんと説明して！`,
+      },
+      {
+        vi: `Không cần vòng vo — tôi đang nghi ${targetName} là Sói và muốn nghe họ giải trình ngay!`,
+        en: `No stalling — I suspect ${targetName} is a Werewolf and want answers before votes lock.`,
+        fr: `Pas de détour — je soupçonne ${targetName} d’être un Loup-Garou et je veux des réponses avant la clôture des votes.`,
+        es: `Sin rodeos: sospecho que ${targetName} es un Hombre Lobo y quiero respuestas antes de que se cierren los votos.`,
+        ja: `回りくどいのはなし — ${targetName}は人狼だと思う。投票が締まる前に答えが聞きたい！`,
+      },
     ],
     observer: [
-      `Watching closely around the fire, ${targetName}’s reactions felt off to me.`,
-      `I’m not rushing, but we need a clear read from ${targetName} before voting.`,
+      {
+        vi: `Mình ngồi quan sát từ nãy giờ thấy thái độ của ${targetName} hơi khác thường, mọi người để ý thử xem.`,
+        en: `Watching closely around the fire, ${targetName}’s reactions felt off to me.`,
+        fr: `En observant bien autour du feu, les réactions de ${targetName} m’ont paru bizarres.`,
+        es: `Mirando con atención alrededor de la hoguera, las reacciones de ${targetName} me parecieron raras.`,
+        ja: `焚き火のまわりをよく見てたけど、${targetName}の反応はちょっと変だったな。`,
+      },
+      {
+        vi: `Chưa vội kết luận, nhưng ${targetName} cần nói rõ góc nhìn hơn trước khi chốt phiếu.`,
+        en: `I’m not rushing, but we need a clear read from ${targetName} before voting.`,
+        fr: `Je ne m’emballe pas, mais on a besoin d’un avis clair de ${targetName} avant de voter.`,
+        es: `No tengo prisa, pero necesitamos una opinión clara de ${targetName} antes de votar.`,
+        ja: `焦るつもりはないけど、投票の前に${targetName}の考えをはっきり聞きたいな。`,
+      },
     ],
     manipulator: [
-      `Careful not to fall for distractions — ${targetName} is the one acting shady here.`,
-      `Everyone’s looking the wrong way; ${targetName}’s angle makes zero sense.`,
+      {
+        vi: `Mọi người cẩn thận kẻo bị dắt mũi nhé — tôi thấy ${targetName} mới là người đáng nghi nhất ở đây.`,
+        en: `Careful not to fall for distractions — ${targetName} is the one acting shady here.`,
+        fr: `Attention à ne pas tomber dans le panneau — c’est ${targetName} qui a un comportement louche ici.`,
+        es: `Ojo con las distracciones — el que actúa raro aquí es ${targetName}.`,
+        ja: `惑わされないで — ここで怪しい動きをしてるのは${targetName}だよ。`,
+      },
+      {
+        vi: `Đừng nhìn sai hướng! Nếu phân tích kỹ thì ${targetName} có động cơ rất lạ.`,
+        en: `Everyone’s looking the wrong way; ${targetName}’s angle makes zero sense.`,
+        fr: `Tout le monde regarde du mauvais côté ; la version de ${targetName} n’a aucun sens.`,
+        es: `Todos están mirando hacia el lado equivocado; el planteamiento de ${targetName} no tiene ningún sentido.`,
+        ja: `みんな見る方向が違うよ。${targetName}の言い分は筋が通ってない。`,
+      },
     ],
     protector: [
-      `We need to keep the village unified — ${targetName}, help clear your name so we don’t mislynch.`,
-      `Let’s stay disciplined and hear ${targetName}’s defense clearly.`,
+      {
+        vi: `Chúng ta phải bảo vệ phe Dân trước đã — ${targetName}, bạn giải thích rõ để cả làng khỏi vote nhầm đi.`,
+        en: `We need to keep the village unified — ${targetName}, help clear your name so we don’t mislynch.`,
+        fr: `Il faut garder le village uni — ${targetName}, aide-nous à te disculper pour qu’on ne pende pas un innocent.`,
+        es: `Hay que mantener unido al pueblo — ${targetName}, ayúdanos a limpiar tu nombre para no linchar a un inocente.`,
+        ja: `村はまとまっておかないと — ${targetName}、冤罪で吊らないように疑いを晴らしてほしい。`,
+      },
+      {
+        vi: `Đừng vội xé lẻ phiếu, nhưng tôi cần ${targetName} chứng minh mình thuộc phe Dân.`,
+        en: `Let’s stay disciplined and hear ${targetName}’s defense clearly.`,
+        fr: `Restons disciplinés et écoutons bien la défense de ${targetName}.`,
+        es: `Mantengamos la disciplina y escuchemos bien la defensa de ${targetName}.`,
+        ja: `落ち着いて、${targetName}の弁明をちゃんと聞こう。`,
+      },
     ],
     wildcard: [
-      `My campfire gut says keep a close eye on ${targetName} today — something feels wild.`,
-      `Plot twist energy today — I’m testing ${targetName} to see how they react!`,
+      {
+        vi: `Trực giác quanh lửa trại mách bảo tôi phải để mắt tới ${targetName} hôm nay — cảm giác lạ lắm!`,
+        en: `My campfire gut says keep a close eye on ${targetName} today — something feels wild.`,
+        fr: `Mon instinct de feu de camp me dit de surveiller ${targetName} aujourd’hui — il y a un truc bizarre.`,
+        es: `Mi instinto de hoguera dice que vigilemos a ${targetName} hoy — algo huele raro.`,
+        ja: `焚き火の勘が言ってる、今日は${targetName}から目を離すなって — なんか妙な感じ！`,
+      },
+      {
+        vi: `Bàn này căng thật đấy! Tôi đặt dấu hỏi lớn lên ${targetName} xem phản ứng ra sao.`,
+        en: `Plot twist energy today — I’m testing ${targetName} to see how they react!`,
+        fr: `Ambiance rebondissement aujourd’hui — je teste ${targetName} pour voir sa réaction !`,
+        es: `Hoy hay energía de giro de guion — ¡voy a probar a ${targetName} a ver cómo reacciona!`,
+        ja: `今日は大どんでん返しの予感 — ${targetName}を試して、どう反応するか見てみるよ！`,
+      },
     ],
   };
-  return pickFrom(enMap[persona], rng);
+  return tr(lang, pickFrom(map[persona], rng));
 }
 
 /**
@@ -1603,37 +1648,63 @@ export function generateScheduledDiscussionBeats(
   if (dawnSpeaker) {
     let dawnText = '';
     if (context.mayorTransferredToName) {
-      dawnText =
-        lang === 'vi'
-          ? `👑 Vương miện Thị Trưởng đã chuyển sang ${context.mayorTransferredToName} (phiếu x2)! ${
-              killedNames.length > 0
-                ? `Đêm qua mất ${killedNames.join(', ')} — cả làng phải tỉnh táo kẻo quyền lực x2 rơi vào tay Sói!`
-                : 'Đêm qua bình yên, nhưng quyền lực Thị Trưởng sẽ quyết định bàn cân hôm nay!'
-            }`
-          : `👑 The Mayor’s crown passed to ${context.mayorTransferredToName} (2x vote)! ${
-              killedNames.length > 0
-                ? `We lost ${killedNames.join(', ')} overnight — stay sharp so double vote power doesn’t swing to the Wolves!`
-                : 'A peaceful night, yet that 2x vote will shape today’s lynch!'
-            }`;
+      const crown = tr(lang, {
+        vi: `👑 Vương miện Thị Trưởng đã chuyển sang ${context.mayorTransferredToName} (phiếu x2)!`,
+        en: `👑 The Mayor’s crown passed to ${context.mayorTransferredToName} (2x vote)!`,
+        fr: `👑 La couronne de Maire est passée à ${context.mayorTransferredToName} (vote x2) !`,
+        es: `👑 ¡La corona de Alcalde pasó a ${context.mayorTransferredToName} (voto x2)!`,
+        ja: `👑 村長の王冠が${context.mayorTransferredToName}に移った（2票分）！`,
+      });
+      const night =
+        killedNames.length > 0
+          ? tr(lang, {
+            vi: `Đêm qua mất ${killedNames.join(', ')} — cả làng phải tỉnh táo kẻo quyền lực x2 rơi vào tay Sói!`,
+            en: `We lost ${killedNames.join(', ')} overnight — stay sharp so double vote power doesn’t swing to the Wolves!`,
+            fr: `On a perdu ${killedNames.join(', ')} cette nuit — restons vigilants pour que le vote double ne tombe pas aux mains des Loups !`,
+            es: `Perdimos a ${killedNames.join(', ')} esta noche — ¡atentos para que el voto doble no acabe en manos de los Lobos!`,
+            ja: `昨夜は${killedNames.join(', ')}を失った — 2倍の票の力が人狼に渡らないよう気を引き締めよう！`,
+          })
+          : tr(lang, {
+            vi: 'Đêm qua bình yên, nhưng quyền lực Thị Trưởng sẽ quyết định bàn cân hôm nay!',
+            en: 'A peaceful night, yet that 2x vote will shape today’s lynch!',
+            fr: 'Nuit paisible, mais ce vote x2 va peser lourd dans le lynchage d’aujourd’hui !',
+            es: 'Noche tranquila, ¡pero ese voto x2 decidirá el linchamiento de hoy!',
+            ja: '静かな夜だったけど、その2票分が今日の処刑を左右するよ！',
+          });
+      dawnText = `${crown} ${night}`;
     } else if (killedNames.length === 0) {
       dawnText =
-        lang === 'vi'
-          ? brain.activeStoryline === 'silent_night_paranoia'
-            ? 'Đêm qua hoàn toàn bình yên! Không biết Bảo Vệ đã đỡ chuẩn, Phù Thủy cứu người, hay Sói vừa cắn trúng Bán Sói / Già Làng nữa...'
-            : 'Đêm qua không ai tử trận! Một pha cứu người quá xuất sắc, nhưng đừng chủ quan vì đàn Sói vẫn đang ngồi ngay quanh lửa trại.'
-          : brain.activeStoryline === 'silent_night_paranoia'
-          ? 'A completely silent night! Either the Bodyguard nailed the shield, the Witch healed, or the Wolves hit the Elder or Cursed...'
-          : 'Zero casualties overnight! Great save for the village, though the Wolves are still sitting right beside us.';
+        brain.activeStoryline === 'silent_night_paranoia'
+          ? tr(lang, {
+            vi: 'Đêm qua hoàn toàn bình yên! Không biết Bảo Vệ đã đỡ chuẩn, Phù Thủy cứu người, hay Sói vừa cắn trúng Bán Sói / Già Làng nữa...',
+            en: 'A completely silent night! Either the Bodyguard nailed the shield, the Witch healed, or the Wolves hit the Elder or Cursed...',
+            fr: 'Nuit totalement calme ! Soit le Salvateur a bien protégé, soit la Sorcière a soigné, soit les Loups ont mordu l’Ancien ou le Maudit...',
+            es: '¡Noche completamente tranquila! O el Guardaespaldas acertó con el escudo, o la Bruja curó, o los Lobos mordieron al Anciano o al Maldito...',
+            ja: '完全に静かな夜！騎士が見事に守ったか、魔女が治したか、人狼が長老か呪われし者を噛んだか…',
+          })
+          : tr(lang, {
+            vi: 'Đêm qua không ai tử trận! Một pha cứu người quá xuất sắc, nhưng đừng chủ quan vì đàn Sói vẫn đang ngồi ngay quanh lửa trại.',
+            en: 'Zero casualties overnight! Great save for the village, though the Wolves are still sitting right beside us.',
+            fr: 'Aucune victime cette nuit ! Beau sauvetage pour le village, mais les Loups sont toujours assis juste à côté de nous.',
+            es: '¡Ninguna baja esta noche! Gran salvada para el pueblo, aunque los Lobos siguen sentados justo a nuestro lado.',
+            ja: '昨夜は犠牲者ゼロ！村にとってはナイスな救出だけど、人狼はまだすぐそばに座ってるよ。',
+          });
     } else if (killedNames.length >= 2) {
-      dawnText =
-        lang === 'vi'
-          ? `Trời ơi, một đêm đẫm máu — mất tới ${killedNames.length} người (${killedNames.join(', ')})! Chắc chắn có liên kết Tình Nhân, Bình Độc Phù Thủy, hoặc Sói Con cuồng nộ rồi!`
-          : `A brutal night — we lost ${killedNames.length} villagers (${killedNames.join(', ')})! Lovers, Witch Poison, or Wolf Pup frenzy is definitely in play!`;
+      dawnText = tr(lang, {
+        vi: `Trời ơi, một đêm đẫm máu — mất tới ${killedNames.length} người (${killedNames.join(', ')})! Chắc chắn có liên kết Tình Nhân, Bình Độc Phù Thủy, hoặc Sói Con cuồng nộ rồi!`,
+        en: `A brutal night — we lost ${killedNames.length} villagers (${killedNames.join(', ')})! Lovers, Witch Poison, or Wolf Pup frenzy is definitely in play!`,
+        fr: `Quelle nuit sanglante — on a perdu ${killedNames.length} villageois (${killedNames.join(', ')}) ! Les Amoureux, le poison de la Sorcière ou la rage du Chiot Loup sont forcément en jeu !`,
+        es: `¡Qué noche tan brutal! Perdimos a ${killedNames.length} aldeanos (${killedNames.join(', ')}). ¡Seguro que hay Enamorados, veneno de la Bruja o frenesí del Cachorro de Lobo de por medio!`,
+        ja: `なんて血まみれの夜 — ${killedNames.length}人も失った（${killedNames.join(', ')}）！恋人の連鎖か、魔女の毒か、子狼の暴走が絡んでるに違いない！`,
+      });
     } else {
-      dawnText =
-        lang === 'vi'
-          ? `Đêm qua ${killedNames[0]} đã ngã xuống rồi... Mọi người bình tĩnh chia sẻ thông tin trước khi dồn phiếu nhé.`
-          : `We lost ${killedNames[0]} last night... Let’s share reads calmly before locking votes.`;
+      dawnText = tr(lang, {
+        vi: `Đêm qua ${killedNames[0]} đã ngã xuống rồi... Mọi người bình tĩnh chia sẻ thông tin trước khi dồn phiếu nhé.`,
+        en: `We lost ${killedNames[0]} last night... Let’s share reads calmly before locking votes.`,
+        fr: `On a perdu ${killedNames[0]} cette nuit... Partageons calmement nos impressions avant de verrouiller les votes.`,
+        es: `Perdimos a ${killedNames[0]} anoche... Compartamos nuestras sospechas con calma antes de cerrar los votos.`,
+        ja: `昨夜は${killedNames[0]}が倒れた... 投票を確定する前に、落ち着いて情報を共有しよう。`,
+      });
     }
     pushBeat(dawnSpeaker, dawnText);
   }
@@ -1656,10 +1727,13 @@ export function generateScheduledDiscussionBeats(
       realSeerClaimedId = botSeer.id;
       realSeerAccusedId = target.id;
       adjustPublicSuspicion(brain, target.id, 45);
-      const text =
-        lang === 'vi'
-          ? `Tôi lên vai luôn: tôi là Tiên Tri thật! Đêm qua tôi đã soi ${target.name} và kết quả là MA SÓI — đề nghị cả làng treo cổ ${target.name} ngay hôm nay!`
-          : `Stepping forward now: I am the real Seer! I inspected ${target.name} and saw WEREWOLF — we must vote ${target.name} out today!`;
+      const text = tr(lang, {
+        vi: `Tôi lên vai luôn: tôi là Tiên Tri thật! Đêm qua tôi đã soi ${target.name} và kết quả là MA SÓI — đề nghị cả làng treo cổ ${target.name} ngay hôm nay!`,
+        en: `Stepping forward now: I am the real Seer! I inspected ${target.name} and saw WEREWOLF — we must vote ${target.name} out today!`,
+        fr: `Je me dévoile : je suis la vraie Voyante ! J’ai sondé ${target.name} et c’est LOUP-GAROU — on doit voter ${target.name} dehors dès aujourd’hui !`,
+        es: `Doy un paso al frente: ¡soy la verdadera Vidente! Inspeccioné a ${target.name} y salió HOMBRE LOBO — ¡hay que votar a ${target.name} hoy mismo!`,
+        ja: `名乗り出るよ：私が本物の占い師だ！${target.name}を占ったら人狼だった — 今日は${target.name}を吊るべき！`,
+      });
       pushBeat(botSeer, text, {
         claimedRole: 'seer',
         targetId: target.id,
@@ -1671,10 +1745,13 @@ export function generateScheduledDiscussionBeats(
       if (shouldHardClaim) {
         realSeerClaimedId = botSeer.id;
         adjustPublicSuspicion(brain, target.id, -28);
-        const text =
-          lang === 'vi'
-            ? `Tôi nhận vai Tiên Tri để dẫn bàn: tôi đã soi ${target.name} thuộc phe Dân Làng (người tốt). Nếu có ai khác nhận Tiên Tri thì chắc chắn là Sói giả!`
-            : `Claiming Seer to anchor town: I checked ${target.name} as GOOD (Villager side). Anyone counter-claiming Seer is a lying Wolf!`;
+        const text = tr(lang, {
+          vi: `Tôi nhận vai Tiên Tri để dẫn bàn: tôi đã soi ${target.name} thuộc phe Dân Làng (người tốt). Nếu có ai khác nhận Tiên Tri thì chắc chắn là Sói giả!`,
+          en: `Claiming Seer to anchor town: I checked ${target.name} as GOOD (Villager side). Anyone counter-claiming Seer is a lying Wolf!`,
+          fr: `Je me déclare Voyante pour guider le village : j’ai sondé ${target.name}, c’est un BON (côté Villageois). Quiconque se déclare Voyante après moi est un Loup qui ment !`,
+          es: `Me declaro Vidente para guiar al pueblo: comprobé a ${target.name} y es BUENO (bando Aldeano). ¡Quien se declare Vidente después de mí es un Lobo mentiroso!`,
+          ja: `村をまとめるために占い師を名乗るよ：${target.name}を占ったら善良（村人側）だった。対抗で占い師を名乗る人は嘘つきの人狼だ！`,
+        });
         pushBeat(botSeer, text, {
           claimedRole: 'seer',
           targetId: target.id,
@@ -1683,10 +1760,13 @@ export function generateScheduledDiscussionBeats(
       } else {
         // Subtle Day 1 safe vouch (does NOT leak Seer role!)
         adjustPublicSuspicion(brain, target.id, -12);
-        const text =
-          lang === 'vi'
-            ? `Cảm giác của mình vòng này là ${target.name} khá đáng tin và thuộc phe Dân, mọi người khoan nhắm vào họ.`
-            : `My early read is that ${target.name} seems clean and trustworthy — let’s look elsewhere first.`;
+        const text = tr(lang, {
+          vi: `Cảm giác của mình vòng này là ${target.name} khá đáng tin và thuộc phe Dân, mọi người khoan nhắm vào họ.`,
+          en: `My early read is that ${target.name} seems clean and trustworthy — let’s look elsewhere first.`,
+          fr: `Mon premier ressenti, c’est que ${target.name} a l’air clean et digne de confiance — regardons ailleurs d’abord.`,
+          es: `Mi primera impresión es que ${target.name} parece limpio y de fiar — mejor miremos primero a otro lado.`,
+          ja: `最初の印象だと${target.name}は白っぽくて信用できそう — まずは他を見てみよう。`,
+        });
         pushBeat(botSeer, text);
       }
     }
@@ -1724,14 +1804,21 @@ export function generateScheduledDiscussionBeats(
       brain.wolfBluffPlan.hasClaimed = true;
       brain.wolfBluffPlan.targetVillagerId = frameTarget.id;
       adjustPublicSuspicion(brain, frameTarget.id, 22);
-      const text =
-        lang === 'vi'
-          ? realSeerClaimedId
-            ? `Khoan đã! Đừng tin lời giả mạo — TÔI mới là Tiên Tri thật! Đêm qua tôi soi chính ${frameTarget.name} ra MA SÓI, họ đang cố đóng kịch để lừa cả làng!`
-            : `Tôi lên nhận Tiên Tri luôn cho rõ ràng: đêm qua tôi soi ${frameTarget.name} và thấy dấu hiệu MA SÓI! Mọi người đừng để họ dẫn dắt!`
-          : realSeerClaimedId
-          ? `Hold everything! Don’t buy that bluff — I am the REAL Seer! I checked ${frameTarget.name} as WEREWOLF; they’re panicking and faking a claim!`
-          : `Stepping up as Seer: I inspected ${frameTarget.name} last night and got WEREWOLF! Don’t let them control the table!`;
+      const text = realSeerClaimedId
+        ? tr(lang, {
+          vi: `Khoan đã! Đừng tin lời giả mạo — TÔI mới là Tiên Tri thật! Đêm qua tôi soi chính ${frameTarget.name} ra MA SÓI, họ đang cố đóng kịch để lừa cả làng!`,
+          en: `Hold everything! Don’t buy that bluff — I am the REAL Seer! I checked ${frameTarget.name} as WEREWOLF; they’re panicking and faking a claim!`,
+          fr: `Stop ! N’avalez pas ce bluff — c’est MOI la VRAIE Voyante ! J’ai sondé ${frameTarget.name} : LOUP-GAROU ; ça panique et ça invente une révélation !`,
+          es: `¡Un momento! No caigan en ese farol — ¡la VERDADERA Vidente soy YO! Comprobé a ${frameTarget.name} como HOMBRE LOBO; está en pánico e inventando una revelación!`,
+          ja: `ちょっと待って！そのハッタリに騙されないで — 本物の占い師は私だ！${frameTarget.name}を占ったら人狼だった。向こうは焦って偽の告白をしてるんだ！`,
+        })
+        : tr(lang, {
+          vi: `Tôi lên nhận Tiên Tri luôn cho rõ ràng: đêm qua tôi soi ${frameTarget.name} và thấy dấu hiệu MA SÓI! Mọi người đừng để họ dẫn dắt!`,
+          en: `Stepping up as Seer: I inspected ${frameTarget.name} last night and got WEREWOLF! Don’t let them control the table!`,
+          fr: `Je me déclare Voyante : j’ai sondé ${frameTarget.name} cette nuit et c’est LOUP-GAROU ! Ne les laissez pas mener la table !`,
+          es: `Me declaro Vidente: anoche inspeccioné a ${frameTarget.name} ¡y salió HOMBRE LOBO! ¡No dejen que controlen la mesa!`,
+          ja: `占い師として名乗り出るよ：昨夜${frameTarget.name}を占ったら人狼だった！あの人に場を支配させないで！`,
+        });
       pushBeat(bluffWolf, text, {
         claimedRole: 'seer',
         targetId: frameTarget.id,
@@ -1747,10 +1834,13 @@ export function generateScheduledDiscussionBeats(
       const accusedObj = alive.find((p) => p.id === realSeerAccusedId);
       if (claimedSeerObj && accusedObj) {
         adjustPublicSuspicion(brain, claimedSeerObj.id, 15);
-        const text =
-          lang === 'vi'
-            ? `Mọi người khoan vội tin ${claimedSeerObj.name}! Lên nhận Tiên Tri vội như vậy rất dễ là Sói giả để đổ oan cho ${accusedObj.name} đấy!`
-            : `Hold on — don’t blindly trust ${claimedSeerObj.name}! Rushing a Seer claim to frame ${accusedObj.name} screams Wolf bait!`;
+        const text = tr(lang, {
+          vi: `Mọi người khoan vội tin ${claimedSeerObj.name}! Lên nhận Tiên Tri vội như vậy rất dễ là Sói giả để đổ oan cho ${accusedObj.name} đấy!`,
+          en: `Hold on — don’t blindly trust ${claimedSeerObj.name}! Rushing a Seer claim to frame ${accusedObj.name} screams Wolf bait!`,
+          fr: `Minute — ne faites pas confiance aveuglément à ${claimedSeerObj.name} ! Se précipiter pour se déclarer Voyante et accuser ${accusedObj.name}, ça sent le Loup à plein nez !`,
+          es: `¡Un momento, no confíen a ciegas en ${claimedSeerObj.name}! Apresurarse a declararse Vidente para inculpar a ${accusedObj.name} ¡huele a Lobo a kilómetros!`,
+          ja: `ちょっと待って、${claimedSeerObj.name}を鵜呑みにしないで！慌てて占い師を名乗って${accusedObj.name}を陥れようなんて、人狼の罠そのものだよ！`,
+        });
         pushBeat(botTraitor, text);
       }
     } else if (
@@ -1762,10 +1852,13 @@ export function generateScheduledDiscussionBeats(
       const alpha = livingBotWolves.find((w) => w.id !== pup?.id && !usedSpeakers.has(w.id));
       if (pup && alpha) {
         adjustPublicSuspicion(brain, pup.id, 20);
-        const text =
-          lang === 'vi'
-            ? `Nói thật lòng, tôi thấy biểu hiện của ${pup.name} vòng này cực kỳ bất ổn — nếu cả làng nghi thì tôi cũng sẵn sàng vote ${pup.name}!`
-            : `Honestly, ${pup.name}’s reads feel super sketchy this round — if town wants to test ${pup.name}, I’m willing to vote them!`;
+        const text = tr(lang, {
+          vi: `Nói thật lòng, tôi thấy biểu hiện của ${pup.name} vòng này cực kỳ bất ổn — nếu cả làng nghi thì tôi cũng sẵn sàng vote ${pup.name}!`,
+          en: `Honestly, ${pup.name}’s reads feel super sketchy this round — if town wants to test ${pup.name}, I’m willing to vote them!`,
+          fr: `Franchement, le comportement de ${pup.name} est super louche ce tour — si le village veut tester ${pup.name}, je suis prêt à voter contre !`,
+          es: `Sinceramente, las lecturas de ${pup.name} me parecen muy turbias esta ronda — si el pueblo quiere probar a ${pup.name}, ¡estoy dispuesto a votar por ${pup.name}!`,
+          ja: `正直、今ラウンドの${pup.name}の動きはかなり怪しい — 村が${pup.name}を試したいなら、私も投票するよ！`,
+        });
         pushBeat(alpha, text);
       }
     }
@@ -1804,19 +1897,31 @@ export function generateScheduledDiscussionBeats(
         ? players.find((p) => p.id === prevVote.targetId)
         : null;
       adjustPublicSuspicion(brain, prevVoteTarget.id, 14);
+      const votedName = votedForObj
+        ? votedForObj.name
+        : tr(lang, {
+          vi: 'mục tiêu lệch nhịp',
+          en: 'an off-wagon target',
+          fr: 'une cible à contre-courant',
+          es: 'un objetivo a contracorriente',
+          ja: '流れに逆らう相手',
+        });
+      const voteText = tr(lang, {
+        vi: `Lật lại lịch sử phiếu Ngày ${prevSnapshot.round}: ${prevVoteTarget.name} đã bỏ phiếu cho ${votedName} — hành động đó rất đáng nghi!`,
+        en: `Checking Day ${prevSnapshot.round}’s vote log: ${prevVoteTarget.name} voted for ${votedName} — that vote trail looks very suspicious!`,
+        fr: `Je repasse le journal des votes du Jour ${prevSnapshot.round} : ${prevVoteTarget.name} a voté pour ${votedName} — cette piste de vote est très suspecte !`,
+        es: `Revisando el registro de votos del Día ${prevSnapshot.round}: ${prevVoteTarget.name} votó por ${votedName} — ¡ese rastro de votos es muy sospechoso!`,
+        ja: `${prevSnapshot.round}日目の投票記録を見直すと、${prevVoteTarget.name}は${votedName}に投票してる — この投票の流れはすごく怪しい！`,
+      });
       crossText =
         lang === 'vi'
-          ? `Lật lại lịch sử phiếu Ngày ${prevSnapshot.round}: ${prevVoteTarget.name} đã bỏ phiếu cho ${
-              votedForObj ? votedForObj.name : 'mục tiêu lệch nhịp'
-            } — hành động đó rất đáng nghi! ${personaTagline(
+          ? `${voteText} ${personaTagline(
               brain.personas[crossExaminer.id] || 'detective',
               lang,
               prevVoteTarget.name,
               rng
             )}`
-          : `Checking Day ${prevSnapshot.round}’s vote log: ${prevVoteTarget.name} voted for ${
-              votedForObj ? votedForObj.name : 'an off-wagon target'
-            } — that vote trail looks very suspicious!`;
+          : voteText;
     } else {
       // Quiet-seat check: STRICTLY exclude anyone who already spoke in this batch!
       const trulyQuiet = validTargets.filter(
@@ -1826,23 +1931,29 @@ export function generateScheduledDiscussionBeats(
       if (pickPool.length > 0) {
         const target = pickFrom(pickPool, rng);
         if (round <= 1) {
-          crossText =
-            lang === 'vi'
-              ? `Vòng 1 còn ít manh mối — ${target.name}, góc nhìn của bạn quanh lửa trại lúc này nghiêng về ai nhất?`
-              : `Day 1 clues are still fresh — ${target.name}, who’s giving you the strangest read around the fire?`;
+          crossText = tr(lang, {
+            vi: `Vòng 1 còn ít manh mối — ${target.name}, góc nhìn của bạn quanh lửa trại lúc này nghiêng về ai nhất?`,
+            en: `Day 1 clues are still fresh — ${target.name}, who’s giving you the strangest read around the fire?`,
+            fr: `Les indices du Jour 1 sont encore frais — ${target.name}, qui te paraît le plus étrange autour du feu ?`,
+            es: `Las pistas del Día 1 son todavía recientes — ${target.name}, ¿quién te da la sensación más extraña junto a la hoguera?`,
+            ja: `1日目はまだ手がかりが少ないね — ${target.name}、焚き火のまわりで一番変だと思う人は誰？`,
+          });
         } else {
           adjustPublicSuspicion(brain, target.id, 12);
-          crossText =
-            trulyQuiet.includes(target)
-              ? lang === 'vi'
-                ? `Từ đầu đến giờ ${target.name} chưa lên tiếng phân tích gì — sự im lặng đó khiến tôi bắt đầu nghi ngờ.`
-                : `${target.name} hasn’t spoken up yet today — staying that quiet makes me suspicious.`
-              : personaTagline(
-                  brain.personas[crossExaminer.id] || 'detective',
-                  lang,
-                  target.name,
-                  rng
-                );
+          crossText = trulyQuiet.includes(target)
+            ? tr(lang, {
+              vi: `Từ đầu đến giờ ${target.name} chưa lên tiếng phân tích gì — sự im lặng đó khiến tôi bắt đầu nghi ngờ.`,
+              en: `${target.name} hasn’t spoken up yet today — staying that quiet makes me suspicious.`,
+              fr: `${target.name} n’a encore rien dit aujourd’hui — rester aussi silencieux commence à me paraître suspect.`,
+              es: `${target.name} todavía no ha dicho nada hoy — tanto silencio me empieza a parecer sospechoso.`,
+              ja: `${target.name}は今日まだ一言も発言してない — そんなに静かだと怪しく思えてくるよ。`,
+            })
+            : personaTagline(
+                brain.personas[crossExaminer.id] || 'detective',
+                lang,
+                target.name,
+                rng
+              );
         }
       }
     }
@@ -1869,38 +1980,44 @@ export function generateScheduledDiscussionBeats(
     // Nudge Tanner suspicion into the 40..70 bait sweet spot
     const cur = brain.publicSuspicion[botTanner.id] ?? 0;
     if (cur < 55) adjustPublicSuspicion(brain, botTanner.id, 22);
-    const tannerText =
-      lang === 'vi'
-        ? pickFrom(
-            [
-              'Ơ hay, sao tự dưng mấy ánh mắt cứ liếc sang tôi thế? Tôi chẳng biết đêm qua có chuyện gì đâu, ai thích thì cứ thử vote tôi đi!',
-              'Bàn này suy luận rối rắm quá... Tôi chán giải thích rồi, các người muốn nghi tôi là Sói thì cứ tự nhiên!',
-            ],
-            rng
-          )
-        : pickFrom(
-            [
-              'Wait, why are people glancing at me? I slept through the whole night — go ahead and vote me if you dare!',
-              'This debate is exhausting... I’m done defending myself, suspect me if you want!',
-            ],
-            rng
-          );
+    const tannerText = tr(lang, pickFrom([
+      {
+        vi: 'Ơ hay, sao tự dưng mấy ánh mắt cứ liếc sang tôi thế? Tôi chẳng biết đêm qua có chuyện gì đâu, ai thích thì cứ thử vote tôi đi!',
+        en: 'Wait, why are people glancing at me? I slept through the whole night — go ahead and vote me if you dare!',
+        fr: 'Attends, pourquoi tout le monde me regarde ? J’ai dormi toute la nuit — votez pour moi si vous osez !',
+        es: 'Un momento, ¿por qué me miran todos? Me dormí toda la noche — ¡voten por mí si se atreven!',
+        ja: 'え、なんでみんなこっちをチラチラ見てるの？昨夜はずっと寝てたよ — やれるものなら投票してみなよ！',
+      },
+      {
+        vi: 'Bàn này suy luận rối rắm quá... Tôi chán giải thích rồi, các người muốn nghi tôi là Sói thì cứ tự nhiên!',
+        en: 'This debate is exhausting... I’m done defending myself, suspect me if you want!',
+        fr: 'Ce débat est épuisant... J’en ai marre de me défendre, soupçonnez-moi si ça vous chante !',
+        es: 'Este debate es agotador... Ya me cansé de defenderme, ¡sospechen de mí si quieren!',
+        ja: 'この議論、疲れる… もう弁解するのは飽きた、疑いたいなら好きに疑って！',
+      },
+    ], rng));
     pushBeat(botTanner, tannerText);
   } else if (botWitch && witchHealedLiving) {
     adjustPublicSuspicion(brain, witchHealedLiving.id, -18);
-    const witchText =
-      lang === 'vi'
-        ? `Tôi có lý do rất chắc chắn để tin ${witchHealedLiving.name} là người tốt — hôm nay tuyệt đối đừng treo nhầm ${witchHealedLiving.name}!`
-        : `I have solid reason to trust ${witchHealedLiving.name} is clean — let’s definitely not lynch ${witchHealedLiving.name} today!`;
+    const witchText = tr(lang, {
+      vi: `Tôi có lý do rất chắc chắn để tin ${witchHealedLiving.name} là người tốt — hôm nay tuyệt đối đừng treo nhầm ${witchHealedLiving.name}!`,
+      en: `I have solid reason to trust ${witchHealedLiving.name} is clean — let’s definitely not lynch ${witchHealedLiving.name} today!`,
+      fr: `J’ai de solides raisons de croire que ${witchHealedLiving.name} est clean — on ne pend surtout pas ${witchHealedLiving.name} aujourd’hui !`,
+      es: `Tengo buenas razones para confiar en que ${witchHealedLiving.name} está limpio — ¡hoy desde luego no linchemos a ${witchHealedLiving.name}!`,
+      ja: `${witchHealedLiving.name}が白だと信じる確かな理由があるんだ — 今日は絶対に${witchHealedLiving.name}を吊らないで！`,
+    });
     pushBeat(botWitch, witchText);
   } else if (brain.activeStoryline === 'mayor_coup' && context.mayorId) {
     const mayorObj = alive.find((p) => p.id === context.mayorId);
     const speaker = pickUnusedBot((b) => b.id !== context.mayorId);
     if (mayorObj && speaker) {
-      const text =
-        lang === 'vi'
-          ? `Thị Trưởng ${mayorObj.name} đang cầm lá phiếu x2 quyền lực nhất bàn! ${mayorObj.name} định dẫn phiếu về phía ai để cả làng theo dõi?`
-          : `Mayor ${mayorObj.name} holds the decisive 2x vote! Where are you leading today’s vote, ${mayorObj.name}?`;
+      const text = tr(lang, {
+        vi: `Thị Trưởng ${mayorObj.name} đang cầm lá phiếu x2 quyền lực nhất bàn! ${mayorObj.name} định dẫn phiếu về phía ai để cả làng theo dõi?`,
+        en: `Mayor ${mayorObj.name} holds the decisive 2x vote! Where are you leading today’s vote, ${mayorObj.name}?`,
+        fr: `Le Maire ${mayorObj.name} détient le vote x2 décisif ! Vers qui diriges-tu le vote d’aujourd’hui, ${mayorObj.name} ?`,
+        es: `¡El Alcalde ${mayorObj.name} tiene el voto x2 decisivo! ¿Hacia quién vas a llevar el voto de hoy, ${mayorObj.name}?`,
+        ja: `村長の${mayorObj.name}が決定的な2票分を握ってる！今日の投票はどこへ導くの、${mayorObj.name}？`,
+      });
       pushBeat(speaker, text);
     }
   } else {
@@ -1938,10 +2055,13 @@ export function generateScheduledDiscussionBeats(
         .map((id) => alive.find((p) => p.id === id)?.name)
         .filter(Boolean)
         .join(' vs ');
-      const text =
-        lang === 'vi'
-          ? `Căng thẳng tột độ rồi: ${names} cùng nhận Tiên Tri! Chắc chắn 1 trong 2 là Ma Sói giả danh — hôm nay phải soi cực kỹ!`
-          : `Huge clash: ${names} are BOTH claiming Seer! One of them is 100% a lying Wolf — focus the vote right here!`;
+      const text = tr(lang, {
+        vi: `Căng thẳng tột độ rồi: ${names} cùng nhận Tiên Tri! Chắc chắn 1 trong 2 là Ma Sói giả danh — hôm nay phải soi cực kỹ!`,
+        en: `Huge clash: ${names} are BOTH claiming Seer! One of them is 100% a lying Wolf — focus the vote right here!`,
+        fr: `Gros clash : ${names} se déclarent TOUS LES DEUX Voyante ! L’un des deux est à 100 % un Loup menteur — concentrons le vote ici !`,
+        es: `Choque enorme: ¡${names} se declaran AMBOS Vidente! Uno de los dos es 100 % un Lobo mentiroso — ¡centremos el voto aquí!`,
+        ja: `大衝突だ：${names}が両方とも占い師を名乗ってる！どちらかは100％嘘つきの人狼 — 投票はここに集中しよう！`,
+      });
       pushBeat(reactor, text);
     }
   }
@@ -2007,76 +2127,122 @@ export function generateGallowsDefenseBeat(
 
   if (leader.roleId === 'tanner') {
     adjustPublicSuspicion(brain, leader.id, 14);
-    text =
-      lang === 'vi'
-        ? 'Được thôi, cứ dồn phiếu treo cổ tôi đi! Các người sai lầm rồi, nhưng tôi chẳng thèm van xin đâu!'
-        : 'Fine, go ahead and hang me! You’re all making a huge mistake, and I’m not begging!';
+    text = tr(lang, {
+      vi: 'Được thôi, cứ dồn phiếu treo cổ tôi đi! Các người sai lầm rồi, nhưng tôi chẳng thèm van xin đâu!',
+      en: 'Fine, go ahead and hang me! You’re all making a huge mistake, and I’m not begging!',
+      fr: 'Très bien, pendez-moi ! Vous faites tous une énorme erreur, et je ne vais pas supplier !',
+      es: '¡Está bien, cuélguenme! Todos están cometiendo un error enorme, ¡y no pienso suplicar!',
+      ja: 'いいよ、吊るしたければ吊るせば！みんな大きな間違いをしてるけど、私は命乞いなんてしないからね！',
+    });
   } else if (leader.roleId === 'hunter') {
     claimedRole = 'hunter';
-    text =
-      lang === 'vi'
-        ? `Khoan đã! Tôi là Thợ Săn — nếu bị treo cổ hôm nay, phát súng cuối cùng của tôi sẽ bắn thẳng vào ${
-            accuser ? accuser.name : 'kẻ đẩy phiếu mạnh nhất'
-          }! Đừng để Sói cười thầm!`
-        : `Wait! I’m the Hunter — if you lynch me today, my dying bullet goes straight into ${
-            accuser ? accuser.name : 'whoever pushed this wagon'
-          }!`;
+    const pusher = accuser
+      ? accuser.name
+      : tr(lang, {
+        vi: 'kẻ đẩy phiếu mạnh nhất',
+        en: 'whoever pushed this wagon',
+        fr: 'celui qui a lancé ce vote',
+        es: 'quien haya empujado este voto',
+        ja: 'この投票を扇動した人',
+      });
+    text = tr(lang, {
+      vi: `Khoan đã! Tôi là Thợ Săn — nếu bị treo cổ hôm nay, phát súng cuối cùng của tôi sẽ bắn thẳng vào ${pusher}! Đừng để Sói cười thầm!`,
+      en: `Wait! I’m the Hunter — if you lynch me today, my dying bullet goes straight into ${pusher}!`,
+      fr: `Attendez ! Je suis le Chasseur — si vous me pendez aujourd’hui, ma dernière balle ira droit dans ${pusher} !`,
+      es: `¡Esperen! Soy el Cazador — si me linchan hoy, ¡mi última bala va directa a ${pusher}!`,
+      ja: `待って！私はハンターだ — 今日吊るされたら、最期の一発は${pusher}に撃ち込むよ！`,
+    });
   } else if (leader.roleId === 'elder') {
     claimedRole = 'elder';
-    text =
-      lang === 'vi'
-        ? 'Dừng tay ngay cả làng! Tôi chính là Già Làng — treo cổ nhầm tôi thì toàn bộ Tiên Tri, Bảo Vệ và Phù Thủy sẽ bị phong ấn mất hết kỹ năng đấy!'
-        : 'Stop the vote! I am the Elder — lynching me will seal ALL Villager special powers for the rest of the match!';
+    text = tr(lang, {
+      vi: 'Dừng tay ngay cả làng! Tôi chính là Già Làng — treo cổ nhầm tôi thì toàn bộ Tiên Tri, Bảo Vệ và Phù Thủy sẽ bị phong ấn mất hết kỹ năng đấy!',
+      en: 'Stop the vote! I am the Elder — lynching me will seal ALL Villager special powers for the rest of the match!',
+      fr: 'Arrêtez le vote ! Je suis l’Ancien — me pendre scellera TOUS les pouvoirs spéciaux des Villageois jusqu’à la fin de la partie !',
+      es: '¡Paren la votación! Soy el Anciano — si me linchan se sellarán TODOS los poderes especiales de los Aldeanos el resto de la partida!',
+      ja: '投票をやめて！私は長老だ — 私を吊ると、残りの試合中、村人の特殊能力がすべて封印されるよ！',
+    });
   } else if (leader.roleId === 'seer') {
     claimedRole = 'seer';
     const checks = Object.entries(brain.seerChecksByBot[leader.id] || {})
       .map(([id, res]) => {
         const name = players.find((p) => p.id === id)?.name || id;
-        return `${name}=${res === 'wolf' ? (lang === 'vi' ? 'Sói' : 'Wolf') : lang === 'vi' ? 'Dân' : 'Good'}`;
+        return `${name}=${res === 'wolf' ? tr(lang, {
+            vi: 'Sói',
+            en: 'Wolf',
+            fr: 'Loup',
+            es: 'Lobo',
+            ja: '人狼',
+          }) : tr(lang, {
+            vi: 'Dân',
+            en: 'Good',
+            fr: 'Villageois',
+            es: 'Aldeano',
+            ja: '村人',
+          })}`;
       })
       .join(', ');
-    text =
-      lang === 'vi'
-        ? `Đừng treo tôi — tôi là Tiên Tri thật!${checks ? ` Lịch sử soi của tôi: ${checks}.` : ''} Chuyển phiếu sang kẻ đang gài bẫy tôi ngay!`
-        : `Don’t lynch your real Seer!${checks ? ` My checks: ${checks}.` : ''} Flip the vote onto the real wolves!`;
+    text = tr(lang, {
+      vi: `Đừng treo tôi — tôi là Tiên Tri thật!${checks ? ` Lịch sử soi của tôi: ${checks}.` : ''} Chuyển phiếu sang kẻ đang gài bẫy tôi ngay!`,
+      en: `Don’t lynch your real Seer!${checks ? ` My checks: ${checks}.` : ''} Flip the vote onto the real wolves!`,
+      fr: `Ne pendez pas votre vraie Voyante !${checks ? ` Mes sondages : ${checks}.` : ''} Reportez le vote sur les vrais loups !`,
+      es: `¡No linchen a su verdadera Vidente!${checks ? ` Mis comprobaciones: ${checks}.` : ''} ¡Pasen el voto a los verdaderos lobos!`,
+      ja: `本物の占い師を吊らないで！${checks ? ` 私の占い結果：${checks}。` : ''} 本物の人狼に票を移して！`,
+    });
   } else if (leader.roleId === 'bodyguard' || leader.roleId === 'witch') {
     claimedRole = leader.roleId;
     const roleLabel = ROLES[leader.roleId].name[lang] || ROLES[leader.roleId].name.vi;
-    text =
-      lang === 'vi'
-        ? `Bình tĩnh đã! Tôi là ${roleLabel} đang âm thầm giữ mạng cho làng — mất tôi đêm nay bầy Sói sẽ làm loạn mất!`
-        : `Hold on! I’m the ${roleLabel} keeping this village alive — losing me tonight hands the game to the Wolves!`;
+    text = tr(lang, {
+      vi: `Bình tĩnh đã! Tôi là ${roleLabel} đang âm thầm giữ mạng cho làng — mất tôi đêm nay bầy Sói sẽ làm loạn mất!`,
+      en: `Hold on! I’m the ${roleLabel} keeping this village alive — losing me tonight hands the game to the Wolves!`,
+      fr: `Doucement ! Mon rôle, c’est ${roleLabel} : je garde ce village en vie — me perdre ce soir livre la partie aux Loups !`,
+      es: `¡Un momento! Soy ${roleLabel} y mantengo vivo a este pueblo — ¡perderme esta noche le regala la partida a los Lobos!`,
+      ja: `待って！私は${roleLabel}で、この村を生かし続けてるんだ — 今夜私を失ったら人狼に勝ちを渡すことになるよ！`,
+    });
   } else if (isBitingWolf(leader.roleId) || leader.roleId === 'traitor') {
     const counter =
       accuser ||
       alive.find(
         (p) => p.id !== leader.id && !isBitingWolf(p.roleId)
       );
-    text =
-      lang === 'vi'
-        ? `Cả làng đang bị dắt mũi rồi! ${
-            counter ? `${counter.name} mới là kẻ vội vàng đẩy phiếu đáng nghi nhất` : 'Đàn Sói đang lợi dụng để đẩy một Dân Làng'
-          } — xin hãy suy nghĩ lại trước khi hết giờ!`
-        : `You’re all being played! ${
-            counter ? `${counter.name} is rushing this vote way too eagerly` : 'The real Wolves are steering this mislynch'
-          } — reconsider before time runs out!`;
+    const blame = counter
+      ? tr(lang, {
+        vi: `${counter.name} mới là kẻ vội vàng đẩy phiếu đáng nghi nhất`,
+        en: `${counter.name} is rushing this vote way too eagerly`,
+        fr: `${counter.name} précipite ce vote beaucoup trop avidement`,
+        es: `${counter.name} está apurando este voto con demasiado entusiasmo`,
+        ja: `${counter.name}がやけに急いでこの投票を進めてる`,
+      })
+      : tr(lang, {
+        vi: 'Đàn Sói đang lợi dụng để đẩy một Dân Làng',
+        en: 'The real Wolves are steering this mislynch',
+        fr: 'Les vrais Loups manipulent ce vote pour faire pendre un innocent',
+        es: 'Los verdaderos Lobos están dirigiendo este linchamiento erróneo',
+        ja: '本物の人狼がこの誤った処刑を誘導してる',
+      });
+    text = tr(lang, {
+      vi: `Cả làng đang bị dắt mũi rồi! ${blame} — xin hãy suy nghĩ lại trước khi hết giờ!`,
+      en: `You’re all being played! ${blame} — reconsider before time runs out!`,
+      fr: `Vous vous faites tous manipuler ! ${blame} — reconsidérez avant la fin du temps imparti !`,
+      es: `¡Los están manipulando a todos! ${blame} — ¡reconsideren antes de que se acabe el tiempo!`,
+      ja: `みんな踊らされてるよ！${blame} — 時間切れになる前に考え直して！`,
+    });
   } else {
-    text =
-      lang === 'vi'
-        ? pickFrom(
-            [
-              `Tôi chỉ là Dân Làng vô tội! Hãy nhìn kỹ ai đang hùa theo đẩy phiếu cho tôi${accuser ? ` — ${accuser.name}, bạn giải thích đi!` : '!'}`,
-              'Treo nhầm tôi là mất thêm một lá phiếu phe Dân đấy! Còn thời gian, mọi người kiểm tra lại nghi phạm thật đi!',
-            ],
-            rng
-          )
-        : pickFrom(
-            [
-              `I’m an innocent Villager! Watch closely who piled onto this wagon${accuser ? ` — ${accuser.name}, why the rush?` : '!'}`,
-              'Mislynching me only hands numbers to the Wolves! Check the real suspects before locking!',
-            ],
-            rng
-          );
+    text = tr(lang, pickFrom([
+      {
+        vi: `Tôi chỉ là Dân Làng vô tội! Hãy nhìn kỹ ai đang hùa theo đẩy phiếu cho tôi${accuser ? ` — ${accuser.name}, bạn giải thích đi!` : '!'}`,
+        en: `I’m an innocent Villager! Watch closely who piled onto this wagon${accuser ? ` — ${accuser.name}, why the rush?` : '!'}`,
+        fr: `Je suis un simple Villageois innocent ! Regardez bien qui a rejoint ce vote${accuser ? ` — ${accuser.name}, pourquoi cette précipitation ?` : ' !'}`,
+        es: `¡Soy un Aldeano inocente! Fíjense bien en quién se sumó a este voto${accuser ? ` — ${accuser.name}, ¿por qué tanta prisa?` : '.'}`,
+        ja: `私は無実の村人だよ！誰がこの投票に乗っかってるのかよく見て${accuser ? ` — ${accuser.name}、なんでそんなに急ぐの？` : '！'}`,
+      },
+      {
+        vi: 'Treo nhầm tôi là mất thêm một lá phiếu phe Dân đấy! Còn thời gian, mọi người kiểm tra lại nghi phạm thật đi!',
+        en: 'Mislynching me only hands numbers to the Wolves! Check the real suspects before locking!',
+        fr: 'Me pendre à tort ne fait qu’avantager les Loups ! Vérifiez les vrais suspects avant de verrouiller !',
+        es: '¡Linchar a un inocente como yo solo le da ventaja a los Lobos! ¡Revisen a los verdaderos sospechosos antes de cerrar!',
+        ja: '私を誤って吊っても人狼を有利にするだけだよ！確定する前に本当の容疑者を確認して！',
+      },
+    ], rng));
   }
 
   if (claimedRole) {
@@ -2262,10 +2428,13 @@ export function generateHumanChatResponses(
         speakerName: realBotSeer.name,
         persona: brain.personas[realBotSeer.id],
         claimedRole: 'seer',
-        text:
-          lang === 'vi'
-            ? 'Khoan đã! Bạn đang nói dối — TÔI mới là Tiên Tri thật! Cả làng cẩn thận, đừng để Sói cướp vai!'
-            : 'Hold on! You’re lying — I am the real Seer! Village, don’t fall for a Wolf counter-claim!',
+        text: tr(lang, {
+          vi: 'Khoan đã! Bạn đang nói dối — TÔI mới là Tiên Tri thật! Cả làng cẩn thận, đừng để Sói cướp vai!',
+          en: 'Hold on! You’re lying — I am the real Seer! Village, don’t fall for a Wolf counter-claim!',
+          fr: 'Minute ! Tu mens — la vraie Voyante, c’est MOI ! Village, ne vous laissez pas avoir par la contre-déclaration d’un Loup !',
+          es: '¡Un momento! Estás mintiendo — ¡la verdadera Vidente soy YO! Pueblo, ¡no se dejen engañar por la contradeclaración de un Lobo!',
+          ja: 'ちょっと待って！あなたは嘘をついてる — 本物の占い師は私だ！みんな、人狼の対抗告白に騙されないで！',
+        }),
       });
     } else {
       const challenger =
@@ -2284,13 +2453,21 @@ export function generateHumanChatResponses(
           speakerName: challenger.name,
           persona: brain.personas[challenger.id],
           text:
-            lang === 'vi'
-              ? claimedRole === 'seer'
-                ? `Bạn nhận ${roleLabel} à? Vậy đêm qua bạn soi ai và có manh mối cụ thể nào để cả làng kiểm chứng không?`
-                : `Ghi nhận bạn nhận vai ${roleLabel}! Nếu là thật thì nhớ giữ lập trường rõ ràng để phe Dân phối hợp nhé.`
-              : claimedRole === 'seer'
-              ? `Claiming ${roleLabel}? Name who you inspected and why we should trust your claim!`
-              : `Noted on your ${roleLabel} claim — let’s see if the night results back you up.`,
+            claimedRole === 'seer'
+              ? tr(lang, {
+                vi: `Bạn nhận ${roleLabel} à? Vậy đêm qua bạn soi ai và có manh mối cụ thể nào để cả làng kiểm chứng không?`,
+                en: `Claiming ${roleLabel}? Name who you inspected and why we should trust your claim!`,
+                fr: `Tu te déclares ${roleLabel} ? Dis-nous qui tu as sondé et pourquoi on devrait te croire !`,
+                es: `¿Dices ser ${roleLabel}? ¡Di a quién inspeccionaste y por qué deberíamos creerte!`,
+                ja: `${roleLabel}を名乗るの？誰を占ったのか、なぜ信じていいのか教えて！`,
+              })
+              : tr(lang, {
+                vi: `Ghi nhận bạn nhận vai ${roleLabel}! Nếu là thật thì nhớ giữ lập trường rõ ràng để phe Dân phối hợp nhé.`,
+                en: `Noted on your ${roleLabel} claim — let’s see if the night results back you up.`,
+                fr: `Noté pour ta déclaration de ${roleLabel} — voyons si les résultats de la nuit te donnent raison.`,
+                es: `Anotado lo de tu declaración de ${roleLabel} — veamos si los resultados de la noche te respaldan.`,
+                ja: `${roleLabel}の名乗り、了解 — 夜の結果が裏付けてくれるか見てみよう。`,
+              }),
         });
       }
     }
@@ -2308,44 +2485,58 @@ export function generateHumanChatResponses(
       let defenseText = '';
       if (primaryMentioned.roleId === 'tanner') {
         adjustPublicSuspicion(brain, primaryMentioned.id, 10);
-        defenseText =
-          lang === 'vi'
-            ? 'Ồ, nghi tôi nhanh thế? Nếu bạn tự tin vậy thì cứ bỏ phiếu treo cổ tôi đi, xem ai mới hối hận!'
-            : 'Oh, pointing at me already? Go ahead and vote me out if you’re so sure — don’t regret it!';
+        defenseText = tr(lang, {
+          vi: 'Ồ, nghi tôi nhanh thế? Nếu bạn tự tin vậy thì cứ bỏ phiếu treo cổ tôi đi, xem ai mới hối hận!',
+          en: 'Oh, pointing at me already? Go ahead and vote me out if you’re so sure — don’t regret it!',
+          fr: 'Oh, tu me pointes déjà du doigt ? Si t’es si sûr de toi, vote contre moi — mais ne viens pas pleurer après !',
+          es: 'Oh, ¿ya me estás señalando? Si estás tan seguro, vótame — ¡luego no te arrepientas!',
+          ja: 'おや、もう私を指さすの？そんなに自信があるなら投票すれば — 後悔しても知らないよ！',
+        });
       } else if (isBitingWolf(primaryMentioned.roleId)) {
         // A fake Seer must stay consistent with its public claim instead of "I'm just a Villager".
         const claimsSeer = brain.publicClaims.some(
           (c) => c.speakerId === primaryMentioned.id && c.claimedRole === 'seer'
         );
         defenseText = claimsSeer
-          ? lang === 'vi'
-            ? 'Tôi là Tiên Tri, soi được gì tôi đã báo cả làng rồi! Đổ tội cho tôi lúc này chỉ có lợi cho Sói thôi!'
-            : 'I’m the Seer and I already shared my results! Pushing on me now only helps the Wolves!'
-          : lang === 'vi'
-          ? pickFrom(
-              [
-                'Nghi vô cớ thế bạn? Tôi chỉ là Dân Làng thôi — bạn vội đổ tội cho tôi như vậy có khi mới đáng nghi đấy!',
-                'Tôi là Dân Làng đàng hoàng! Bạn có bằng chứng gì không hay chỉ đang đẩy phiếu cho nhanh?',
-              ],
-              rng
-            )
-          : pickFrom(
-              [
-                'Baseless accusation! I’m a regular Villager — pushing on me this fast makes you look pretty sus yourself!',
-                'I’m just a Villager! Got any evidence, or are you only rushing the vote?',
-              ],
-              rng
-            );
+          ? tr(lang, {
+            vi: 'Tôi là Tiên Tri, soi được gì tôi đã báo cả làng rồi! Đổ tội cho tôi lúc này chỉ có lợi cho Sói thôi!',
+            en: 'I’m the Seer and I already shared my results! Pushing on me now only helps the Wolves!',
+            fr: 'Je suis la Voyante et j’ai déjà partagé mes résultats ! Me charger maintenant n’avantage que les Loups !',
+            es: '¡Soy la Vidente y ya compartí mis resultados! ¡Presionarme ahora solo ayuda a los Lobos!',
+            ja: '私は占い師で、結果はもう共有したよ！今私を責めても人狼が得するだけ！',
+          })
+          : tr(lang, pickFrom([
+            {
+              vi: 'Nghi vô cớ thế bạn? Tôi chỉ là Dân Làng thôi — bạn vội đổ tội cho tôi như vậy có khi mới đáng nghi đấy!',
+              en: 'Baseless accusation! I’m a regular Villager — pushing on me this fast makes you look pretty sus yourself!',
+              fr: 'Accusation sans fondement ! Je suis un simple Villageois — me charger aussi vite, ça te rend plutôt suspect toi-même !',
+              es: '¡Acusación sin fundamento! Soy un Aldeano normal — ¡presionarme tan rápido te hace parecer bastante sospechoso a ti también!',
+              ja: '根拠のない言いがかりだよ！私はただの村人 — こんなに急いで私を責めるなんて、あなたのほうが怪しいんじゃない？',
+            },
+            {
+              vi: 'Tôi là Dân Làng đàng hoàng! Bạn có bằng chứng gì không hay chỉ đang đẩy phiếu cho nhanh?',
+              en: 'I’m just a Villager! Got any evidence, or are you only rushing the vote?',
+              fr: 'Je ne suis qu’un Villageois ! T’as des preuves, ou tu cherches juste à précipiter le vote ?',
+              es: '¡Solo soy un Aldeano! ¿Tienes pruebas, o solo tienes prisa por votar?',
+              ja: '私はただの村人だよ！証拠はあるの？それとも投票を急ぎたいだけ？',
+            },
+          ], rng));
       } else if (primaryMentioned.roleId === 'seer') {
-        defenseText =
-          lang === 'vi'
-            ? 'Bình tĩnh đi bạn, bạn đang nhắm sai người rồi! Tôi có thông tin rất quan trọng cho phe Dân đấy!'
-            : 'Slow down — you’re aiming at the wrong person! I have crucial info for the village!';
+        defenseText = tr(lang, {
+          vi: 'Bình tĩnh đi bạn, bạn đang nhắm sai người rồi! Tôi có thông tin rất quan trọng cho phe Dân đấy!',
+          en: 'Slow down — you’re aiming at the wrong person! I have crucial info for the village!',
+          fr: 'Doucement — tu vises la mauvaise personne ! J’ai des infos cruciales pour le village !',
+          es: '¡Calma — estás apuntando a la persona equivocada! ¡Tengo información crucial para el pueblo!',
+          ja: 'ちょっと落ち着いて — 狙う相手を間違ってるよ！私は村にとって大事な情報を持ってるんだ！',
+        });
       } else {
-        defenseText =
-          lang === 'vi'
-            ? 'Khoan đã! Bạn dựa vào bằng chứng nào mà nghi tôi là Sói? Tôi phe Dân đàng hoàng, đừng để Sói thật cười thầm!'
-            : 'Wait a second! What evidence do you have against me? I’m town — don’t let the real Wolves hide behind this!';
+        defenseText = tr(lang, {
+          vi: 'Khoan đã! Bạn dựa vào bằng chứng nào mà nghi tôi là Sói? Tôi phe Dân đàng hoàng, đừng để Sói thật cười thầm!',
+          en: 'Wait a second! What evidence do you have against me? I’m town — don’t let the real Wolves hide behind this!',
+          fr: 'Une seconde ! Quelles preuves as-tu contre moi ? Je suis du village — ne laisse pas les vrais Loups se cacher derrière ça !',
+          es: '¡Un segundo! ¿Qué pruebas tienes contra mí? Soy del pueblo — ¡no dejes que los verdaderos Lobos se escondan detrás de esto!',
+          ja: 'ちょっと待って！私にどんな証拠があるの？私は村側だよ — 本物の人狼にここへ隠れさせないで！',
+        });
       }
 
       replies.push({
@@ -2371,14 +2562,21 @@ export function generateHumanChatResponses(
         used.add(analyst.id);
         brain.spokenCounts[analyst.id] = (brain.spokenCounts[analyst.id] ?? 0) + 1;
         const isDefendingLover = analyst.loverId === primaryMentioned.id;
-        const text =
-          lang === 'vi'
-            ? isDefendingLover
-              ? `Tôi thấy ${primaryMentioned.name} chưa có gì đáng nghi cả — khoan vội hùa theo nhé mọi người!`
-              : `Góc nhìn thú vị đấy — để tôi quan sát kỹ phản ứng của ${primaryMentioned.name} trước khi bỏ phiếu.`
-            : isDefendingLover
-            ? `I don’t buy the case on ${primaryMentioned.name} at all — let’s not rush a bad vote!`
-            : `Interesting push — let’s watch how ${primaryMentioned.name} responds before voting.`;
+        const text = isDefendingLover
+          ? tr(lang, {
+            vi: `Tôi thấy ${primaryMentioned.name} chưa có gì đáng nghi cả — khoan vội hùa theo nhé mọi người!`,
+            en: `I don’t buy the case on ${primaryMentioned.name} at all — let’s not rush a bad vote!`,
+            fr: `Je n’achète pas du tout l’accusation contre ${primaryMentioned.name} — ne précipitons pas un mauvais vote !`,
+            es: `No me creo nada el caso contra ${primaryMentioned.name} — ¡no nos apresuremos con un mal voto!`,
+            ja: `${primaryMentioned.name}への疑いは全然ピンとこないな — 間違った投票を急がないようにしよう！`,
+          })
+          : tr(lang, {
+            vi: `Góc nhìn thú vị đấy — để tôi quan sát kỹ phản ứng của ${primaryMentioned.name} trước khi bỏ phiếu.`,
+            en: `Interesting push — let’s watch how ${primaryMentioned.name} responds before voting.`,
+            fr: `Intéressante accusation — voyons comment ${primaryMentioned.name} réagit avant de voter.`,
+            es: `Interesante acusación — veamos cómo responde ${primaryMentioned.name} antes de votar.`,
+            ja: `面白い指摘だね — 投票の前に${primaryMentioned.name}がどう反応するか見てみよう。`,
+          });
         replies.push({
           delayMs: 2250 + Math.round(rng() * 150),
           speakerId: analyst.id,
@@ -2401,10 +2599,13 @@ export function generateHumanChatResponses(
         speakerId: primaryMentioned.id,
         speakerName: primaryMentioned.name,
         persona: brain.personas[primaryMentioned.id],
-        text:
-          lang === 'vi'
-            ? 'Cảm ơn bạn đã tin tưởng! Cùng nhau lọc ra Sói thật quanh lửa trại nhé.'
-            : 'Appreciate the trust! Let’s focus together on finding the real Wolves.',
+        text: tr(lang, {
+          vi: 'Cảm ơn bạn đã tin tưởng! Cùng nhau lọc ra Sói thật quanh lửa trại nhé.',
+          en: 'Appreciate the trust! Let’s focus together on finding the real Wolves.',
+          fr: 'Merci de ta confiance ! Concentrons-nous ensemble pour trouver les vrais Loups.',
+          es: '¡Gracias por la confianza! Concentrémonos juntos en encontrar a los verdaderos Lobos.',
+          ja: '信じてくれてありがとう！みんなで本物の人狼を見つけ出そう。',
+        }),
       });
     }
 
@@ -2422,10 +2623,13 @@ export function generateHumanChatResponses(
           speakerId: skeptic.id,
           speakerName: skeptic.name,
           persona: brain.personas[skeptic.id],
-          text:
-            lang === 'vi'
-              ? `Sao bạn chắc chắn ${primaryMentioned.name} là Dân thế? Cẩn thận kẻo bênh nhầm Sói đấy!`
-              : `Why are you so sure ${primaryMentioned.name} is clean? Careful not to vouch for a Wolf!`,
+          text: tr(lang, {
+            vi: `Sao bạn chắc chắn ${primaryMentioned.name} là Dân thế? Cẩn thận kẻo bênh nhầm Sói đấy!`,
+            en: `Why are you so sure ${primaryMentioned.name} is clean? Careful not to vouch for a Wolf!`,
+            fr: `Pourquoi es-tu si sûr que ${primaryMentioned.name} est clean ? Attention à ne pas défendre un Loup !`,
+            es: `¿Por qué estás tan seguro de que ${primaryMentioned.name} está limpio? ¡Cuidado, no vayas a respaldar a un Lobo!`,
+            ja: `なんで${primaryMentioned.name}が白だってそんなに言い切れるの？人狼をかばわないよう気をつけて！`,
+          }),
         });
       }
     }

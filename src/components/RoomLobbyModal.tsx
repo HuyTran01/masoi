@@ -779,7 +779,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
             disabled={isStarting}
             onClick={handleCloseModal}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 cursor-pointer shrink-0"
-            aria-label="Close"
+            aria-label={t.closeAria}
           >
             <X className="w-4 h-4" />
           </button>
@@ -805,7 +805,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
             }`}
           >
             <Globe className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-            <span className="sm:hidden">1. Online 3D</span>
+            <span className="sm:hidden">{t.tabOnline3DShort}</span>
             <span className="hidden sm:inline truncate">{t.tabOnline3D}</span>
           </button>
 
@@ -1011,7 +1011,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                         disabled={effectiveSize <= Math.max(4, modeTab === 'online' ? humanCount : 4)}
                         onClick={() => handleChangeSize(latestSizeRef.current - 1)}
                         className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
-                        aria-label="Decrease player count"
+                        aria-label={t.decreasePlayersAria}
                       >
                         <Minus className="w-3 h-3" />
                       </button>
@@ -1030,7 +1030,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
                         disabled={effectiveSize >= 20}
                         onClick={() => handleChangeSize(latestSizeRef.current + 1)}
                         className="p-1 rounded bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 cursor-pointer"
-                        aria-label="Increase player count"
+                        aria-label={t.increasePlayersAria}
                       >
                         <Plus className="w-3 h-3" />
                       </button>

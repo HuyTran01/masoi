@@ -335,6 +335,18 @@ export interface UITranslationSchema {
   behindViewBanner: string;
   ghostFlightBanner: string;
   winDraw: string;
+  roleRevealRosterTitle: string;
+  aliveSuffix: string;
+  campfireAbstainBanner: string;
+  tabOnline3DShort: string;
+  closeAria: string;
+  decreasePlayersAria: string;
+  increasePlayersAria: string;
+  winReasonVillagers: string;
+  winReasonWerewolves: string;
+  winReasonLovers: string;
+  winReasonTanner: string;
+  winReasonDraw: string;
   autoGmSenderName: string;
   waitingHostRematch: string;
   deadChatLockedBanner: string;
@@ -749,6 +761,18 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostFlightBanner:
       '👻 Chế độ Hồn Ma · Bay tự do WASD · Space Lên / Shift Xuống · Giữ chuột kéo xoay 360° · 🔒 Chat Làng & Mic đã khóa · Mở Khu Vực Ma',
     winDraw: 'HÒA — KHÔNG CÒN AI SỐNG SÓT!',
+    roleRevealRosterTitle: 'Bảng Lật Vai Trò Toàn Làng',
+    aliveSuffix: 'sống sót',
+    campfireAbstainBanner: 'Lửa Trại · Phiếu Trắng',
+    tabOnline3DShort: '1. Online 3D',
+    closeAria: 'Close',
+    decreasePlayersAria: 'Decrease player count',
+    increasePlayersAria: 'Increase player count',
+    winReasonVillagers: 'Toàn bộ Ma Sói đã bị tiêu diệt! Bình minh thực sự đã trở lại với Phe Dân Làng!',
+    winReasonWerewolves: 'Bầy Ma Sói đã làm chủ hoàn toàn ngôi làng. Phe Ma Sói thắng!',
+    winReasonLovers: 'Cặp đôi Tình Nhân khác phe đã vượt qua định kiến và chiến thắng!',
+    winReasonTanner: 'Kẻ Chán Đời đã lừa cả làng treo cổ mình thành công và giành chiến thắng tuyệt đối!',
+    winReasonDraw: 'Không còn ai sống sót trong ngôi làng. Trận đấu khép lại với kết quả Hòa!',
     autoGmSenderName: '🤖 Quản Trò Máy',
     waitingHostRematch: '⏳ Đang chờ Chủ phòng bắt đầu ván mới...',
     deadChatLockedBanner: '👻 Bạn đã thành Hồn Ma — Phòng Chính bị khóa để chống gian lận!',
@@ -1158,6 +1182,18 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostFlightBanner:
       '👻 Ghost Mode · Free Flight WASD · Space Up / Shift Down · Drag to Look 360° · 🔒 Village Chat & Mic Locked · Ghost Realm Open',
     winDraw: 'DRAW — NO SURVIVORS!',
+    roleRevealRosterTitle: 'Full Village Role Reveal',
+    aliveSuffix: 'alive',
+    campfireAbstainBanner: 'Campfire · Abstain',
+    tabOnline3DShort: '1. Online 3D',
+    closeAria: 'Close',
+    decreasePlayersAria: 'Decrease player count',
+    increasePlayersAria: 'Increase player count',
+    winReasonVillagers: 'Every werewolf has been eliminated! Dawn has truly returned to the Villagers!',
+    winReasonWerewolves: 'The Werewolf pack has taken over the village completely. Werewolves win!',
+    winReasonLovers: 'The Lovers from opposing sides overcame their differences and won!',
+    winReasonTanner: 'The Tanner tricked the whole village into lynching them and wins outright!',
+    winReasonDraw: 'No one is left alive in the village. The game ends in a Draw!',
     autoGmSenderName: '🤖 Auto-GM',
     waitingHostRematch: '⏳ Waiting for Room Host to start a new match...',
     deadChatLockedBanner: '👻 You are a Ghost — Main Chat is locked to prevent cheating!',
@@ -1565,6 +1601,18 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostFlightBanner:
       '👻 Mode Fantôme · Vol libre WASD · Espace Monter / Shift Descendre · Glisser 360° · 🔒 Chat Village & Micro verrouillés · Salon Fantôme ouvert',
     winDraw: 'ÉGALITÉ — AUCUN SURVIVANT !',
+    roleRevealRosterTitle: 'Révélation des rôles du village',
+    aliveSuffix: 'en vie',
+    campfireAbstainBanner: 'Feu de Camp · Abstention',
+    tabOnline3DShort: '1. En ligne 3D',
+    closeAria: 'Fermer',
+    decreasePlayersAria: 'Réduire le nombre de joueurs',
+    increasePlayersAria: 'Augmenter le nombre de joueurs',
+    winReasonVillagers: 'Tous les loups-garous ont été éliminés ! L\'aube est véritablement revenue pour les villageois !',
+    winReasonWerewolves: 'La meute de loups-garous a pris le contrôle total du village. Les loups-garous gagnent !',
+    winReasonLovers: 'Les amoureux de camps opposés ont surmonté leurs différences et remportent la victoire !',
+    winReasonTanner: 'Le Tanneur a trompé tout le village pour se faire pendre et gagne en solitaire !',
+    winReasonDraw: 'Plus personne n\'est en vie dans le village. La partie se termine sur une égalité !',
     autoGmSenderName: '🤖 MJ Auto',
     waitingHostRematch: '⏳ En attente que l’hôte lance une nouvelle partie...',
     deadChatLockedBanner: '👻 Vous êtes Fantôme — Le chat principal est verrouillé !',
@@ -1972,6 +2020,18 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostFlightBanner:
       '👻 Modo Fantasma · Vuelo libre WASD · Espacio Subir / Shift Bajar · Arrastrar 360° · 🔒 Chat de Aldea y Mic bloqueados · Chat Fantasma abierto',
     winDraw: '¡EMPATE — SIN SUPERVIVIENTES!',
+    roleRevealRosterTitle: 'Revelación de roles de la aldea',
+    aliveSuffix: 'vivos',
+    campfireAbstainBanner: 'Hoguera · Abstención',
+    tabOnline3DShort: '1. Online 3D',
+    closeAria: 'Cerrar',
+    decreasePlayersAria: 'Reducir número de jugadores',
+    increasePlayersAria: 'Aumentar número de jugadores',
+    winReasonVillagers: '¡Todos los hombres lobo han sido eliminados! ¡El amanecer ha vuelto de verdad para los aldeanos!',
+    winReasonWerewolves: 'La manada de hombres lobo se ha hecho con el control total de la aldea. ¡Ganan los hombres lobo!',
+    winReasonLovers: '¡Los enamorados de bandos opuestos superaron sus diferencias y ganaron!',
+    winReasonTanner: '¡El Curtidor engañó a toda la aldea para que lo ahorcaran y gana en solitario!',
+    winReasonDraw: 'Nadie queda con vida en la aldea. ¡La partida termina en empate!',
     autoGmSenderName: '🤖 Narrador Auto',
     waitingHostRematch: '⏳ Esperando al anfitrión para nueva partida...',
     deadChatLockedBanner: '👻 Eres Fantasma — ¡El chat principal está bloqueado!',
@@ -2379,6 +2439,18 @@ export const UI_TEXT: Record<Language, UITranslationSchema> = {
     ghostFlightBanner:
       '👻 幽霊モード・WASD自由飛行・Space上昇/Shift下降・ドラッグで360°視点・🔒 村チャット＆マイク無効・霊界チャット解放',
     winDraw: '引き分け — 生存者なし！',
+    roleRevealRosterTitle: '村人全員の役職公開',
+    aliveSuffix: '生存',
+    campfireAbstainBanner: '焚き火・棄権',
+    tabOnline3DShort: '1. オンライン3D',
+    closeAria: '閉じる',
+    decreasePlayersAria: 'プレイヤー数を減らす',
+    increasePlayersAria: 'プレイヤー数を増やす',
+    winReasonVillagers: '人狼は全員排除された！村人たちに本当の夜明けが戻った！',
+    winReasonWerewolves: '人狼の群れが村を完全に支配した。人狼陣営の勝利！',
+    winReasonLovers: '敵対する陣営の恋人たちが壁を乗り越え、勝利した！',
+    winReasonTanner: '皮なめし職人は村人を欺いて自ら吊られ、単独勝利した！',
+    winReasonDraw: '村に生存者は誰もいない。ゲームは引き分けで終了！',
     autoGmSenderName: '🤖 自動GM',
     waitingHostRematch: '⏳ ホストが次の試合を開始するのを待機中...',
     deadChatLockedBanner: '👻 幽霊状態です — 不正防止のため村チャットはロックされています',

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Language } from '../types/game';
 import { sound } from '../utils/sound';
+import { UI_TEXT } from '../utils/i18n';
 import {
   signInWithGoogleFirebase,
   signOutFirebase,
@@ -289,7 +290,7 @@ const ACCOUNT_I18N: Record<
   },
 };
 
-const makeDefaultGuestName = () => `Người Chơi #${Math.floor(100 + Math.random() * 900)}`;
+const makeDefaultGuestName = (prefix: string) => `${prefix} #${Math.floor(100 + Math.random() * 900)}`;
 
 export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
   currentUser,
@@ -317,7 +318,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
   const [confirmPassword, setConfirmPassword] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [displayName, setDisplayName] = useState<string>(
-    () => currentUser.name || makeDefaultGuestName()
+    () => currentUser.name || makeDefaultGuestName(UI_TEXT[lang].guestPlayerPrefix)
   );
   const [selectedAvatar, setSelectedAvatar] = useState<string>(currentUser.avatar || '🐺');
   const [region, setRegion] = useState<'VN' | 'SEA' | 'GLOBAL'>(
@@ -601,7 +602,7 @@ export const SocialLoginModal: React.FC<SocialLoginModalProps> = ({
     }
     onSaveProfile(
       {
-        name: makeDefaultGuestName(),
+        name: makeDefaultGuestName(UI_TEXT[lang].guestPlayerPrefix),
         avatar: '🐺',
         provider: 'guest',
         handle: '',

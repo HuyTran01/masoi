@@ -1,6 +1,7 @@
 import React from 'react';
 import { Language, Player, RoleId } from '../types/game';
 import { ROLES } from '../game/roles';
+import { UI_TEXT } from '../utils/i18n';
 
 interface RoleRevealRosterEntry {
   id?: string;
@@ -43,11 +44,11 @@ export const RoleRevealRoster: React.FC<RoleRevealRosterProps> = ({
     >
       <div className="text-xs font-extrabold uppercase tracking-wider text-amber-300 flex items-center justify-between">
         <span>
-          🃏 {lang === 'vi' ? 'Bảng Lật Vai Trò Toàn Làng' : 'Full Village Role Reveal'}
+          🃏 {UI_TEXT[lang].roleRevealRosterTitle}
         </span>
         <span className="text-[11px] font-mono text-slate-300">
           {entries.filter((p) => p.isAlive).length}/{entries.length}{' '}
-          {lang === 'vi' ? 'sống sót' : 'alive'}
+          {UI_TEXT[lang].aliveSuffix}
         </span>
       </div>
       <div
@@ -82,9 +83,7 @@ export const RoleRevealRoster: React.FC<RoleRevealRosterProps> = ({
                 >
                   {player.name}
                   {(meId ? player.id === meId : Boolean(player.isHuman))
-                    ? lang === 'vi'
-                      ? ' (Bạn)'
-                      : ' (You)'
+                    ? ` ${UI_TEXT[lang].youSuffix}`
                     : ''}
                 </span>
               </div>

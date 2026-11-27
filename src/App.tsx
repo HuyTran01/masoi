@@ -165,6 +165,8 @@ import { addMatchHistory } from './utils/storage';
 import confetti from 'canvas-confetti';
 
 // Keyboard-shortcut hints ([E]/[T]) are meaningless on touch screens.
+const tr = (lang: Language, m: Record<Language, string>): string => m[lang] ?? m.en;
+
 const IS_TOUCH_DEVICE =
   typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
 
@@ -320,9 +322,11 @@ function getOrCreateTabGuestIdentity(): { id: string; defaultName: string } {
       uid = `usr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
       sessionStorage.setItem('werewolf_client_uid', uid);
     }
+    const savedLang = localStorage.getItem('werewolf_lang') as Language | null;
+    const prefix = UI_TEXT[savedLang && UI_TEXT[savedLang] ? savedLang : 'vi'].guestPlayerPrefix;
     let guestName = sessionStorage.getItem('werewolf_guest_name');
     if (!guestName || guestName === 'Thợ Săn Đêm' || /^Thợ Săn #\d+$/.test(guestName)) {
-      guestName = `Người Chơi #${randomSuffix()}`;
+      guestName = `${prefix} #${randomSuffix()}`;
       sessionStorage.setItem('werewolf_guest_name', guestName);
     }
     return { id: uid, defaultName: guestName };
@@ -330,7 +334,7 @@ function getOrCreateTabGuestIdentity(): { id: string; defaultName: string } {
     const suf = randomSuffix();
     return {
       id: `usr_${Date.now().toString(36)}_${suf}`,
-      defaultName: `Người Chơi #${suf}`,
+      defaultName: `${UI_TEXT.vi.guestPlayerPrefix} #${suf}`,
     };
   }
 }
@@ -485,7 +489,9 @@ export default function App() {
             typeof parsed.name === 'string' &&
             (parsed.name.trim() === 'Thợ Săn Đêm' ||
               /^Thợ Săn #\d+$/.test(parsed.name.trim()) ||
-              /^Người Chơi #\d+$/.test(parsed.name.trim()));
+              Object.values(UI_TEXT).some((tx) =>
+                new RegExp(`^${tx.guestPlayerPrefix} #\\d+$`).test(parsed.name.trim())
+              ));
           const resolvedName =
             typeof parsed.name === 'string' &&
             parsed.name.trim() &&
@@ -2165,9 +2171,13 @@ export default function App() {
           const p1 = effectivePlayers[idx1];
           const p2 = effectivePlayers[idx2];
           extraNotices.push(
-            curLang === 'vi'
-              ? `💘 Mật báo Quản Trò: Bạn đã ghép đôi ${p1.name} (#${idx1 + 1}) và ${p2.name} (#${idx2 + 1}) thành Tình Nhân sinh tử!`
-              : `💘 Secret GM Tap: You linked ${p1.name} (#${idx1 + 1}) and ${p2.name} (#${idx2 + 1}) as star-crossed Lovers!`
+            tr(curLang, {
+              vi: `💘 Mật báo Quản Trò: Bạn đã ghép đôi ${p1.name} (#${idx1 + 1}) và ${p2.name} (#${idx2 + 1}) thành Tình Nhân sinh tử!`,
+              en: `💘 Secret GM Tap: You linked ${p1.name} (#${idx1 + 1}) and ${p2.name} (#${idx2 + 1}) as star-crossed Lovers!`,
+              fr: `💘 Message secret du MJ : Vous avez lié ${p1.name} (#${idx1 + 1}) et ${p2.name} (#${idx2 + 1}) comme Amoureux !`,
+              es: `💘 Aviso secreto del Narrador: ¡Has unido a ${p1.name} (#${idx1 + 1}) y ${p2.name} (#${idx2 + 1}) como Enamorados!`,
+              ja: `💘 GMからの密書：あなたは${p1.name}（#${idx1 + 1}）と${p2.name}（#${idx2 + 1}）を恋人に結びました！`,
+            })
           );
         }
       } else if (
@@ -2179,9 +2189,13 @@ export default function App() {
         if (partnerIdx >= 0) {
           const partner = effectivePlayers[partnerIdx];
           extraNotices.push(
-            curLang === 'vi'
-              ? `💘 Mật báo Quản Trò: Đêm qua mũi tên Cupid đã ghép đôi bạn với ${partner.name} (#${partnerIdx + 1}). Hai bạn cùng sống, cùng chết!`
-              : `💘 Secret GM Tap: Cupid bound you as Lovers with ${partner.name} (#${partnerIdx + 1}). You live and die together!`
+            tr(curLang, {
+              vi: `💘 Mật báo Quản Trò: Đêm qua mũi tên Cupid đã ghép đôi bạn với ${partner.name} (#${partnerIdx + 1}). Hai bạn cùng sống, cùng chết!`,
+              en: `💘 Secret GM Tap: Cupid bound you as Lovers with ${partner.name} (#${partnerIdx + 1}). You live and die together!`,
+              fr: `💘 Message secret du MJ : Cupidon vous a lié à ${partner.name} (#${partnerIdx + 1}). Vous vivez et mourez ensemble !`,
+              es: `💘 Aviso secreto del Narrador: Cupido te ha unido con ${partner.name} (#${partnerIdx + 1}). ¡Viven y mueren juntos!`,
+              ja: `💘 GMからの密書：昨夜キューピッドの矢があなたと${partner.name}（#${partnerIdx + 1}）を恋人に結びました。二人は運命共同体です！`,
+            })
           );
         }
       }
@@ -2374,10 +2388,13 @@ export default function App() {
         id: `gm_start_${Date.now()}`,
         senderId: 'sys',
         senderName: '🤖 Quản Trò Máy',
-        text:
-          lang === 'vi'
-            ? `🤖 Quản Trò Máy: Ván đấu ${count} người bắt đầu! Vai trò bí mật của bạn là ${assignedDef.name.vi}.`
-            : `🤖 Auto-GM: ${count}-player match started! Your secret role is ${assignedDef.name[lang]}.`,
+        text: tr(lang, {
+          vi: `🤖 Quản Trò Máy: Ván đấu ${count} người bắt đầu! Vai trò bí mật của bạn là ${assignedDef.name.vi}.`,
+          en: `🤖 Auto-GM: ${count}-player match started! Your secret role is ${assignedDef.name.en}.`,
+          fr: `🤖 MJ Auto : Partie à ${count} joueurs lancée ! Votre rôle secret est ${assignedDef.name.fr}.`,
+          es: `🤖 Narrador Auto: ¡Partida de ${count} jugadores iniciada! Tu rol secreto es ${assignedDef.name.es}.`,
+          ja: `🤖 自動GM：${count}人のゲームを開始！あなたの役職は「${assignedDef.name.ja}」です。`,
+        }),
         timestamp: Date.now(),
         isSystem: true,
       };
@@ -4290,8 +4307,23 @@ export default function App() {
     setShellState('playing');
     if (savedMatchSnapshot.phase === 'day_voting') {
       scheduleBotDayVotes(savedMatchSnapshot.mayorId, savedMatchSnapshot.knownWolfIds ?? []);
+    } else if (savedMatchSnapshot.phase === 'day_discussion' && aiBrainRef.current) {
+      // Re-arm bot chat that the reload wiped out (no dawn facts to replay, so only the remaining time matters).
+      scheduleBotBeats(
+        generateScheduledDiscussionBeats(aiBrainRef.current, {
+          players: savedMatchSnapshot.players,
+          round: savedMatchSnapshot.round,
+          lang,
+          killedNames: [],
+          killedIds: [],
+          dayDiscussSec: Math.max(5, savedMatchSnapshot.timerSeconds),
+          mayorId: savedMatchSnapshot.mayorId,
+        }),
+        ['day_discussion'],
+        matchInstanceIdRef.current
+      );
     }
-  }, [savedMatchSnapshot, preferredStoryline, currentUser.id, scheduleBotDayVotes]);
+  }, [savedMatchSnapshot, preferredStoryline, currentUser.id, scheduleBotDayVotes, scheduleBotBeats, lang]);
 
   const handleDismissSavedMatch = useCallback(() => {
     clearSavedAIMatchSnapshot();
@@ -5930,29 +5962,29 @@ export default function App() {
               >
                 <span>
                   <strong className="text-[#f5b82e]">WASD</strong>{' '}
-                  {lang === 'vi' ? 'Đứng dậy & Đi' : 'Stand & Walk'}
+                  {tr(lang, { vi: 'Đứng dậy & Đi', en: 'Stand & Walk', fr: 'Marcher', es: 'Caminar', ja: '歩く' })}
                 </span>
                 <span className="opacity-40">·</span>
                 <span>
                   <strong className="text-[#f5b82e]">
-                    {lang === 'vi' ? 'Kéo chuột' : 'Drag'}
+                    {tr(lang, { vi: 'Kéo chuột', en: 'Drag', fr: 'Glisser', es: 'Arrastrar', ja: 'ドラッグ' })}
                   </strong>{' '}
-                  {lang === 'vi' ? 'Xoay 360°' : 'Look 360°'}
+                  {tr(lang, { vi: 'Xoay 360°', en: 'Look 360°', fr: 'Vue 360°', es: 'Mirar 360°', ja: '360°視点' })}
                 </span>
                 <span className="opacity-40">·</span>
                 <span>
                   <strong className="text-[#f5b82e]">Shift</strong>{' '}
-                  {lang === 'vi' ? 'Chạy nhanh' : 'Sprint'}
+                  {tr(lang, { vi: 'Chạy nhanh', en: 'Sprint', fr: 'Courir', es: 'Correr', ja: '走る' })}
                 </span>
                 <span className="opacity-40">·</span>
                 <span>
                   <strong className="text-[#f5b82e]">Space</strong>{' '}
-                  {lang === 'vi' ? 'Nhảy' : 'Jump'}
+                  {tr(lang, { vi: 'Nhảy', en: 'Jump', fr: 'Sauter', es: 'Saltar', ja: 'ジャンプ' })}
                 </span>
                 <span className="opacity-40">·</span>
                 <span>
                   <strong className="text-[#f5b82e]">X</strong>{' '}
-                  {lang === 'vi' ? 'Về ghế' : 'Sit'}
+                  {tr(lang, { vi: 'Về ghế', en: 'Sit', fr: 'S’asseoir', es: 'Sentarse', ja: '座る' })}
                 </span>
               </div>
             )}
@@ -6404,8 +6436,6 @@ export default function App() {
                                 }`
                               : !p.isAlive
                               ? t.ghostStatus
-                              : isBodyguardRepeatTarget
-                              ? `🛡️ ${t.nightLabel}`
                               : vCount > 0
                               ? `${vCount} ${t.votesUnit} · ${voterLabels.join(', ')}`
                               : effectiveTrust === 'wolf_lock'
@@ -7049,10 +7079,19 @@ export default function App() {
                   ? t.winDraw
                   : t.winVillagers}
               </h3>
-              {/* shortcut: win reasons are generated in Vietnamese by rules.ts; hide them in other languages (the headline above is localized), localize the reasons if non-vi players need the detail. */}
-              {lang === 'vi' && (
-                <p className="text-xs text-slate-300 mt-2 leading-relaxed">{gameResult.reason}</p>
-              )}
+              <p className="text-xs text-slate-300 mt-2 leading-relaxed">
+                {lang === 'vi'
+                  ? gameResult.reason
+                  : gameResult.winner === 'werewolves'
+                  ? t.winReasonWerewolves
+                  : gameResult.winner === 'lovers'
+                  ? t.winReasonLovers
+                  : gameResult.winner === 'tanner'
+                  ? t.winReasonTanner
+                  : gameResult.winner === 'draw'
+                  ? t.winReasonDraw
+                  : t.winReasonVillagers}
+              </p>
             </div>
 
             <div className="grid grid-cols-3 gap-2.5 bg-[#070a14] border border-slate-800 rounded-xl p-3">

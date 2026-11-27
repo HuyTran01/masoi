@@ -21,6 +21,11 @@ import { GameMode, Language, Phase, RoleDefinition } from '../types/game';
 import { CameraViewPreset } from '../game/fpvCamera';
 import { UI_TEXT } from '../utils/i18n';
 
+// Keyboard-shortcut hints like "[V]" are meaningless on touch screens (accessible names keep them).
+const IS_TOUCH_DEVICE =
+  typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
+const visibleLabel = (label: string) => (IS_TOUCH_DEVICE ? label.replace(/\s*\[[A-Z]\]/g, '') : label);
+
 interface GameTopHudProps {
   lang: Language;
   phase: Phase;
@@ -344,8 +349,8 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
           aria-label={t.firstPersonBtn}
         >
           <View className="w-3.5 h-3.5 shrink-0" />
-          <span className="hidden md:inline">{t.firstPersonBtn}</span>
-          <span className="hidden sm:inline md:hidden">{cleanFpvShort}</span>
+          <span className="hidden md:inline">{visibleLabel(t.firstPersonBtn)}</span>
+          <span className="hidden sm:inline md:hidden">{visibleLabel(cleanFpvShort)}</span>
         </button>
 
         <button
@@ -365,7 +370,7 @@ export const GameTopHud: React.FC<GameTopHudProps> = ({
           aria-label={tpvLabel}
         >
           <UserRound className="w-3.5 h-3.5 shrink-0" />
-          <span className="hidden md:inline">{tpvLabel}</span>
+          <span className="hidden md:inline">{visibleLabel(tpvLabel)}</span>
           <span className="hidden sm:inline md:hidden">{tpvShort}</span>
         </button>
 

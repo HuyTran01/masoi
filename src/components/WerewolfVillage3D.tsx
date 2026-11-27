@@ -3969,7 +3969,7 @@ export const WerewolfVillage3D: React.FC<WerewolfVillage3DProps> = ({
             <div className="text-[10px] font-black whitespace-nowrap flex items-center gap-1">
               <span>🔥</span>
               <span>
-                {lang === 'vi' ? 'Lửa Trại · Phiếu Trắng' : 'Campfire · Abstain'}
+                {t.campfireAbstainBanner}
               </span>
               {abstainVotesCount > 0 && (
                 <span className="px-1.5 py-0.2 rounded bg-[#e86f24] text-[#fff8ed] font-mono text-[9px]">

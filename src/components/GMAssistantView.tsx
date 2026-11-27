@@ -264,7 +264,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   const [copyToast, setCopyToast] = useState<string>('');
   const [hideRolesForPrivacy, setHideRolesForPrivacy] = useState<boolean>(false);
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
-  const [undoSnapshot, setUndoSnapshot] = useState<GMUndoSnapshot | null>(null);
+  // Last 10 night/lynch resolutions, newest last, so a GM can step back more than once.
+  const [undoStack, setUndoStack] = useState<GMUndoSnapshot[]>([]);
+  const undoSnapshot = undoStack[undoStack.length - 1] ?? null;
   const [confirmReset, setConfirmReset] = useState<boolean>(false);
   const [hostSecret, setHostSecret] = useState<string>(() =>
     loadStoredGMHostSecret(roomId)
@@ -502,7 +504,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setNightStep(0);
     setWolfPupFrenzy(false);
     setElderSealActive(false);
-    setUndoSnapshot(null);
+    setUndoStack([]);
     setConfirmReset(false);
     setLastNightSummary([]);
     setLastNightResult(null);
@@ -712,7 +714,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setNightStep(0);
     setWolfPupFrenzy(false);
     setElderSealActive(false);
-    setUndoSnapshot(null);
+    setUndoStack([]);
     setConfirmReset(false);
     setNightActions({
       wolfTargetId: null,
@@ -855,6 +857,9 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     timerSeconds,
   });
 
+  const pushUndoSnapshot = (label: string) =>
+    setUndoStack((stack) => [...stack, captureUndoSnapshot(label)].slice(-10));
+
   const handleUndoLastStep = () => {
     if (!undoSnapshot) return;
     sound.playCardFlip();
@@ -871,7 +876,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     setTimerSeconds(undoSnapshot.timerSeconds);
     setIsTimerRunning(false);
     setGameResult(null);
-    setUndoSnapshot(null);
+    setUndoStack((stack) => stack.slice(0, -1));
     showToast(`Đã hoàn tác: ${undoSnapshot.label}`);
   };
 
@@ -900,7 +905,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
   };
 
   const handleResolveNight = () => {
-    setUndoSnapshot(captureUndoSnapshot(`Kết thúc Đêm ${roundNumber}`));
+    pushUndoSnapshot(`Kết thúc Đêm ${roundNumber}`);
     sound.playDayGong();
     const { updatedPlayers, result } = resolveNightActions(players, nightActions, {
       wolfPupTriggered: wolfPupFrenzy,
@@ -929,7 +934,7 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     const target = players.find((p) => p.id === selectedLynchTargetId);
     if (!target) return;
 
-    setUndoSnapshot(captureUndoSnapshot(`Treo cổ ${target.name} (Ngày ${roundNumber})`));
+    pushUndoSnapshot(`Treo cổ ${target.name} (Ngày ${roundNumber})`);
     sound.playGavel();
 
     const {
@@ -947,6 +952,14 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
     }
     if (cascadeMessages.length > 0) {
       setLastNightSummary((prev) => [...prev, ...cascadeMessages]);
+    }
+
+    // Public cue for the narrator: who else fell with the lynched player (Hunter bullet / Lover). Cause stays secret.
+    const alsoFallen = updatedPlayers
+      .filter((p) => !p.isAlive && p.id !== target.id && players.find((b) => b.id === p.id)?.isAlive)
+      .map((p) => p.name);
+    if (alsoFallen.length > 0) {
+      showToast(`💀 Đọc to: ${target.name} bị treo cổ, cũng tử trận theo: ${alsoFallen.join(', ')}`);
     }
 
     setPlayers(updatedPlayers);
@@ -1521,7 +1534,10 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   className="px-3 py-1.5 rounded-lg bg-amber-950/80 hover:bg-amber-900/80 border border-amber-500/50 text-xs font-bold text-amber-200 flex items-center gap-1.5 cursor-pointer"
                 >
                   <Undo2 className="w-3.5 h-3.5" />
-                  <span>{t.gmUndoBtn.replace(/^↩️\s*/, '')}</span>
+                  <span>
+                    {t.gmUndoBtn.replace(/^↩️\s*/, '')}
+                    {undoStack.length > 1 ? ` (${undoStack.length})` : ''}
+                  </span>
                 </button>
               )}
 
@@ -2354,7 +2370,10 @@ export const GMAssistantView: React.FC<GMAssistantViewProps> = ({
                   className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-200 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Undo2 className="w-3.5 h-3.5" />
-                  <span>{t.gmUndoBtn.replace(/^↩️\s*/, '')}</span>
+                  <span>
+                    {t.gmUndoBtn.replace(/^↩️\s*/, '')}
+                    {undoStack.length > 1 ? ` (${undoStack.length})` : ''}
+                  </span>
                 </button>
               )}
               <button
